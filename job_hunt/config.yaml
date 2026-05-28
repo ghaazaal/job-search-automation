@@ -1,0 +1,50 @@
+# config.yaml — Job Hunt Automation
+# API keys are NEVER stored here — set via environment variables:
+#   PowerShell:  $env:APIFY_TOKEN = "apify_api_..."
+#                $env:ANTHROPIC_API_KEY = "sk-ant-..."
+# This file is safe to commit. Add to .gitignore: output/, *.db, .env
+
+resume:
+  canonical_path: "../Resume/cv_ghazal_izadi_AE.pdf"
+  candidate_name: "Ghazal Izadi"
+  email: "zahra.izaadii@gmail.com"
+  linkedin: "linkedin.com/in/ghazal-izadi"
+
+search:
+  categories:
+    - {title: "Analytics Engineer", category: "Analytics Engineer"}
+    - {title: "Data Engineer",      category: "Data Engineer"}
+    - {title: "Data Analyst",       category: "Data Analyst"}
+    - {title: "Product Analyst",    category: "Product Analyst"}
+  days_posted: 7
+  jobs_per_category: 50
+  run_timeout: 120
+
+apify:
+  indeed_actor:   "valig~indeed-jobs-scraper"
+  linkedin_actor: "valig~linkedin-jobs-scraper"
+  company_actor:  "curious_coder~linkedin-company-scraper"
+
+scoring:
+  weights:
+    title_match:    0.40
+    category_bonus: 0.10
+    seniority:      0.20
+    skills:         0.20
+    penalty:        0.10
+
+company_filter:
+  reject_stages: ["enterprise"]
+  min_growth_score: 4
+  cache_ttl_days: 7
+  reject_keywords_in_company_name: ["Consulting", "Staffing", "Recruiting", "Staffing Agency"]
+
+tailoring:
+  min_score: 6
+  shortlist_score: 7       # minimum score for LLM decision layer
+
+output_dir: "output/"
+tracker_path: "../job_tracker_ghazal.xlsx"
+
+anthropic:
+  model: "claude-sonnet-4-6"
