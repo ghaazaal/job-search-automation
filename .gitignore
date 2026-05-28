@@ -1,0 +1,28 @@
+# Personal data — never commit
+Resume/
+Linkedin_Profile.pdf
+data.csv
+
+# Excel tracker — binary, changes every run
+job_tracker_ghazal.xlsx
+
+# Generated design artifacts
+*.png
+job-review-dashboard.html
+gen_dashboard.py
+render_variant_c.py
+
+# Tooling (local-only, not project config)
+.claude/
+.gstack/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# job_hunt package secrets + outputs (also has its own .gitignore)
+job_hunt/.env
+job_hunt/output/
+job_hunt/*.db
+job_hunt/.pytest_cache/

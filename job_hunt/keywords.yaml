@@ -1,0 +1,124 @@
+# keywords.yaml — Scoring keyword lists and point values
+
+title_groups:
+  core_ae:
+    - "analytics engineer"
+    - "analytical engineer"
+    - "analytics eng"
+  core_de:
+    - "data engineer"
+    - "data infrastructure"
+    - "data platform engineer"
+    - "data integration engineer"
+    - "etl engineer"
+    - "elt engineer"
+    - "data intelligence engineer"
+  core_da:
+    - "data analyst"
+    - "bi analyst"
+    - "business intelligence analyst"
+    - "bi engineer"
+    - "business intelligence engineer"
+    - "data systems analyst"
+    - "data cloud"
+    - "data mining"
+  core_pa:
+    - "product analyst"
+    - "product data analyst"
+    - "analytics product"
+    - "senior data analyst, product"
+  adjacent:
+    - "data scientist"
+    - "analytics manager"
+    - "marketing analytics"
+    - "reporting analyst"
+    - "data content"
+    - "data strategy"
+    - "experimentation platform"
+    - "data & ai"
+    - "data solutions"
+    - "data architect"
+    - "database engineer"
+    - "cloud data engineer"
+    - "databricks"
+    - "data quality"
+    - "data governance"
+  weak:
+    - "software engineer"
+    - "devops"
+    - "backend engineer"
+    - "qa engineer"
+    - "field service"
+    - "telecom"
+    - "mobile engineer"
+    - "sales"
+    - "security engineer"
+    - "marketing manager"
+    - "hr analyst"
+    - "total rewards"
+    - "billing"
+    - "actuarial"
+    - "business analyst (claims)"
+    - "configuration"
+    - "paid search"
+
+title_scores:
+  core_ae: 40
+  core_de: 35
+  core_da: 35
+  core_pa: 30
+  adjacent: 20
+  weak: 5
+  default: 15
+
+seniority:
+  senior_keywords: ["senior", "sr.", "sr ", "staff", "principal", "lead",
+                    "manager", "director", "head of", "vp ", "vice president"]
+  junior_keywords: ["junior", "jr.", "jr ", "intern", "entry", "associate ",
+                    "analyst i ", "engineer i "]
+  exec_keywords:   ["vp ", "vice president", "director", "head of", "executive"]
+  scores:
+    senior: 20
+    junior: 8
+    exec:   5
+    mid:    14
+
+skills:
+  airflow:      4
+  etl:          3
+  elt:          3
+  sql:          3
+  "power bi":   4
+  clickhouse:   4
+  python:       3
+  dbt:          3
+  "data model": 4
+  kpi:          3
+  dashboard:    3
+  pipeline:     3
+  warehouse:    3
+  medallion:    4
+  quality:      2
+  governance:   3
+  analytics:    2
+  bi:           2
+  tableau:      2
+  plotly:       3
+  streamlit:    3
+  experimentation: 3
+  skill_max: 20
+
+penalties:
+  "w2 only":   15
+  clearance:   30
+  secret:      30
+  cpt:         20
+  opt:         20
+  exec_penalty: 10
+  legacy_tech:
+    keywords: ["coldfusion", "mainframe", "cobol", "sas "]
+    value: 25
+  frontend_tech:
+    keywords: ["mobile", "ios", "android", "front-end", "frontend",
+               "react", "vue", "angular", "ruby", "rails"]
+    value: 30
