@@ -12,15 +12,16 @@ _CONFIG = {
 }
 
 
-def test_apify_ok_returns_apify_source():
+def test_apify_lookup_helper_returns_apify_source():
+    """_lookup_apify() still works standalone — used when enrichment is re-enabled."""
+    from src.agents.company_agent import _lookup_apify
     mock_item = {
         "employeeRange": "51-200",
         "description": "Series B startup growing fast",
         "founded": 2020,
     }
-    llm = MockLLMClient("{}")
     with patch("src.agents.company_agent.call_actor", return_value=[mock_item]):
-        result = lookup("Acme Corp", _CONFIG, llm, cache=None)
+        result = _lookup_apify("Acme Corp", "some-actor-id")
     assert result["source"] == "apify"
     assert result["stage"] == "scale-up"
     assert result["growth_score"] >= 5
