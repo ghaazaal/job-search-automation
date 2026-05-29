@@ -1,12 +1,13 @@
-"""Tailoring agent — generates cover letters and resume highlights per job.
+"""Tailoring agent — generates cover letters, highlights, and shortlist decisions.
 
-Also provides the LLM shortlist decision layer (Apply_Now, LLM_Reason, Risk_Flags).
+Provider-agnostic: all LLM calls go through the injected LLMClient.
 """
 import json
 import logging
-import os
 import re
 from pathlib import Path
+
+from ..llm.base import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -20,46 +21,34 @@ Output strictly as JSON with no prose preamble or markdown fences."""
 
 def tailor_job(job_description: str, resume_text: str,
                role_title: str, company_name: str,
-               config: dict) -> dict | None:
-    """Generate cover letter + highlights. Returns None on Claude failure."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        logger.error("ANTHROPIC_API_KEY not set")
-        return None
+               llm: LLMClient) -> dict | None:
+    """Generate cover letter + highlights. Returns None on LLM failure."""
+    prompt = (
+        f"Job description:\n{job_description}\n\n"
+        f"Resume text for this role:\n{resume_text[:2500]}\n\n"
+        f"Target role: {role_title} at {company_name}\n\n"
+        'Output JSON: {"cover_letter":"...","highlights":["...","...","..."]}'
+    )
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        model = config.get("anthropic", {}).get("model", "claude-sonnet-4-6")
-        user_msg = (
-            f"Job description:\n{job_description}\n\n"
-            f"Resume text for this role:\n{resume_text[:2500]}\n\n"
-            f"Target role: {role_title} at {company_name}\n\n"
-            'Output JSON: {"cover_letter":"...","highlights":["...","...","..."]}'
-        )
-        msg = client.messages.create(
-            model=model, max_tokens=1500,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        text = msg.content[0].text
+        text = llm.complete(prompt, system=_SYSTEM_PROMPT, max_tokens=1500)
         m = re.search(r'\{.*\}', text, re.DOTALL)
         if not m:
-            logger.error("Non-JSON response for %s: %s", company_name, text[:200])
+            logger.error("Non-JSON response from %s for %s: %s",
+                         llm.provider, company_name, text[:200])
             return None
         return json.loads(m.group())
     except json.JSONDecodeError:
-        logger.error("JSON parse error for %s", company_name)
+        logger.error("JSON parse error from %s for %s", llm.provider, company_name)
         return None
     except Exception as e:
-        logger.error("Claude tailoring failed for %s: %s", company_name, e)
+        logger.error("LLM tailoring failed for %s: %s", company_name, e)
         return None
 
 
 def save_tailoring_output(result: dict, company_name: str,
                            output_dir: Path) -> Path:
     from datetime import date
-    import re as _re
-    safe_name = _re.sub(r'[^\w\s-]', '_', company_name).strip()[:60]
+    safe_name = re.sub(r'[^\w\s-]', '_', company_name).strip()[:60]
     folder = output_dir / f"{safe_name}_{date.today().isoformat()}"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "cover_letter.txt").write_text(
@@ -71,42 +60,32 @@ def save_tailoring_output(result: dict, company_name: str,
 
 def shortlist_decision(job_description: str, resume_text: str,
                         role_title: str, company_name: str,
-                        match_score: int, config: dict) -> dict:
+                        match_score: int, llm: LLMClient) -> dict:
     """LLM decision layer for shortlisted jobs.
 
     Returns {apply_now, reason, risk_flags, bullet_edits, cover_angle}.
-    Falls back to safe defaults on failure.
+    Falls back to score-based defaults on failure.
     """
     _default = {
-        "apply_now": "yes" if match_score >= 8 else "no",
-        "reason": f"Score {match_score}/10",
-        "risk_flags": "",
+        "apply_now":    "yes" if match_score >= 8 else "no",
+        "reason":       f"Score {match_score}/10",
+        "risk_flags":   "",
         "bullet_edits": [],
-        "cover_angle": "",
+        "cover_angle":  "",
     }
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return _default
+    prompt = (
+        f"Role: {role_title} at {company_name} (match score {match_score}/10)\n\n"
+        f"Job description (first 1500 chars):\n{job_description[:1500]}\n\n"
+        f"Resume:\n{resume_text[:1500]}\n\n"
+        "Evaluate fit. Output JSON only:\n"
+        '{"apply_now":"yes|no",'
+        '"reason":"one sentence",'
+        '"risk_flags":"comma-separated or empty",'
+        '"bullet_edits":["rewritten bullet 1","rewritten bullet 2","rewritten bullet 3"],'
+        '"cover_angle":"one sentence angle for cover letter"}'
+    )
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        model = config.get("anthropic", {}).get("model", "claude-sonnet-4-6")
-        prompt = (
-            f"Role: {role_title} at {company_name} (match score {match_score}/10)\n\n"
-            f"Job description (first 1500 chars):\n{job_description[:1500]}\n\n"
-            f"Resume:\n{resume_text[:1500]}\n\n"
-            "Evaluate fit. Output JSON only:\n"
-            '{"apply_now":"yes|no",'
-            '"reason":"one sentence",'
-            '"risk_flags":"comma-separated or empty",'
-            '"bullet_edits":["rewritten bullet 1","rewritten bullet 2","rewritten bullet 3"],'
-            '"cover_angle":"one sentence angle for cover letter"}'
-        )
-        msg = client.messages.create(
-            model=model, max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = msg.content[0].text
+        text = llm.complete(prompt, max_tokens=600)
         m = re.search(r'\{.*\}', text, re.DOTALL)
         return json.loads(m.group()) if m else _default
     except Exception as e:

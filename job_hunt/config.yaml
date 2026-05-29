@@ -46,5 +46,10 @@ tailoring:
 output_dir: "output/"
 tracker_path: "../job_tracker_ghazal.xlsx"
 
-anthropic:
-  model: "claude-sonnet-4-6"
+# LLM provider configuration
+# Provider and model can also be overridden at runtime via environment variables:
+#   LLM_PROVIDER=groq
+#   LLM_MODEL=llama-3.3-70b-versatile
+llm:
+  provider: "anthropic"          # anthropic | groq | gemini
+  model:    "claude-sonnet-4-6"  # leave blank to use the provider's default
