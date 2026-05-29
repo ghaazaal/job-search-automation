@@ -230,6 +230,8 @@ def run_pipeline(config: dict) -> None:
                  "Data Analyst": 2, "Product Analyst": 3}
     rows: list[dict] = []
 
+    run_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     for job in new_jobs:
         intel  = job["_intel"]
         filt_r = job["_filter"]
@@ -241,6 +243,7 @@ def run_pipeline(config: dict) -> None:
             "Job Title":          job["title"],
             "Company":            job["company"],
             "Location":           job["location"],
+            "Salary":             job.get("salary", ""),
             "Platform":           job["platform"],
             "Posting Date":       job["date"],
             "Apply Link":         job["url"],
@@ -248,16 +251,17 @@ def run_pipeline(config: dict) -> None:
             "Interview Chance":   s["interview_chance"],
             "Tailoring Needed":   s["tailoring"],
             "Application Status": "Filtered Out" if is_filtered else "New",
-            "Company Size":       intel.get("headcount_range", ""),
-            "Company Stage":      intel.get("stage", ""),
-            "Growth Score":       intel.get("growth_score", ""),
-            "Intel Source":       intel.get("source", ""),
             "Apply_Now":          "",
             "LLM_Reason":         filt_r.get("reason", "") if is_filtered else "",
             "Risk_Flags":         "",
             "Date Applied":       "",
             "Follow-up Date":     "",
             "Notes":              filt_r.get("warn", "") or "",
+            "Company Size":       intel.get("headcount_range", ""),
+            "Company Stage":      intel.get("stage", ""),
+            "Growth Score":       intel.get("growth_score", ""),
+            "Intel Source":       intel.get("source", ""),
+            "Loaded At":          run_ts,
             "_score":             s["match_score"],
             "_cat_order":         cat_order.get(job["cat"], 9),
             "Low Growth Signal":  bool(filt_r.get("warn")),
@@ -341,6 +345,29 @@ def run_pipeline(config: dict) -> None:
             print(f"    [{r['_score']}/10] {r['Job Title']} @ {r['Company']}{flag}")
     print(f"\n  Tracker: {tracker_path}")
     print("=" * 62)
+
+    # ── Dashboard ──────────────────────────────────────────────────────────
+    _launch_dashboard(rows, run_ts)
+
+
+# ── Dashboard helper ──────────────────────────────────────────────────────────
+def _launch_dashboard(rows: list[dict], run_ts: str) -> None:
+    """Generate the job-review-dashboard.html and open it in the browser."""
+    from src.dashboard import generate, open_browser
+
+    template = (Path.home() / ".gstack/projects/JobSearchautomation/designs"
+                / "job-review-dashboard-20260528/finalized.html")
+    output   = _BASE.parent / "job-review-dashboard.html"
+
+    try:
+        generate(rows, template, output, run_ts)
+        print(f"\n  Dashboard: {output}")
+        open_browser(output)
+        print("  Opened in browser.")
+    except FileNotFoundError as e:
+        print(f"\n  Dashboard template not found — skipping browser launch.\n  ({e})")
+    except Exception as e:
+        logger.warning("Dashboard generation failed: %s", e)
 
 
 # ── Tailor one job ─────────────────────────────────────────────────────────────

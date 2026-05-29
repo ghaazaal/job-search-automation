@@ -1,4 +1,5 @@
 """Excel tracker — read/write with all columns including new company + LLM columns."""
+from datetime import datetime
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -33,31 +34,37 @@ THIN  = Side(style="thin",   color="D1D5DB")
 THICK = Side(style="medium", color="9CA3AF")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
+# Single source of truth for column definitions.
+# Add new columns here — save() and _build_header() derive everything from this list.
 COLS = [
+    # ── Core job data ───────────────────────────────────────
     ("Search Category",    16),
     ("Job Title",          42),
     ("Company",            24),
     ("Location",           16),
+    ("Salary",             18),
     ("Platform",           10),
     ("Posting Date",       13),
     ("Apply Link",         12),
+    # ── Scoring ─────────────────────────────────────────────
     ("Match Score",        13),
     ("Interview Chance",   16),
     ("Tailoring Needed",   16),
+    # ── Status & workflow ───────────────────────────────────
     ("Application Status", 18),
-    # Company intel columns
+    ("Apply_Now",          10),
+    ("LLM_Reason",         40),
+    ("Risk_Flags",         30),
+    ("Date Applied",       13),
+    ("Follow-up Date",     13),
+    ("Notes",              40),
+    # ── Company enrichment (populated when enabled) ─────────
     ("Company Size",       14),
     ("Company Stage",      14),
     ("Growth Score",       12),
     ("Intel Source",       12),
-    # LLM decision columns
-    ("Apply_Now",          10),
-    ("LLM_Reason",         40),
-    ("Risk_Flags",         30),
-    # Workflow columns
-    ("Date Applied",       13),
-    ("Follow-up Date",     13),
-    ("Notes",              40),
+    # ── Meta ────────────────────────────────────────────────
+    ("Loaded At",          18),
 ]
 COL_NAMES = [c[0] for c in COLS]
 CAT_ORDER = {"Analytics Engineer": 0, "Data Engineer": 1,
@@ -97,7 +104,7 @@ def read_existing(path: Path) -> dict[str, dict]:
 def _style_row(ws, row_idx: int, row_data: dict) -> None:
     cat    = row_data.get("Search Category", "")
     status = row_data.get("Application Status", "New")
-    is_filtered = status == "Filtered Out"
+    is_filtered   = status == "Filtered Out"
     is_low_growth = row_data.get("Low Growth Signal", False)
 
     bg = (FILTERED_BG if is_filtered
@@ -110,8 +117,8 @@ def _style_row(ws, row_idx: int, row_data: dict) -> None:
         cell.border    = BORDER
         cell.alignment = Alignment(
             vertical="center",
-            horizontal="left" if ci in [2, 3, 17, 18, 21] else "center",
-            wrap_text=(ci in [2, 17, 18, 21]),
+            horizontal="left" if ci in {2, 3, 14, 15, 18} else "center",
+            wrap_text=(ci in {2, 14, 15, 18}),
         )
         cell.font = Font(
             size=10, name="Calibri",
@@ -136,12 +143,11 @@ def _style_row(ws, row_idx: int, row_data: dict) -> None:
         elif col_name == "Growth Score" and is_low_growth and not is_filtered:
             cell.fill = PatternFill("solid", fgColor=LOW_GROWTH)
         elif col_name == "Search Category":
-            cell.fill = PatternFill("solid",
-                                    fgColor=CAT_COLORS.get(cat, "FFFFFF"))
+            cell.fill = PatternFill("solid", fgColor=CAT_COLORS.get(cat, "FFFFFF"))
             cell.font = Font(bold=True, size=9, name="Calibri", color=NAVY)
         elif col_name == "Application Status":
             cell.fill = PatternFill("solid",
-                                    fgColor=STATUS_COLORS.get(val, "F9FAFB"))
+                                    fgColor=STATUS_COLORS.get(str(val), "F9FAFB"))
             cell.font = Font(bold=True, size=9, name="Calibri")
         elif col_name == "Apply_Now" and val == "yes":
             cell.font = Font(bold=True, color="065F46", size=10, name="Calibri")
@@ -150,6 +156,7 @@ def _style_row(ws, row_idx: int, row_data: dict) -> None:
 
 
 def _build_header(ws) -> None:
+    """Write (or overwrite) row 1 with the canonical COLS header."""
     for ci, (name, width) in enumerate(COLS, start=1):
         cell = ws.cell(1, ci, name)
         cell.font      = Font(bold=True, color=WHITE, size=10, name="Calibri")
@@ -164,17 +171,38 @@ def _build_header(ws) -> None:
     ws.freeze_panes = "A2"
 
 
+def _drop_blank_trailing_cols(ws) -> None:
+    """Delete completely empty columns beyond our schema width."""
+    while ws.max_column > len(COLS):
+        ci = ws.max_column
+        if all(ws.cell(r, ci).value is None for r in range(1, ws.max_row + 1)):
+            ws.delete_cols(ci)
+        else:
+            break
+
+
 def save(path: Path, new_rows: list[dict]) -> None:
-    """Append new_rows to the tracker, preserving existing data."""
+    """Append new_rows to the tracker.
+
+    Always rebuilds the header row so column names are correct even when
+    appending to a file created by an older version of this script.
+    Drops blank trailing columns beyond our schema width.
+    """
     if path.exists():
         wb = load_workbook(path)
         ws = wb.active
+
+        # Rebuild header — handles schema changes and missing column names
+        _build_header(ws)
+        _drop_blank_trailing_cols(ws)
+
         last_row = ws.max_row
         while last_row > 1 and all(
             ws.cell(last_row, c).value is None
             for c in range(1, len(COLS) + 1)
         ):
             last_row -= 1
+
         for row_data in new_rows:
             last_row += 1
             _style_row(ws, last_row, row_data)
