@@ -37,33 +37,32 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 # Single source of truth for column definitions.
 # Add new columns here — save() and _build_header() derive everything from this list.
 COLS = [
-    # ── Core job data ───────────────────────────────────────
+    # ── Columns 1-15: identical to original job_tracker_updater.py ──────────
+    # Do NOT reorder these — existing rows rely on these exact column positions.
     ("Search Category",    16),
     ("Job Title",          42),
     ("Company",            24),
     ("Location",           16),
-    ("Salary",             18),
     ("Platform",           10),
     ("Posting Date",       13),
     ("Apply Link",         12),
-    # ── Scoring ─────────────────────────────────────────────
     ("Match Score",        13),
     ("Interview Chance",   16),
+    ("Recommended Resume", 32),   # kept for backward compat; blank in new rows
     ("Tailoring Needed",   16),
-    # ── Status & workflow ───────────────────────────────────
     ("Application Status", 18),
-    ("Apply_Now",          10),
-    ("LLM_Reason",         40),
-    ("Risk_Flags",         30),
     ("Date Applied",       13),
     ("Follow-up Date",     13),
     ("Notes",              40),
-    # ── Company enrichment (populated when enabled) ─────────
+    # ── Columns 16+: new fields appended — blank for old rows ───────────────
+    ("Salary",             18),
+    ("Apply_Now",          10),
+    ("LLM_Reason",         40),
+    ("Risk_Flags",         30),
     ("Company Size",       14),
     ("Company Stage",      14),
     ("Growth Score",       12),
     ("Intel Source",       12),
-    # ── Meta ────────────────────────────────────────────────
     ("Loaded At",          18),
 ]
 COL_NAMES = [c[0] for c in COLS]

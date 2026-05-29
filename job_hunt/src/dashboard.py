@@ -27,6 +27,14 @@ _PARTIAL_KWS = ["bi", "etl", "elt", "pipeline", "warehouse", "cloud",
                  "aws", "gcp", "azure", "mlops", "llm", "ml engineer"]
 
 
+def _safe_pct(val) -> int:
+    """Parse a percentage value that may be an int, float, or string like '45%'."""
+    try:
+        return max(0, min(100, int(str(val).replace("%", "").strip())))
+    except (ValueError, TypeError):
+        return 5
+
+
 def _days_ago(posting_date) -> int:
     try:
         if isinstance(posting_date, (date, datetime)):
@@ -59,7 +67,16 @@ def _rows_to_jobs(rows: list[dict]) -> list[dict]:
     for i, row in enumerate(rows, start=1):
         if row.get("Application Status") == "Filtered Out":
             continue
-        score_1_10  = int(row.get("Match Score") or row.get("_score") or 0)
+        raw_score   = row.get("Match Score") or row.get("_score") or 0
+        # Guard: old rows may have a string like "45%" here due to schema migration
+        try:
+            score_1_10 = int(str(raw_score).replace("%", "").strip())
+        except (ValueError, TypeError):
+            score_1_10 = 0
+        # Clamp: old "Interview Chance" values (e.g. 45) landed in Match Score
+        # column due to schema shift — treat anything > 10 as a stale row.
+        if score_1_10 > 10:
+            score_1_10 = 0
         score_pct   = min(100, score_1_10 * 10)   # scale 1–10 → 10–100 for score bar %
 
         apply_now   = str(row.get("Apply_Now") or "").lower() == "yes"
@@ -88,8 +105,8 @@ def _rows_to_jobs(rows: list[dict]) -> list[dict]:
             "requirements": [],
             "breakdown": [
                 {"label": "Keyword Match",  "pct": min(100, score_pct),        "delta": f"+{score_1_10}", "neg": False},
-                {"label": "Interview Est.", "pct": int((row.get("Interview Chance") or "5%").replace("%", "")),
-                 "delta": row.get("Interview Chance") or "", "neg": False},
+                {"label": "Interview Est.", "pct": _safe_pct(row.get("Interview Chance")),
+                 "delta": str(row.get("Interview Chance") or ""), "neg": False},
             ],
         })
     return jobs
@@ -118,9 +135,19 @@ def generate(rows: list[dict], template_path: Path, output_path: Path,
     template = template_path.read_text(encoding="utf-8")
 
     # Sort by score descending, take top 200 for dashboard
+    def _score_key(r) -> int:
+        val = r.get("Match Score") or r.get("_score") or 0
+        try:
+            n = int(str(val).replace("%", "").strip())
+            return n if 1 <= n <= 10 else 0   # discard stale/misaligned values
+        except (ValueError, TypeError):
+            return 0
+
     sorted_rows = sorted(
-        (r for r in rows if r.get("Application Status") != "Filtered Out"),
-        key=lambda r: int(r.get("Match Score") or r.get("_score") or 0),
+        (r for r in rows
+         if r.get("Application Status") != "Filtered Out"
+         and _score_key(r) > 0),           # skip rows with no valid score
+        key=_score_key,
         reverse=True,
     )[:200]
 

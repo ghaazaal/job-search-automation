@@ -73,6 +73,14 @@ logging.basicConfig(level=logging.INFO,
                     datefmt="%H:%M:%S")
 logger = logging.getLogger("main")
 
+# Fix Windows cp1252 terminal encoding — print non-ASCII chars safely
+import sys as _sys
+if hasattr(_sys.stdout, "reconfigure"):
+    try:
+        _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 def run_pipeline(config: dict) -> None:
@@ -174,6 +182,8 @@ def run_pipeline(config: dict) -> None:
         new_jobs.append(job)
     print(f"  {len(new_jobs)} new jobs")
 
+    filtered_out_count = 0  # updated inside enrichment block if enabled
+
     # ── 5. Company enrichment (optional) ──────────────────────────────────
     # Disabled by default. To enable: set company_enrichment.enabled: true
     # in config.yaml. The enrichment code (company_agent, company_filter,
@@ -239,29 +249,33 @@ def run_pipeline(config: dict) -> None:
         s = scorer.score_job(job["title"], job["cat"], job["salary"], job["url"])
 
         row: dict = {
+            # Columns 1-15 — same positions as original job_tracker_updater.py
             "Search Category":    job["cat"],
             "Job Title":          job["title"],
             "Company":            job["company"],
             "Location":           job["location"],
-            "Salary":             job.get("salary", ""),
             "Platform":           job["platform"],
             "Posting Date":       job["date"],
             "Apply Link":         job["url"],
             "Match Score":        s["match_score"],
             "Interview Chance":   s["interview_chance"],
+            "Recommended Resume": "",          # blank — kept for column alignment
             "Tailoring Needed":   s["tailoring"],
             "Application Status": "Filtered Out" if is_filtered else "New",
-            "Apply_Now":          "",
-            "LLM_Reason":         filt_r.get("reason", "") if is_filtered else "",
-            "Risk_Flags":         "",
             "Date Applied":       "",
             "Follow-up Date":     "",
             "Notes":              filt_r.get("warn", "") or "",
+            # Columns 16+ — new fields
+            "Salary":             job.get("salary", ""),
+            "Apply_Now":          "",
+            "LLM_Reason":         filt_r.get("reason", "") if is_filtered else "",
+            "Risk_Flags":         "",
             "Company Size":       intel.get("headcount_range", ""),
             "Company Stage":      intel.get("stage", ""),
             "Growth Score":       intel.get("growth_score", ""),
             "Intel Source":       intel.get("source", ""),
             "Loaded At":          run_ts,
+            # Internal — not written to Excel
             "_score":             s["match_score"],
             "_cat_order":         cat_order.get(job["cat"], 9),
             "Low Growth Signal":  bool(filt_r.get("warn")),
@@ -347,7 +361,10 @@ def run_pipeline(config: dict) -> None:
     print("=" * 62)
 
     # ── Dashboard ──────────────────────────────────────────────────────────
-    _launch_dashboard(rows, run_ts)
+    # Combine existing + new rows so the dashboard shows the full tracker,
+    # not just today's additions.
+    all_rows = list(existing.values()) + rows
+    _launch_dashboard(all_rows, run_ts)
 
 
 # ── Dashboard helper ──────────────────────────────────────────────────────────
