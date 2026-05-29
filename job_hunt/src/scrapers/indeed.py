@@ -1,12 +1,20 @@
-"""Indeed scraper — wraps Apify valig~indeed-jobs-scraper."""
-from datetime import date, datetime
+"""Indeed scraper — wraps Apify valig~indeed-jobs-scraper.
+
+Actor input schema (as of May 2026):
+  query      : search term (was 'title')
+  location   : location string
+  country    : ISO country code
+  maxResults : max jobs to return (was 'limit')
+  datePosted : "1" | "3" | "7" | "14" | "" (was "last N days" text)
+"""
+from datetime import date
 
 from .base import call_actor
 from ..utils._dates import normalize_date, parse_salary
 
 
-_DATE_MAP = {1: "last 24 hours", 3: "last 3 days",
-             7: "last 7 days",   14: "last 14 days"}
+# Actor now expects numeric strings, not human-readable text
+_DATE_MAP = {1: "1", 3: "3", 7: "7", 14: "14"}
 
 
 def scrape(category: str, title: str,
@@ -14,11 +22,11 @@ def scrape(category: str, title: str,
            jobs_per_category: int = 50,
            run_timeout: int = 120) -> list[dict]:
     payload = {
-        "title":      title,
+        "query":      title,
         "location":   "remote",
         "country":    "us",
-        "limit":      jobs_per_category,
-        "datePosted": _DATE_MAP.get(days_posted, "last 7 days"),
+        "maxResults": jobs_per_category,
+        "datePosted": _DATE_MAP.get(days_posted, "7"),
     }
     raw = call_actor(actor_id, payload, f"Indeed/{category}", run_timeout)
     today = date.today().isoformat()
@@ -28,12 +36,21 @@ def scrape(category: str, title: str,
                or item.get("url") or "")
         if not url:
             continue
+        # Location may be a nested object or a plain string
+        loc_raw = item.get("location") or {}
+        if isinstance(loc_raw, dict):
+            city    = loc_raw.get("city") or ""
+            state   = loc_raw.get("state") or ""
+            location = f"{city}, {state}".strip(", ") or "Remote, US"
+        else:
+            location = str(loc_raw) or "Remote, US"
+
         jobs.append({
             "cat":      category,
             "title":    item.get("title") or item.get("jobTitle") or "",
             "company":  ((item.get("employer") or {}).get("name")
                          or item.get("company") or ""),
-            "location": item.get("location") or "Remote, US",
+            "location": location,
             "platform": "Indeed",
             "date":     normalize_date(
                 item.get("datePublished") or item.get("postedAt") or today),

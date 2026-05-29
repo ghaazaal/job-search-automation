@@ -46,10 +46,18 @@ tailoring:
 output_dir: "output/"
 tracker_path: "../job_tracker_ghazal.xlsx"
 
+# Company enrichment — Apify company scraper + LLM intel (stage, headcount, growth score)
+# Disabled by default while the core scrape→score→tailor pipeline stabilises.
+# Set enabled: true to re-activate once the core pipeline is stable.
+company_enrichment:
+  enabled: false
+
 # LLM provider configuration
 # Provider and model can also be overridden at runtime via environment variables:
 #   LLM_PROVIDER=groq
 #   LLM_MODEL=llama-3.3-70b-versatile
 llm:
-  provider: "anthropic"          # anthropic | groq | gemini
-  model:    "claude-sonnet-4-6"  # leave blank to use the provider's default
+  provider: "groq"
+  model: "llama-3.3-70b-versatile"
+  # provider: "anthropic"          # anthropic | groq | gemini
+  # model:    "claude-sonnet-4-6"  # leave blank to use the provider's default

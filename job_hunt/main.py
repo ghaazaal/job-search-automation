@@ -15,7 +15,6 @@ import logging
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -80,11 +79,8 @@ def run_pipeline(config: dict) -> None:
     from src.scrapers import indeed as indeed_scraper
     from src.scrapers import linkedin as li_scraper
     from src.scoring.scorer import Scorer
-    from src.agents.company_agent import lookup as company_lookup
-    from src.filters.company_filter import CompanyFilter
     from src.agents.resume_agent import parse_resume, generate_role_variant
     from src.agents.tailoring_agent import shortlist_decision
-    from src.tracker.cache import CompanyCache
     from src.tracker import excel
     from src.llm.factory import get_client
 
@@ -113,8 +109,17 @@ def run_pipeline(config: dict) -> None:
 
     # ── 1. Parse resume ────────────────────────────────────────────────────
     print("\n[1/8] Parsing resume...")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("  ERROR: ANTHROPIC_API_KEY not set. Abort.")
+    # Validate the API key for the configured provider before doing any work
+    _provider_key = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "groq":      "GROQ_API_KEY",
+        "gemini":    "GEMINI_API_KEY",
+    }
+    _provider = config.get("llm", {}).get("provider", "anthropic").lower()
+    _key_name  = _provider_key.get(_provider, "ANTHROPIC_API_KEY")
+    if not os.environ.get(_key_name):
+        print(f"  ERROR: {_key_name} is not set.")
+        print(f"  Add it to job_hunt/.env:  {_key_name}=your_key_here")
         sys.exit(1)
     try:
         parsed_resume = parse_resume(config, output_dir, llm)
@@ -169,41 +174,57 @@ def run_pipeline(config: dict) -> None:
         new_jobs.append(job)
     print(f"  {len(new_jobs)} new jobs")
 
-    # ── 5. Company intel (concurrent) ─────────────────────────────────────
-    unique_companies = list({j["company"] for j in new_jobs if j["company"]})
-    print(f"\n[5/8] Fetching company intel ({len(unique_companies)} unique companies)...")
-    cache = CompanyCache(ttl_days=config.get("company_filter", {}).get("cache_ttl_days", 7))
-    company_intel: dict[str, dict] = {}
+    # ── 5. Company enrichment (optional) ──────────────────────────────────
+    # Disabled by default. To enable: set company_enrichment.enabled: true
+    # in config.yaml. The enrichment code (company_agent, company_filter,
+    # CompanyCache) is unchanged and ready to plug back in.
+    enrichment_enabled = config.get("company_enrichment", {}).get("enabled", False)
+    if enrichment_enabled:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from src.agents.company_agent import lookup as company_lookup
+        from src.filters.company_filter import CompanyFilter
+        from src.tracker.cache import CompanyCache
 
-    def _fetch_intel(company: str) -> tuple[str, dict]:
-        return company, company_lookup(company, config, llm, cache)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
-        for done_idx, fut in enumerate(as_completed(futures), start=1):
-            c, intel = fut.result()
-            company_intel[c] = intel
-            if done_idx % 10 == 0:
-                print(f"  {done_idx}/{len(unique_companies)} companies resolved")
-    print(f"  Done — {len(company_intel)} companies resolved")
+        unique_companies = list({j["company"] for j in new_jobs if j["company"]})
+        print(f"\n[5/8] Company enrichment ({len(unique_companies)} companies)...")
+        cache = CompanyCache(
+            ttl_days=config.get("company_filter", {}).get("cache_ttl_days", 7))
+        company_intel: dict[str, dict] = {}
 
-    # ── 6. Filter ──────────────────────────────────────────────────────────
-    print("\n[6/8] Filtering...")
-    filt = CompanyFilter(config)
-    filtered_in: list[dict] = []
-    filtered_out_count = 0
-    for job in new_jobs:
-        intel = company_intel.get(job["company"], {"stage": "unknown", "growth_score": 5})
-        result = filt.evaluate(job["company"], intel)
-        job["_intel"]  = intel
-        job["_filter"] = result
-        if result["verdict"] == "REJECT":
-            filtered_out_count += 1
-        else:
-            filtered_in.append(job)
-    print(f"  {len(filtered_in)} pass | {filtered_out_count} filtered out")
+        def _fetch_intel(company: str) -> tuple[str, dict]:
+            return company, company_lookup(company, config, llm, cache)
 
-    # ── 7. Score ───────────────────────────────────────────────────────────
-    print(f"\n[7/8] Scoring {len(new_jobs)} jobs...")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
+            for done_idx, fut in enumerate(as_completed(futures), start=1):
+                c, intel = fut.result()
+                company_intel[c] = intel
+                if done_idx % 10 == 0:
+                    print(f"  {done_idx}/{len(unique_companies)} resolved")
+        print(f"  Done — {len(company_intel)} companies enriched")
+
+        filt = CompanyFilter(config)
+        filtered_out_count = 0
+        for job in new_jobs:
+            intel  = company_intel.get(job["company"],
+                                       {"stage": "unknown", "growth_score": 5})
+            result = filt.evaluate(job["company"], intel)
+            job["_intel"]  = intel
+            job["_filter"] = result
+            if result["verdict"] == "REJECT":
+                filtered_out_count += 1
+        print(f"  {len(new_jobs) - filtered_out_count} pass | {filtered_out_count} filtered")
+    else:
+        print("\n[5/8] Company enrichment: disabled "
+              "(set company_enrichment.enabled: true in config.yaml to activate)")
+        _passthrough = {"stage": "", "growth_score": "", "headcount_range": "",
+                        "source": "", "verdict": "PASS"}
+        for job in new_jobs:
+            job["_intel"]  = _passthrough
+            job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
+
+    # ── 6. Score ───────────────────────────────────────────────────────────
+    print(f"\n[6/8] Scoring {len(new_jobs)} jobs...")
     scorer = Scorer(config, KEYWORDS_PATH)
     cat_order = {"Analytics Engineer": 0, "Data Engineer": 1,
                  "Data Analyst": 2, "Product Analyst": 3}
@@ -245,8 +266,8 @@ def run_pipeline(config: dict) -> None:
 
     rows.sort(key=lambda r: (r["_cat_order"], -r["_score"]))
 
-    # ── 8. LLM shortlist decisions ─────────────────────────────────────────
-    print(f"\n[8/8] LLM shortlist decisions (score >= {shortlist_min})...")
+    # ── 7. LLM shortlist decisions ─────────────────────────────────────────
+    print(f"\n[7/8] LLM shortlist decisions (score >= {shortlist_min})...")
     shortlist = [r for r in rows
                  if r["_score"] >= shortlist_min
                  and r["Application Status"] != "Filtered Out"]
@@ -285,7 +306,7 @@ def run_pipeline(config: dict) -> None:
                 logger.warning("Role variant failed for %s: %s", role, e)
 
     # ── Save ───────────────────────────────────────────────────────────────
-    print(f"\n  Saving tracker...")
+    print(f"\n[8/8] Saving tracker...")
     if tracker_path.exists() and tracker_path.stat().st_size == 0:
         tracker_path.unlink()
     try:
@@ -377,7 +398,7 @@ def run_tailor(config: dict, jd_file: str) -> None:
         llm,
     )
     if result is None:
-        print("ERROR: Tailoring failed. Check ANTHROPIC_API_KEY.")
+        print("ERROR: Tailoring failed. Check your LLM API key in job_hunt/.env.")
         sys.exit(1)
 
     folder = save_tailoring_output(result, row_data.get("Company", "company"), output_dir)
