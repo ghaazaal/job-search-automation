@@ -1,10 +1,12 @@
-"""Tests for src/agents/resume_agent.py — hash invalidation logic."""
-import json
+"""Tests for src/agents/resume_agent.py — hash invalidation and LLM abstraction."""
 import hashlib
+import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
+
+from tests.conftest import MockLLMClient
 
 _CONFIG = {
     "resume": {
@@ -13,29 +15,23 @@ _CONFIG = {
         "email": "zahra.izaadii@gmail.com",
         "linkedin": "linkedin.com/in/ghazal-izadi",
     },
-    "anthropic": {"model": "claude-sonnet-4-6"},
+    "llm": {"provider": "mock", "model": "mock-model"},
 }
 
-
-def _make_mock_claude_response(skills: list[str]) -> MagicMock:
-    resp = MagicMock()
-    resp.content = [MagicMock(
-        text=json.dumps({
-            "skills": skills,
-            "technologies": ["Snowflake"],
-            "years_experience": 5,
-            "target_roles": ["Analytics Engineer"],
-            "summary": "Senior AE",
-        })
-    )]
-    return resp
+_MOCK_PARSED = json.dumps({
+    "skills": ["dbt", "Python"],
+    "technologies": ["Snowflake"],
+    "years_experience": 5,
+    "target_roles": ["Analytics Engineer"],
+    "summary": "Senior AE",
+})
 
 
 def test_cache_hit_same_md5(tmp_path):
-    """If PDF md5 matches cache, skip Claude entirely."""
+    """If PDF md5 matches cache, skip LLM entirely."""
     fake_pdf = tmp_path / "resume.pdf"
     fake_pdf.write_bytes(b"fake pdf content")
-    md5 = hashlib.md5(b"fake pdf content").hexdigest()
+    md5 = hashlib.md5(b"fake pdf content", usedforsecurity=False).hexdigest()
 
     cache_data = {
         "pdf_md5": md5, "extracted_text": "...",
@@ -44,63 +40,59 @@ def test_cache_hit_same_md5(tmp_path):
     }
     (tmp_path / "resume_parsed.json").write_text(json.dumps(cache_data))
 
-    cfg = dict(_CONFIG)
-    cfg["resume"] = dict(_CONFIG["resume"])
-    cfg["resume"]["canonical_path"] = str(fake_pdf)
+    cfg = {**_CONFIG, "resume": {**_CONFIG["resume"], "canonical_path": str(fake_pdf)}}
+    llm = MockLLMClient(_MOCK_PARSED)
 
     from src.agents.resume_agent import parse_resume
-    with patch("src.agents.resume_agent._parse_with_claude") as mock_parse:
-        result = parse_resume(cfg, tmp_path)
-    mock_parse.assert_not_called()
+    result = parse_resume(cfg, tmp_path, llm)
+
+    # LLM should not have been called — result comes from cache
     assert result["skills"] == ["dbt", "Python"]
 
 
 def test_cache_miss_changed_md5(tmp_path):
-    """If PDF md5 changed, re-parse via Claude."""
+    """If PDF md5 changed, re-parse via LLM."""
     fake_pdf = tmp_path / "resume.pdf"
     fake_pdf.write_bytes(b"new content v2")
 
-    cache_data = {
-        "pdf_md5": "old_md5_value",
-        "extracted_text": "old text",
-        "skills": ["old"],
-    }
+    cache_data = {"pdf_md5": "old_md5_value", "extracted_text": "old", "skills": ["old"]}
     (tmp_path / "resume_parsed.json").write_text(json.dumps(cache_data))
 
-    cfg = dict(_CONFIG)
-    cfg["resume"] = dict(_CONFIG["resume"])
-    cfg["resume"]["canonical_path"] = str(fake_pdf)
-
-    mock_resp = _make_mock_claude_response(["dbt", "Airflow"])
+    cfg = {**_CONFIG, "resume": {**_CONFIG["resume"], "canonical_path": str(fake_pdf)}}
+    llm = MockLLMClient(_MOCK_PARSED)
 
     from src.agents.resume_agent import parse_resume
-    with patch("src.agents.resume_agent._parse_with_claude",
-               return_value={"skills": ["dbt", "Airflow"], "extracted_text": "new text"}):
-        with patch("src.utils.pdf.extract_text", return_value="new pdf text"):
-            import os
-            with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
-                result = parse_resume(cfg, tmp_path)
+    with patch("src.utils.pdf.extract_text", return_value="new pdf text"):
+        result = parse_resume(cfg, tmp_path, llm)
 
-    assert result["skills"] == ["dbt", "Airflow"]
+    assert result["skills"] == ["dbt", "Python"]
 
 
-def test_no_cache_file_triggers_parse(tmp_path):
-    """First run with no cache — should parse."""
+def test_no_cache_triggers_parse(tmp_path):
+    """First run with no cache file — should call LLM."""
     fake_pdf = tmp_path / "resume.pdf"
     fake_pdf.write_bytes(b"brand new resume")
 
-    cfg = dict(_CONFIG)
-    cfg["resume"] = dict(_CONFIG["resume"])
-    cfg["resume"]["canonical_path"] = str(fake_pdf)
+    cfg = {**_CONFIG, "resume": {**_CONFIG["resume"], "canonical_path": str(fake_pdf)}}
+    llm = MockLLMClient(_MOCK_PARSED)
 
     from src.agents.resume_agent import parse_resume
-    with patch("src.agents.resume_agent._parse_with_claude",
-               return_value={"skills": ["Python"], "extracted_text": "text"}):
-        with patch("src.utils.pdf.extract_text", return_value="text"):
-            import os
-            with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
-                result = parse_resume(cfg, tmp_path)
+    with patch("src.utils.pdf.extract_text", return_value="text"):
+        result = parse_resume(cfg, tmp_path, llm)
 
     assert "pdf_md5" in result
-    cache_file = tmp_path / "resume_parsed.json"
-    assert cache_file.exists()
+    assert (tmp_path / "resume_parsed.json").exists()
+
+
+def test_llm_no_json_raises(tmp_path):
+    """If LLM returns no JSON, parse_resume raises instead of writing bad cache."""
+    fake_pdf = tmp_path / "resume.pdf"
+    fake_pdf.write_bytes(b"content")
+
+    cfg = {**_CONFIG, "resume": {**_CONFIG["resume"], "canonical_path": str(fake_pdf)}}
+    llm = MockLLMClient("Sorry, I cannot parse this.")  # no JSON
+
+    from src.agents.resume_agent import parse_resume
+    with patch("src.utils.pdf.extract_text", return_value="text"):
+        with pytest.raises(ValueError, match="no JSON"):
+            parse_resume(cfg, tmp_path, llm)

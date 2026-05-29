@@ -38,14 +38,31 @@ def _load_config() -> dict:
 
 
 # ── Imports ───────────────────────────────────────────────────────────────────
-# Deferred so missing deps give a clear message at startup, not mid-run
-def _check_deps() -> None:
+_PROVIDER_PKG = {
+    "anthropic": "anthropic",
+    "groq":      "groq",
+    "gemini":    "google.generativeai",
+}
+
+
+def _check_deps(config: dict) -> None:
+    """Check required packages are installed. Fails fast with a clear message."""
+    provider = (
+        os.environ.get("LLM_PROVIDER")
+        or config.get("llm", {}).get("provider", "anthropic")
+    ).lower()
+
+    always_needed = ("openpyxl", "yaml", "requests", "dotenv")
+    provider_pkg  = _PROVIDER_PKG.get(provider, "")
+
     missing = []
-    for pkg in ("anthropic", "apify_client", "openpyxl", "yaml", "requests", "dotenv"):
+    for pkg in (*always_needed, provider_pkg):
+        if not pkg:
+            continue
         try:
             __import__(pkg)
         except ImportError:
-            missing.append(pkg.replace("_", "-"))
+            missing.append(pkg.replace("_", "-").replace(".", "-"))
     if missing:
         print(f"ERROR: Missing packages: {', '.join(missing)}")
         print(f"Run: pip install -r {_BASE / 'requirements.txt'}")
@@ -69,6 +86,10 @@ def run_pipeline(config: dict) -> None:
     from src.agents.tailoring_agent import shortlist_decision
     from src.tracker.cache import CompanyCache
     from src.tracker import excel
+    from src.llm.factory import get_client
+
+    llm = get_client(config)
+    print(f"  LLM: {llm.provider} / {llm.model}")
 
     output_dir = _BASE / config.get("output_dir", "output/")
     output_dir.mkdir(exist_ok=True)
@@ -96,7 +117,7 @@ def run_pipeline(config: dict) -> None:
         print("  ERROR: ANTHROPIC_API_KEY not set. Abort.")
         sys.exit(1)
     try:
-        parsed_resume = parse_resume(config, output_dir)
+        parsed_resume = parse_resume(config, output_dir, llm)
         print(f"  Skills: {', '.join(parsed_resume.get('skills', [])[:8])}")
     except Exception as e:
         print(f"  ERROR: Resume parse failed: {e}")
@@ -155,7 +176,7 @@ def run_pipeline(config: dict) -> None:
     company_intel: dict[str, dict] = {}
 
     def _fetch_intel(company: str) -> tuple[str, dict]:
-        return company, company_lookup(company, config, cache)
+        return company, company_lookup(company, config, llm, cache)
     with ThreadPoolExecutor(max_workers=3) as pool:
         futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
         for done_idx, fut in enumerate(as_completed(futures), start=1):
@@ -246,7 +267,7 @@ def run_pipeline(config: dict) -> None:
             role_title=row["Job Title"],
             company_name=row["Company"],
             match_score=row["_score"],
-            config=config,
+            llm=llm,
         )
         row["Apply_Now"]   = decision.get("apply_now", "")
         row["LLM_Reason"]  = decision.get("reason", "")
@@ -259,7 +280,7 @@ def run_pipeline(config: dict) -> None:
         roles_needed = {r["Search Category"] for r in apply_now_jobs}
         for role in roles_needed:
             try:
-                generate_role_variant(role, parsed_resume, config, output_dir)
+                generate_role_variant(role, parsed_resume, config, output_dir, llm)
             except Exception as e:
                 logger.warning("Role variant failed for %s: %s", role, e)
 
@@ -305,7 +326,11 @@ def run_pipeline(config: dict) -> None:
 def run_tailor(config: dict, jd_file: str) -> None:
     from src.agents.tailoring_agent import tailor_job, save_tailoring_output
     from src.tracker import excel
+    from src.llm.factory import get_client
     from pathlib import Path
+
+    llm = get_client(config)
+    print(f"  LLM: {llm.provider} / {llm.model}")
 
     output_dir = _BASE / config.get("output_dir", "output/")
     output_dir.mkdir(exist_ok=True)
@@ -349,7 +374,7 @@ def run_tailor(config: dict, jd_file: str) -> None:
         jd_text, resume_text,
         row_data.get("Job Title", ""),
         row_data.get("Company", ""),
-        config,
+        llm,
     )
     if result is None:
         print("ERROR: Tailoring failed. Check ANTHROPIC_API_KEY.")
@@ -387,15 +412,14 @@ def run_tailor(config: dict, jd_file: str) -> None:
 
 # ── Entry ──────────────────────────────────────────────────────────────────────
 def main() -> None:
-    _check_deps()
+    config = _load_config()
+    _check_deps(config)
     parser = argparse.ArgumentParser(description="Job Hunt Automation")
     parser.add_argument("--tailor", action="store_true",
                         help="Tailor one job from a JD file")
     parser.add_argument("--jd", type=str, default="",
                         help="Path to job description .txt file (required with --tailor)")
     args = parser.parse_args()
-
-    config = _load_config()
 
     if args.tailor:
         if not args.jd:
