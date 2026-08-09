@@ -64,6 +64,8 @@ CATEGORIES = [
 # =============================================================================
 # CANDIDATE PROFILE
 # =============================================================================
+# Filenames are placeholders — point these at your own files in Resume/,
+# which is gitignored. Superseded by job_hunt/, kept for reference.
 RESUMES = {
     "Analytics Engineer": "resume_analytics_engineer.pdf",
     "Data Engineer":      "resume_data_engineer.pdf",
