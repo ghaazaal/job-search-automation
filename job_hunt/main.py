@@ -32,8 +32,9 @@ load_dotenv(_BASE / ".env")
 
 
 def _load_config() -> dict:
+    from src.config import apply_env_overrides
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return apply_env_overrides(yaml.safe_load(f))
 
 
 # ── Imports ───────────────────────────────────────────────────────────────────

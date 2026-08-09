@@ -4,11 +4,10 @@
 #                $env:ANTHROPIC_API_KEY = "sk-ant-..."
 # This file is safe to commit. Add to .gitignore: output/, *.db, .env
 
-resume:
-  canonical_path: "../Resume/resume_analytics_engineer.pdf"
-  candidate_name: "Ghazal Izadi"
-  email: "candidate@example.com"
-  linkedin: "linkedin.com/in/candidate"
+# Personal details are NOT stored here — this file is public.
+# Set them in job_hunt/.env (gitignored):
+#   CANDIDATE_NAME, CANDIDATE_EMAIL, CANDIDATE_LINKEDIN, RESUME_PATH
+resume: {}
 
 search:
   categories:
