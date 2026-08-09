@@ -1,7 +1,7 @@
 """LinkedIn scraper — wraps Apify valig~linkedin-jobs-scraper."""
 from datetime import date
 
-from .base import call_actor
+from .base import call_actor, extract_description
 from ..utils._dates import normalize_date, parse_salary
 
 
@@ -44,5 +44,6 @@ def scrape(category: str, title: str,
             "url":      url,
             "salary":   parse_salary(
                 item.get("salary") or item.get("baseSalary") or {}),
+            "description": extract_description(item),
         })
     return jobs

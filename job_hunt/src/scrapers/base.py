@@ -1,7 +1,9 @@
 """ApifyClient wrapper — single point for all actor calls."""
+import html
 import json
 import logging
 import os
+import re
 import time
 
 import requests
@@ -9,6 +11,28 @@ import requests
 logger = logging.getLogger(__name__)
 
 APIFY_BASE = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+
+# Actors disagree on the description field name; take the first non-empty one.
+_DESCRIPTION_KEYS = ("description", "descriptionText", "jobDescription",
+                     "descriptionHtml", "jobDescriptionText", "snippet")
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE  = re.compile(r"\s+")
+
+
+def extract_description(item: dict) -> str:
+    """Return the job description as plain text, or '' if the actor sent none.
+
+    Bodies arrive as either plain text or HTML depending on the actor and the
+    source listing. Scoring matches keywords against this, so markup is
+    flattened rather than preserved.
+    """
+    for key in _DESCRIPTION_KEYS:
+        raw = item.get(key)
+        if isinstance(raw, str) and raw.strip():
+            text = html.unescape(_TAG_RE.sub(" ", raw))
+            return _WS_RE.sub(" ", text).strip()
+    return ""
 
 
 def call_actor(actor_id: str, payload: dict, label: str,

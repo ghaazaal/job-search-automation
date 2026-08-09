@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from datetime import date, datetime
+from html import escape
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -46,16 +47,25 @@ def _days_ago(posting_date) -> int:
         return 0
 
 
-def _chips(title: str) -> list[dict]:
-    t = title.lower()
+def _chips(text: str) -> list[dict]:
+    """Derive skill chips from the title plus job description.
+
+    Word boundaries matter once descriptions are in scope — plain substring
+    matching pulls 'bi' out of 'ambitious' and 'ml' out of 'html'.
+    """
+    t = text.lower()
     seen: set[str] = set()
     chips: list[dict] = []
+
+    def _found(kw: str) -> bool:
+        return bool(re.search(r"\b" + re.escape(kw) + r"\b", t))
+
     for kw in _MATCH_KWS:
-        if kw in t and kw not in seen:
+        if kw not in seen and _found(kw):
             chips.append({"label": kw, "type": "match"})
             seen.add(kw)
     for kw in _PARTIAL_KWS:
-        if kw in t and kw not in seen:
+        if kw not in seen and _found(kw):
             chips.append({"label": kw, "type": "partial"})
             seen.add(kw)
     return chips[:6]
@@ -80,10 +90,19 @@ def _rows_to_jobs(rows: list[dict]) -> list[dict]:
         score_pct   = min(100, score_1_10 * 10)   # scale 1–10 → 10–100 for score bar %
 
         apply_now   = str(row.get("Apply_Now") or "").lower() == "yes"
-        description = row.get("Apply Link") or ""
-        if description:
+        # Prefer the scraped JD; older rows predate description capture and
+        # still fall back to a link out to the listing.
+        jd = (row.get("_description") or "").strip()
+        link = row.get("Apply Link") or ""
+        if jd:
+            description = escape(jd)
+        elif link:
             platform = row.get("Platform", "job board")
-            description = f'View full description on {platform}: <a href="{description}" target="_blank" style="color:var(--cyan)">Open listing →</a>'
+            description = (f'View full description on {platform}: '
+                           f'<a href="{link}" target="_blank" '
+                           f'style="color:var(--cyan)">Open listing →</a>')
+        else:
+            description = ""
 
         jobs.append({
             "id":           i,
@@ -100,7 +119,7 @@ def _rows_to_jobs(rows: list[dict]) -> list[dict]:
             "applyNow":     apply_now,
             "llmReason":    row.get("LLM_Reason") or "",
             "riskFlags":    row.get("Risk_Flags") or "",
-            "chips":        _chips(row.get("Job Title") or ""),
+            "chips":        _chips(f"{row.get('Job Title') or ''} {jd}"),
             "description":  description,
             "requirements": [],
             "breakdown": [

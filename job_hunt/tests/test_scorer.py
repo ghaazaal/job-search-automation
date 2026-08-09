@@ -76,3 +76,81 @@ def test_tailoring_field_returned(scorer):
     r = scorer.score_job("Analytics Engineer", "Analytics Engineer",
                          "", "https://example.com/job12")
     assert r["tailoring"] in ("Minor", "Moderate", "Significant", "N/A")
+
+
+# ── Description-aware scoring ─────────────────────────────────────────────────
+# Skill keywords and penalty terms live in the job description, not the title.
+# Scoring on the title alone left 80% of real listings with zero skill points.
+
+def test_skills_in_description_raise_score(scorer):
+    """A JD naming her stack should outscore the same title with no JD."""
+    jd = ("We run dbt on Snowflake with Airflow orchestration. "
+          "You will build Power BI dashboards over our ClickHouse warehouse.")
+    with_jd = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job13", description=jd)
+    without = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job13")
+    assert with_jd["match_score"] > without["match_score"]
+
+
+def test_clearance_in_description_penalized(scorer):
+    """Clearance requirements appear in the JD body, never the title."""
+    jd = "Applicants must hold an active TS/SCI security clearance."
+    flagged = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job14", description=jd)
+    clean = scorer.score_job("Data Analyst", "Data Analyst", "",
+                             "https://example.com/job15", description="")
+    assert flagged["match_score"] < clean["match_score"]
+
+
+def test_frontend_stack_in_description_penalized(scorer):
+    """A 'Data Analyst' role that is really React work should score down."""
+    jd = "You will build React components and maintain our Angular frontend."
+    flagged = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job16", description=jd)
+    clean = scorer.score_job("Data Analyst", "Data Analyst", "",
+                             "https://example.com/job17", description="")
+    assert flagged["match_score"] < clean["match_score"]
+
+
+def test_description_is_optional(scorer):
+    """Callers that have no JD still get a score — no crash, no penalty."""
+    r = scorer.score_job("Analytics Engineer", "Analytics Engineer", "",
+                         "https://example.com/job18")
+    assert 1 <= r["match_score"] <= 10
+
+
+def test_common_words_do_not_trigger_short_token_penalties(scorer):
+    """'optimize'/'adopt' must not fire the OPT visa penalty as substrings."""
+    jd = ("You will optimize query performance, adopt best practices, "
+          "and describe options to stakeholders.")
+    innocuous = scorer.score_job("Data Analyst", "Data Analyst", "",
+                                 "https://example.com/job21", description=jd)
+    clean = scorer.score_job("Data Analyst", "Data Analyst", "",
+                             "https://example.com/job22", description="")
+    assert innocuous["match_score"] >= clean["match_score"]
+
+
+def test_real_opt_requirement_still_penalized(scorer):
+    """The genuine standalone term must still count against the job."""
+    jd = "We cannot sponsor candidates on CPT or OPT at this time."
+    flagged = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job23", description=jd)
+    clean = scorer.score_job("Data Analyst", "Data Analyst", "",
+                             "https://example.com/job24", description="")
+    assert flagged["match_score"] < clean["match_score"]
+
+
+def test_skill_score_respects_cap(scorer):
+    """A JD stuffed with every keyword cannot outrank the skill_max budget."""
+    every_kw = " ".join(["dbt", "airflow", "clickhouse", "power bi", "python",
+                         "sql", "etl", "elt", "medallion", "governance",
+                         "tableau", "plotly", "streamlit", "experimentation",
+                         "data model", "kpi", "dashboard", "pipeline",
+                         "warehouse", "quality", "analytics", "bi"])
+    stuffed = scorer.score_job("Data Analyst", "Data Analyst", "",
+                               "https://example.com/job19", description=every_kw)
+    four_kws = scorer.score_job("Data Analyst", "Data Analyst", "",
+                                "https://example.com/job20",
+                                description="dbt airflow clickhouse power bi")
+    assert stuffed["match_score"] == four_kws["match_score"]
