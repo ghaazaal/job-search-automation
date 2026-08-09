@@ -11,15 +11,28 @@ def _load_keywords(keywords_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
+def _has(term: str, haystack: str) -> bool:
+    """Word-boundary keyword match.
+
+    Descriptions are long enough that substring matching produces false
+    positives on short tokens — 'opt' inside 'optimize', 'bi' inside
+    'ambitious'. Boundaries keep multi-word terms ('power bi') working.
+    """
+    return bool(re.search(r"\b" + re.escape(term.strip()) + r"\b", haystack))
+
+
 class Scorer:
     def __init__(self, config: dict, keywords_path: Path):
         self._cfg = config.get("scoring", {}).get("weights", {})
         self._kw = _load_keywords(keywords_path)
 
     def score_job(self, title: str, category: str,
-                  salary_str: str, url: str) -> dict:
+                  salary_str: str, url: str,
+                  description: str = "") -> dict:
         t = title.lower()
-        url_l = url.lower()
+        # Skills and penalties are stated in the JD body, not the title.
+        # Falls back to the title alone when no description was captured.
+        body = f"{t}\n{(description or '').lower()}"
 
         groups = self._kw["title_groups"]
         scores_map = self._kw["title_scores"]
@@ -51,22 +64,22 @@ class Scorer:
         skill_max = self._kw["skills"].get("skill_max", 20)
         skill_score = 0
         for kw, pts in skill_kws.items():
-            if kw in t or kw in url_l:
+            if _has(kw, body):
                 skill_score = min(skill_score + pts, skill_max)
 
         penalties_cfg = self._kw["penalties"]
         penalty = 0
-        if "w2 only" in t or "w2 only" in url_l:
+        if _has("w2 only", body):
             penalty += penalties_cfg.get("w2 only", 15)
-        if "clearance" in t or "secret" in t:
+        if _has("clearance", body) or _has("secret", body):
             penalty += penalties_cfg.get("clearance", 30)
-        if "cpt" in t or "opt" in t:
+        if _has("cpt", body) or _has("opt", body):
             penalty += penalties_cfg.get("cpt", 20)
         if is_exec:
             penalty += penalties_cfg.get("exec_penalty", 10)
-        if any(k in t for k in penalties_cfg.get("legacy_tech", {}).get("keywords", [])):
+        if any(_has(k, body) for k in penalties_cfg.get("legacy_tech", {}).get("keywords", [])):
             penalty += penalties_cfg["legacy_tech"].get("value", 25)
-        if any(k in t for k in penalties_cfg.get("frontend_tech", {}).get("keywords", [])):
+        if any(_has(k, body) for k in penalties_cfg.get("frontend_tech", {}).get("keywords", [])):
             penalty += penalties_cfg["frontend_tech"].get("value", 30)
 
         raw = max(0, min(title_score + cat_bonus + seniority_score

@@ -9,7 +9,7 @@ Actor input schema (as of May 2026):
 """
 from datetime import date
 
-from .base import call_actor
+from .base import call_actor, extract_description
 from ..utils._dates import normalize_date, parse_salary
 
 
@@ -57,5 +57,6 @@ def scrape(category: str, title: str,
             "url":      url,
             "salary":   parse_salary(
                 item.get("baseSalary") or item.get("salary") or {}),
+            "description": extract_description(item),
         })
     return jobs

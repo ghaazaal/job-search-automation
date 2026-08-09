@@ -10,10 +10,10 @@ from tests.conftest import MockLLMClient
 
 _CONFIG = {
     "resume": {
-        "canonical_path": "../Resume/resume_analytics_engineer.pdf",
-        "candidate_name": "Ghazal Izadi",
-        "email": "candidate@example.com",
-        "linkedin": "linkedin.com/in/candidate",
+        "canonical_path": "../Resume/candidate.pdf",
+        "candidate_name": "Ada Lovelace",
+        "email": "ada@example.com",
+        "linkedin": "linkedin.com/in/ada",
     },
     "llm": {"provider": "mock", "model": "mock-model"},
 }

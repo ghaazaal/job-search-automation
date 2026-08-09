@@ -89,6 +89,9 @@ def read_existing(path: Path) -> dict[str, dict]:
                 if cell.hyperlink:
                     url = cell.hyperlink.target
             if url:
+                # The cell renders as "Apply →"; callers (dashboard, tailoring)
+                # need the hyperlink target, so put it back on the row.
+                row_data["Apply Link"] = url
                 status = (row_data.get("Application Status")
                           or row_data.get("Status") or "New")
                 if status == "Not Applied":

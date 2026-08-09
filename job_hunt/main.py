@@ -32,8 +32,9 @@ load_dotenv(_BASE / ".env")
 
 
 def _load_config() -> dict:
+    from src.config import apply_env_overrides
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return apply_env_overrides(yaml.safe_load(f))
 
 
 # ── Imports ───────────────────────────────────────────────────────────────────
@@ -172,15 +173,13 @@ def run_pipeline(config: dict) -> None:
 
     # ── 4. Deduplicate ─────────────────────────────────────────────────────
     print("\n[4/8] Deduplicating...")
-    seen: set[str] = set()
-    new_jobs: list[dict] = []
-    for job in all_scraped:
-        url = job["url"]
-        if url in seen or url in existing_urls:
-            continue
-        seen.add(url)
-        new_jobs.append(job)
-    print(f"  {len(new_jobs)} new jobs")
+    from src.tracker.dedup import dedupe
+
+    new_jobs = dedupe(all_scraped,
+                      existing_urls=list(existing_urls),
+                      existing_rows=list(existing.values()))
+    print(f"  {len(new_jobs)} new jobs "
+          f"({len(all_scraped) - len(new_jobs)} duplicates collapsed)")
 
     filtered_out_count = 0  # updated inside enrichment block if enabled
 
@@ -246,7 +245,8 @@ def run_pipeline(config: dict) -> None:
         intel  = job["_intel"]
         filt_r = job["_filter"]
         is_filtered = filt_r["verdict"] == "REJECT"
-        s = scorer.score_job(job["title"], job["cat"], job["salary"], job["url"])
+        s = scorer.score_job(job["title"], job["cat"], job["salary"], job["url"],
+                             description=job.get("description", ""))
 
         row: dict = {
             # Columns 1-15 — same positions as original job_tracker_updater.py
@@ -277,6 +277,7 @@ def run_pipeline(config: dict) -> None:
             "Loaded At":          run_ts,
             # Internal — not written to Excel
             "_score":             s["match_score"],
+            "_description":       job.get("description", ""),
             "_cat_order":         cat_order.get(job["cat"], 9),
             "Low Growth Signal":  bool(filt_r.get("warn")),
         }
@@ -300,8 +301,10 @@ def run_pipeline(config: dict) -> None:
         else:
             resume_text = parsed_resume.get("extracted_text", "")
 
+        # Fall back to the title line only when the actor returned no body.
+        jd_text = row["_description"] or f"{row['Job Title']} at {row['Company']}"
         decision = shortlist_decision(
-            job_description=f"{row['Job Title']} at {row['Company']}",
+            job_description=jd_text,
             resume_text=resume_text,
             role_title=row["Job Title"],
             company_name=row["Company"],
