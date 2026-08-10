@@ -367,13 +367,33 @@ def run_pipeline(config: dict) -> None:
     print(f"\n  Tracker: {tracker_path}")
     print("=" * 62)
 
-    # ── Opportunity map ────────────────────────────────────────────────────
-    # Built from this run's jobs only — the map is a daily "today" view, not
-    # the full tracker history.
-    _launch_map(scored_jobs, shortlist_min)
+    # ── Persist and render ─────────────────────────────────────────────────
+    _persist_and_launch(scored_jobs, len(all_scraped), shortlist_min, config)
 
 
 # ── Opportunity map helper ────────────────────────────────────────────────────
+def _persist_and_launch(scored_jobs: list[dict], scraped: int,
+                        shortlist_min: int, config: dict) -> None:
+    """Write the run to the store, then render the map from it."""
+    from src.pipeline_store import persist_run
+    from src.store.db import connect
+    from src.store.ingest import ensure_user
+    from src.store.schema import init_db
+
+    conn = connect()
+    init_db(conn)
+    user_id = ensure_user(conn,
+                          config.get("resume", {}).get("candidate_name") or "default")
+    try:
+        persist_run(conn, user_id, scored_jobs, scraped)
+        print(f"  Stored {len(scored_jobs)} roles.")
+    except Exception as e:
+        logger.warning("Persisting the run failed: %s", e)
+    finally:
+        conn.close()
+    _launch_map(scored_jobs, shortlist_min)
+
+
 def _launch_map(scored_jobs: list[dict], shortlist_min: int) -> None:
     """Generate opportunity-map.html and open it in the browser."""
     from src.dashboard import open_browser
