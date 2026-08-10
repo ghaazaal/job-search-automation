@@ -163,3 +163,36 @@ def test_maps_without_a_section_are_treated_as_new():
     body = _body(render([_map()]))
     assert "Acme Analytics" in body
     assert "still here from earlier" not in body
+
+
+# ── Wiring to the store ───────────────────────────────────────────────────────
+
+def test_buttons_carry_their_role_and_company_ids():
+    m = _map()
+    m["id"] = 7
+    m["roles"][0]["id"] = 42
+    html = render([m])
+    assert 'data-role="42"' in html
+    assert 'data-company="7"' in html
+
+
+def test_save_and_hide_actions_are_present():
+    m = _map()
+    m["id"] = 7
+    m["roles"][0]["id"] = 42
+    body = _body(render([m]))
+    assert 'data-status="SAVED"' in body
+    assert 'data-status="HIDDEN"' in body
+
+
+def test_watch_posts_a_company_state():
+    m = _map()
+    m["id"] = 7
+    m["roles"][0]["id"] = 42
+    assert 'data-state="WATCH"' in _body(render([m]))
+
+
+def test_missing_ids_do_not_break_rendering():
+    """Rendering from an in-memory run, before the store exists, still works."""
+    html = render([_map()])
+    assert "Acme Analytics" in html

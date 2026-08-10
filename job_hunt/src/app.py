@@ -3,6 +3,7 @@
 No SQL lives here. Routes call the store and hand read models to renderers.
 Binds to localhost only — this is a local application, not a service.
 """
+import sqlite3
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -71,6 +72,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         try:
             set_role_status(conn, _user(conn), role_id, status)
             return jsonify({"role_id": role_id, "status": status})
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "not found"}), 404
         finally:
             conn.close()
 
@@ -83,6 +86,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         try:
             set_company_state(conn, _user(conn), company_id, state)
             return jsonify({"company_id": company_id, "state": state})
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "not found"}), 404
         finally:
             conn.close()
 

@@ -182,14 +182,24 @@ def _fit_block(role: dict, lead: bool) -> str:
     return f'<div class="brow">{pill}<span class="reason">{reason}</span></div>'
 
 
-def _actions(company_key: str, watchable: bool = True) -> str:
-    watch = ('<button type="button" class="btn-q">WATCH</button>'
+def _actions(company_key: str, company_id=None, role_id=None,
+             watchable: bool = True) -> str:
+    """Action row. Data attributes are the wiring to the write endpoints."""
+    ids = ""
+    if role_id is not None:
+        ids += f' data-role="{_e(role_id)}"'
+    if company_id is not None:
+        ids += f' data-company="{_e(company_id)}"'
+    save = (f'<button type="button" class="btn-q" data-status="SAVED"{ids}>SAVE</button>'
+            if role_id is not None else "")
+    watch = (f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
              if watchable else "")
     return (
         f'<div class="acts">'
         f'<button type="button" class="btn" data-open="{_e(company_key)}">REVIEW ROLE</button>'
-        f'{watch}'
-        f'<button type="button" class="btn-q btn-hide">HIDE</button></div>'
+        f'{save}{watch}'
+        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"{ids}>HIDE</button>'
+        f'</div>'
     )
 
 
@@ -206,7 +216,7 @@ def _lead_card(m: dict, key: str) -> str:
         f'<div class="rtitle">{_e(role.get("title"))}</div>'
         f'<div class="rmeta">{_e(_role_meta(role))}</div>'
         f'{_fit_block(role, True)}'
-        f'{_actions(key)}</div>'
+        f'{_actions(key, m.get("id"), role.get("id"))}</div>'
     )
 
 
@@ -223,7 +233,7 @@ def _compact_card(m: dict, key: str) -> str:
         f'<div class="cmeta">{_e(meta.upper())}</div></div>'
         f'<div class="cwhy">{_e(m["why"])}</div>'
         f'{_fit_block(role, False)}'
-        f'{_actions(key)}</div>'
+        f'{_actions(key, m.get("id"), role.get("id"))}</div>'
     )
 
 
@@ -324,6 +334,16 @@ document.addEventListener('click',function(e){
   const t=e.target.closest('.tab'); if(t){roleIdx=parseInt(t.getAttribute('data-i'),10);render();return;}
   const n=e.target.closest('[data-next]');
   if(n){const co=DATA[openKey]; if(roleIdx<co.roles.length-1){roleIdx++;render();}else{close();}}
+});
+async function post(url, body){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){location.reload();}
+}
+document.addEventListener('click',function(e){
+  const s=e.target.closest('[data-status]');
+  if(s&&s.dataset.role){post('/api/roles/'+s.dataset.role+'/status',{status:s.dataset.status});return;}
+  const w=e.target.closest('[data-state]');
+  if(w&&w.dataset.company){post('/api/companies/'+w.dataset.company+'/state',{state:w.dataset.state});}
 });
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openKey){close();}});
 """

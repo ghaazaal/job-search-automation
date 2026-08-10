@@ -89,3 +89,13 @@ def test_earlier_section_appears_after_a_second_run(tmp_path):
     # earlier group's presence is verified via its own "Acme" card appearing
     # after the heading, not via "Analytics Engineer" (see note to reviewer).
     assert body.rindex("Acme") > body.index("still here from earlier")
+
+
+def test_setting_status_on_a_missing_role_returns_404(client):
+    r = client.post("/api/roles/999999/status", json={"status": "SAVED"})
+    assert r.status_code == 404
+
+
+def test_setting_state_on_a_missing_company_returns_404(client):
+    r = client.post("/api/companies/999999/state", json={"state": "WATCH"})
+    assert r.status_code == 404
