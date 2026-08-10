@@ -22,13 +22,18 @@ Three separate problems share one cause:
 ## Scope
 
 **In:** SQLite store, a local Flask application, role-level status tracking, an
-activity screen, run history, and a one-time import of the existing Excel
-tracker.
+activity screen, and run history.
 
 **Out:** hosted deployment, accounts and login, automated status detection from
 email, people-in-context hints, and outcome-driven re-weighting of the scorer.
 The last is deliberately deferred — this design captures the data that makes it
 possible later, and stops there.
+
+**The existing Excel tracker is not migrated.** Its 273 rows predate description
+capture, so every one would import with no band, no reason and no evidence —
+hundreds of "not checked yet" cards burying whatever the first real run finds.
+The store starts empty and fills from the first scrape. `job_tracker_ghazal.xlsx`
+stays on disk, untouched, as a historical record.
 
 ## Architecture
 
@@ -41,9 +46,9 @@ scrape → score → SQLite (source of truth) → Flask (localhost) → two scre
 `python main.py` scrapes and writes to SQLite, then serves the app.
 `python main.py --serve` skips the scrape and serves what is already stored.
 
-Excel stops being the database and becomes an export. This removes the
-`PermissionError` when the file is open, and the hyperlink-based row identity
-that made `read_existing` fragile.
+Excel stops being involved. This removes the `PermissionError` raised when the
+file is open in Excel during a run, and the hyperlink-based row identity that
+made `read_existing` fragile.
 
 Flask is chosen over FastAPI: the app serves server-rendered pages and a handful
 of JSON endpoints, needs no async, and Flask adds one dependency rather than
@@ -280,7 +285,10 @@ These extend the rules in the MVP spec and are binding.
 | GET | `/activity` | Activity screen |
 | POST | `/api/roles/<id>/status` | Set status, write event |
 | POST | `/api/companies/<id>/state` | Watch, unwatch or hide |
-| GET | `/api/export.xlsx` | Excel export of the current state |
+
+There is no Excel export. The tracker is not migrated and the spreadsheet is not
+the destination any more; adding an export would keep alive a format the product
+has moved off. `job_tracker_ghazal.xlsx` remains on disk as a historical file.
 
 State-changing endpoints accept JSON, return the updated read model, and are the
 only paths that write. They validate the target status against the same
@@ -288,16 +296,6 @@ vocabulary as the `CHECK` constraint, so an invalid value is rejected before it
 reaches SQLite.
 
 The app binds to `127.0.0.1` only.
-
-## Migrating the existing tracker
-
-A one-time `python main.py --import-tracker` reads
-`job_tracker_ghazal.xlsx` and creates a synthetic run holding its 273 rows.
-Existing `Application Status` values map as: `Applied` → `APPLIED`,
-`Interview` → `INTERVIEWING`, `Rejected` → `REJECTED`, `Ignored` and
-`Filtered Out` → `HIDDEN`, `New` and `Tailored` → no application row. Imported
-roles have `description_captured = 0`, because those rows predate description
-capture, and so render as "not checked yet" rather than claiming a fit.
 
 ## Testing
 
@@ -328,13 +326,14 @@ capture, and so render as "not checked yet" rather than claiming a fit.
 7. A fresh connection reports `foreign_keys = 1` and `journal_mode = wal`.
 8. An invalid status is rejected by the database, not only by the application.
 9. No numeric score appears in any rendered page or JSON response.
-10. `--import-tracker` loads the existing 273 rows without inventing fit data.
+10. On a machine with no database, the first run creates it and the map renders.
 
 ## Sequencing
 
 1. Store: schema, pragmas, transactions, upsert from a run. No UI.
-2. Import the existing tracker. Proves the schema against real data.
-3. Flask app serving the existing map from the store, read-only.
+2. Pipeline writes each run into the store. The generated page still comes from
+   the run in memory, so nothing user-facing changes yet.
+3. Flask app serving the map from the store, read-only.
 4. Write endpoints, then wire the map's buttons.
 5. Activity screen.
 
