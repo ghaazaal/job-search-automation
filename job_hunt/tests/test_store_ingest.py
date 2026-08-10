@@ -40,6 +40,14 @@ def test_run_starts_as_running_and_finishes_ok(conn):
     assert row["status"] == "OK" and row["kept"] == 8 and row["finished_at"]
 
 
+def test_run_can_finish_as_failed(conn):
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    finish_run(conn, run_id, scraped=5, kept=0, ok=False)
+    row = conn.execute("SELECT * FROM run WHERE id=?", (run_id,)).fetchone()
+    assert row["status"] == "FAILED" and row["finished_at"]
+
+
 def test_jobs_create_companies_and_roles(conn):
     u = ensure_user(conn, "Ghazal")
     run_id = start_run(conn, u)
