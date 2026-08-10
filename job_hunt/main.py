@@ -2,7 +2,8 @@
 main.py — Job Hunt Automation
 ==============================
 Usage:
-  python main.py                        # scrape + score + company intel + shortlist
+  python main.py                        # scrape + score + persist + serve (blocks until Ctrl-C)
+  python main.py --serve                # serve the existing store without scraping
   python main.py --tailor --jd job.txt  # tailor one job from a saved JD file
 
 Setup:
@@ -374,7 +375,7 @@ def run_pipeline(config: dict) -> None:
 # ── Opportunity map helper ────────────────────────────────────────────────────
 def _persist_and_launch(scored_jobs: list[dict], scraped: int,
                         shortlist_min: int, config: dict) -> None:
-    """Write the run to the store, then render the map from it."""
+    """Write the run to the store. Rendering happens separately via _serve()."""
     from src.pipeline_store import persist_run
     from src.store.db import connect
     from src.store.ingest import ensure_user
@@ -406,6 +407,9 @@ def _serve(config: dict, port: int) -> None:
 
     shortlist_min = config.get("tailoring", {}).get("shortlist_score", 7)
     name = config.get("resume", {}).get("candidate_name") or "default"
+    if name == "default":
+        logger.warning("No CANDIDATE_NAME set — storing this run under the "
+                       "'default' user. Set CANDIDATE_NAME in job_hunt/.env.")
     app = create_app(user_name=name, shortlist_min=shortlist_min)
     url = f"http://127.0.0.1:{port}/"
     print(f"\n  Opportunity map: {url}")
