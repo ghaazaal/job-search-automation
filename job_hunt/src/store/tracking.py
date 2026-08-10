@@ -42,6 +42,8 @@ def set_role_status(conn: sqlite3.Connection, user_id: int,
 
     with transaction(conn):
         previous = role_status(conn, role_id)
+        if status == previous:
+            return
         if previous == "NEW":
             conn.execute(
                 """INSERT INTO application (user_id, role_id, status, applied_at,
@@ -73,6 +75,8 @@ def set_company_state(conn: sqlite3.Connection, user_id: int,
         row = conn.execute("SELECT user_state FROM company WHERE id = ?",
                            (company_id,)).fetchone()
         previous = row["user_state"] if row else None
+        if state == previous:
+            return
         conn.execute("UPDATE company SET user_state = ? WHERE id = ?",
                      (state, company_id))
         conn.execute(

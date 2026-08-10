@@ -187,9 +187,9 @@ def _actions(company_key: str, company_id=None, role_id=None,
     """Action row. Data attributes are the wiring to the write endpoints."""
     ids = ""
     if role_id is not None:
-        ids += f' data-role="{_e(role_id)}"'
+        ids += f' data-role="{_e(str(role_id))}"'
     if company_id is not None:
-        ids += f' data-company="{_e(company_id)}"'
+        ids += f' data-company="{_e(str(company_id))}"'
     save = (f'<button type="button" class="btn-q" data-status="SAVED"{ids}>SAVE</button>'
             if role_id is not None else "")
     watch = (f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
@@ -337,7 +337,7 @@ document.addEventListener('click',function(e){
 });
 async function post(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r.ok){location.reload();}
+  if(r.ok){location.reload();}else{alert('That did not save. Try again.');}
 }
 document.addEventListener('click',function(e){
   const s=e.target.closest('[data-status]');

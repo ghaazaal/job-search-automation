@@ -196,3 +196,13 @@ def test_missing_ids_do_not_break_rendering():
     """Rendering from an in-memory run, before the store exists, still works."""
     html = render([_map()])
     assert "Acme Analytics" in html
+
+
+def test_zero_is_a_valid_id_not_a_missing_one():
+    """0 or "" in Python treats 0 as falsy — a real trap for an id field."""
+    m = _map()
+    m["id"] = 0
+    m["roles"][0]["id"] = 0
+    html = render([m])
+    assert 'data-role="0"' in html
+    assert 'data-company="0"' in html

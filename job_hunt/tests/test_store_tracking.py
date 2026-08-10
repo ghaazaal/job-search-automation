@@ -116,3 +116,19 @@ def test_set_company_state_on_missing_company_raises(ctx):
     conn, user_id, _, _ = ctx
     with pytest.raises(sqlite3.IntegrityError):
         set_company_state(conn, user_id, 999999, "WATCH")
+
+
+def test_repeating_the_same_status_writes_no_new_event(ctx):
+    conn, user_id, role_id, _ = ctx
+    set_role_status(conn, user_id, role_id, "SAVED")
+    set_role_status(conn, user_id, role_id, "SAVED")
+    assert len(role_events(conn, role_id)) == 1
+
+
+def test_repeating_the_same_company_state_writes_no_new_event(ctx):
+    conn, user_id, _, company_id = ctx
+    set_company_state(conn, user_id, company_id, "WATCH")
+    set_company_state(conn, user_id, company_id, "WATCH")
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM event WHERE company_id=?",
+        (company_id,)).fetchone()["c"] == 1

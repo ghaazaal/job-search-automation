@@ -73,6 +73,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             set_role_status(conn, _user(conn), role_id, status)
             return jsonify({"role_id": role_id, "status": status})
         except sqlite3.IntegrityError:
+            # status is already validated above, so the only FK this can trip
+            # is role_id referencing a role that doesn't exist.
             return jsonify({"error": "not found"}), 404
         finally:
             conn.close()
@@ -87,6 +89,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             set_company_state(conn, _user(conn), company_id, state)
             return jsonify({"company_id": company_id, "state": state})
         except sqlite3.IntegrityError:
+            # state is already validated above, so the only FK this can trip
+            # is company_id referencing a company that doesn't exist.
             return jsonify({"error": "not found"}), 404
         finally:
             conn.close()
