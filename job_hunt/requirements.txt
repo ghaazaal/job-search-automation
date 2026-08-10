@@ -17,3 +17,5 @@ anthropic>=0.25.0
 
 # Option C: Google Gemini
 # google-generativeai>=0.7.0
+
+flask>=3.0
