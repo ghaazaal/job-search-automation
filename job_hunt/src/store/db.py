@@ -32,9 +32,12 @@ def transaction(conn: sqlite3.Connection):
     """Run a block atomically. Rolls back on any exception.
 
     `isolation_level=None` disables the driver's implicit transactions, so
-    BEGIN and COMMIT are explicit and nesting cannot surprise us.
+    BEGIN and COMMIT are explicit and nesting cannot surprise us. Uses
+    BEGIN IMMEDIATE, not BEGIN, so the write lock is acquired up front —
+    a concurrent writer blocks here rather than racing to read stale state
+    before either side commits.
     """
-    conn.execute("BEGIN")
+    conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
     except Exception:

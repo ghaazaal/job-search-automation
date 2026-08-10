@@ -37,11 +37,11 @@ def set_role_status(conn: sqlite3.Connection, user_id: int,
     if status not in STATUSES:
         raise ValueError(f"unknown status: {status!r}")
 
-    previous = role_status(conn, role_id)
     now = _now()
     applied_at = now if status == "APPLIED" else None
 
     with transaction(conn):
+        previous = role_status(conn, role_id)
         if previous == "NEW":
             conn.execute(
                 """INSERT INTO application (user_id, role_id, status, applied_at,
@@ -67,12 +67,12 @@ def set_company_state(conn: sqlite3.Connection, user_id: int,
     if state not in COMPANY_STATES:
         raise ValueError(f"unknown company state: {state!r}")
 
-    row = conn.execute("SELECT user_state FROM company WHERE id = ?",
-                       (company_id,)).fetchone()
-    previous = row["user_state"] if row else None
     now = _now()
 
     with transaction(conn):
+        row = conn.execute("SELECT user_state FROM company WHERE id = ?",
+                           (company_id,)).fetchone()
+        previous = row["user_state"] if row else None
         conn.execute("UPDATE company SET user_state = ? WHERE id = ?",
                      (state, company_id))
         conn.execute(

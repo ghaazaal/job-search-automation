@@ -1,4 +1,6 @@
 """Tests for src/store/tracking.py — status moves and their event log."""
+import sqlite3
+
 import pytest
 
 from src.store.db import connect
@@ -102,3 +104,15 @@ def test_invalid_company_state_is_rejected(ctx):
     conn, user_id, _, company_id = ctx
     with pytest.raises(ValueError):
         set_company_state(conn, user_id, company_id, "MAYBE")
+
+
+def test_set_role_status_on_missing_role_raises(ctx):
+    conn, user_id, _, _ = ctx
+    with pytest.raises(sqlite3.IntegrityError):
+        set_role_status(conn, user_id, 999999, "SAVED")
+
+
+def test_set_company_state_on_missing_company_raises(ctx):
+    conn, user_id, _, _ = ctx
+    with pytest.raises(sqlite3.IntegrityError):
+        set_company_state(conn, user_id, 999999, "WATCH")
