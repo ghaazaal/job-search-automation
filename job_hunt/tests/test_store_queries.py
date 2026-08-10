@@ -89,6 +89,20 @@ def test_watched_company_with_an_open_role_is_a_card_not_a_tile(conn):
     assert [m["name"] for m in sections["new"]] == ["Acme"]
 
 
+def test_watched_company_with_only_an_earlier_role_is_not_also_a_tile(conn):
+    """The exact case the new/earlier/watching split has to get right:
+    an open role that's 'earlier', not 'new', must still count as open —
+    so the company must NOT also appear as a no-role watching tile."""
+    u = ensure_user(conn, "G")
+    first = _run_with(conn, u, [_job("https://x/1")])
+    mark_seen(conn, u, first)
+    company_id = conn.execute("SELECT id FROM company").fetchone()["id"]
+    set_company_state(conn, u, company_id, "WATCH")
+    sections = map_sections(conn, u, shortlist_min=7)
+    assert [m["name"] for m in sections["earlier"]] == ["Acme"]
+    assert sections["watching"] == []
+
+
 def test_state_is_derived_from_the_threshold(conn):
     u = ensure_user(conn, "G")
     _run_with(conn, u, [_job("https://x/1", score=9),
@@ -112,6 +126,14 @@ def test_evidence_round_trips_as_lists(conn):
     assert role["matched"] == ["dbt"]
     assert role["gaps"] == ["snowflake"]
     assert role["description_captured"] is True
+
+
+def test_why_notes_uncaptured_descriptions(conn):
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1", description_captured=False,
+                             band=None, matched=[])])
+    why = map_sections(conn, u, shortlist_min=7)["new"][0]["why"]
+    assert "descriptions not captured yet" in why
 
 
 def test_activity_board_groups_by_status(conn):
