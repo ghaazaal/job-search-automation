@@ -13,7 +13,11 @@ DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "job_hunt.db"
 
 
 def connect(db_path: Path | str = DEFAULT_PATH) -> sqlite3.Connection:
-    """Open a connection with the pragmas this design depends on."""
+    """Open a connection with the pragmas this design depends on.
+
+    The caller owns the returned connection and must close it explicitly;
+    using this as a `with` block manages the transaction only, not the handle.
+    """
     conn = sqlite3.connect(str(db_path), isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
