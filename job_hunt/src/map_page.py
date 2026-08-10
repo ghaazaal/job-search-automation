@@ -427,3 +427,16 @@ def render(maps: list[dict], meta: dict | None = None) -> str:
 </body>
 </html>
 """
+
+
+def open_browser(path) -> None:
+    """Open a generated page in the system browser."""
+    import os
+    import subprocess
+
+    try:
+        os.startfile(str(path))              # Windows
+    except AttributeError:
+        subprocess.Popen(["open", str(path)])  # macOS
+    except Exception:
+        print(f"  Open manually: {path}")

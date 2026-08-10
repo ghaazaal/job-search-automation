@@ -420,8 +420,7 @@ def _serve(config: dict, port: int) -> None:
 
 def _launch_map(scored_jobs: list[dict], shortlist_min: int) -> None:
     """Generate opportunity-map.html and open it in the browser."""
-    from src.dashboard import open_browser
-    from src.map_page import render
+    from src.map_page import open_browser, render
     from src.opportunity import build_maps
 
     output = _BASE.parent / "opportunity-map.html"
