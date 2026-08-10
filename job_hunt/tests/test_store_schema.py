@@ -102,6 +102,15 @@ def test_new_is_not_a_storable_status(conn):
                    VALUES (?, ?, 'NEW', '2026-08-10')""", (u, role_id))
 
 
+def test_invalid_run_status_is_rejected(conn):
+    u = _user(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction(conn):
+            conn.execute(
+                "INSERT INTO run (user_id, started_at, status) VALUES (?, ?, 'PENDING')",
+                (u, "2026-08-10T06:40:00"))
+
+
 def test_invalid_company_state_is_rejected(conn):
     u = _user(conn)
     with pytest.raises(sqlite3.IntegrityError):

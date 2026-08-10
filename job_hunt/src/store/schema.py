@@ -91,6 +91,11 @@ CREATE INDEX IF NOT EXISTS idx_event_role ON event(role_id, at);
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create the schema if absent. Safe to call on every start."""
+    """Create the schema if absent. Safe to call on every start.
+
+    Never call this from inside a `transaction()` block — `executescript`
+    always issues an implicit COMMIT first, which would commit the block's
+    BEGIN out from under it.
+    """
     conn.executescript(_DDL)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
