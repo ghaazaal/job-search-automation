@@ -47,3 +47,22 @@ def test_a_failed_run_is_marked_failed(conn):
         persist_run(conn, user_id, [bad], scraped=1)
     row = conn.execute("SELECT * FROM run ORDER BY id DESC LIMIT 1").fetchone()
     assert row["status"] == "FAILED"
+
+
+def test_setup_failure_still_launches_the_map(monkeypatch):
+    """A broken connect()/init_db()/ensure_user() must not hide the map —
+    that's the whole point of this task."""
+    import main
+
+    launched = []
+    monkeypatch.setattr(main, "_launch_map",
+                        lambda scored_jobs, shortlist_min: launched.append(True))
+
+    def _boom(*a, **k):
+        raise RuntimeError("db is locked")
+
+    monkeypatch.setattr("src.store.db.connect", _boom)
+
+    main._persist_and_launch([], scraped=0, shortlist_min=7, config={})
+
+    assert launched == [True]

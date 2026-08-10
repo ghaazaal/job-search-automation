@@ -380,17 +380,22 @@ def _persist_and_launch(scored_jobs: list[dict], scraped: int,
     from src.store.ingest import ensure_user
     from src.store.schema import init_db
 
-    conn = connect()
-    init_db(conn)
-    user_id = ensure_user(conn,
-                          config.get("resume", {}).get("candidate_name") or "default")
+    conn = None
     try:
+        conn = connect()
+        init_db(conn)
+        candidate_name = config.get("resume", {}).get("candidate_name") or "default"
+        if candidate_name == "default":
+            logger.warning("No CANDIDATE_NAME set — storing this run under the "
+                           "'default' user. Set CANDIDATE_NAME in job_hunt/.env.")
+        user_id = ensure_user(conn, candidate_name)
         persist_run(conn, user_id, scored_jobs, scraped)
         print(f"  Stored {len(scored_jobs)} roles.")
     except Exception as e:
         logger.warning("Persisting the run failed: %s", e)
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
     _launch_map(scored_jobs, shortlist_min)
 
 
