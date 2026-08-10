@@ -5,6 +5,8 @@ from typing import Any
 
 import yaml
 
+from .reason import compose_reason
+
 
 def _load_keywords(keywords_path: Path) -> dict:
     with open(keywords_path, "r", encoding="utf-8") as f:
@@ -25,6 +27,9 @@ class Scorer:
     def __init__(self, config: dict, keywords_path: Path):
         self._cfg = config.get("scoring", {}).get("weights", {})
         self._kw = _load_keywords(keywords_path)
+        # Band cut-offs on the internal 1-10 score.
+        self._bands = config.get("scoring", {}).get("bands",
+                                                    {"strong": 8, "partial": 5})
 
     def score_job(self, title: str, category: str,
                   salary_str: str, url: str,
@@ -63,37 +68,56 @@ class Scorer:
                      if k != "skill_max"}
         skill_max = self._kw["skills"].get("skill_max", 20)
         skill_score = 0
-        for kw, pts in skill_kws.items():
+        matched: list[str] = []
+        # Strongest signals first so the reason sentence names them in order.
+        for kw, pts in sorted(skill_kws.items(), key=lambda kv: -kv[1]):
             if _has(kw, body):
+                matched.append(kw)
                 skill_score = min(skill_score + pts, skill_max)
+
+        # Gaps come from the description only — a tool named in the post that
+        # the candidate's own skill list did not match.
+        desc_l = (description or "").lower()
+        gaps = [tool for tool in self._kw.get("market_tools", [])
+                if _has(tool, desc_l) and tool not in matched]
 
         penalties_cfg = self._kw["penalties"]
         penalty = 0
+        fired: list[str] = []
         if _has("w2 only", body):
             penalty += penalties_cfg.get("w2 only", 15)
+            fired.append("w2 only")
         if _has("clearance", body) or _has("secret", body):
             penalty += penalties_cfg.get("clearance", 30)
+            fired.append("clearance")
         if _has("cpt", body) or _has("opt", body):
             penalty += penalties_cfg.get("cpt", 20)
+            fired.append("visa restriction")
         if is_exec:
             penalty += penalties_cfg.get("exec_penalty", 10)
+            fired.append("executive role")
         if any(_has(k, body) for k in penalties_cfg.get("legacy_tech", {}).get("keywords", [])):
             penalty += penalties_cfg["legacy_tech"].get("value", 25)
+            fired.append("legacy tech")
         if any(_has(k, body) for k in penalties_cfg.get("frontend_tech", {}).get("keywords", [])):
             penalty += penalties_cfg["frontend_tech"].get("value", 30)
+            fired.append("frontend focus")
 
         raw = max(0, min(title_score + cat_bonus + seniority_score
                          + skill_score - penalty, 90))
         match_score = max(1, round(raw / 9))
 
-        base = {10: 45, 9: 45, 8: 45, 7: 30, 6: 30,
-                5: 15, 4: 15}.get(match_score, 5)
-        sal_nums = re.findall(r'\d+', (salary_str or "").replace(',', ''))
-        if sal_nums:
-            top_sal = int(sal_nums[-1])
-            if   top_sal >= 400_000: base -= 15
-            elif top_sal >= 200_000: base -= 5
-        interview_chance = f"{max(5, min(base, 60))}%"
+        # The band is the only fit signal the UI may render. Without a
+        # description nothing was compared, so no band may be claimed.
+        described = bool((description or "").strip())
+        if not described:
+            band = None
+        elif match_score >= self._bands.get("strong", 8):
+            band = "STRONG FIT"
+        elif match_score >= self._bands.get("partial", 5):
+            band = "PARTIAL FIT"
+        else:
+            band = "STRETCH"
 
         groups_for_cat = {
             "Analytics Engineer": groups.get("core_ae", []),
@@ -107,8 +131,19 @@ class Scorer:
         elif match_score >= 4: tailoring = "Significant"
         else:                  tailoring = "N/A"
 
-        return {
-            "match_score":      match_score,
-            "interview_chance": interview_chance,
-            "tailoring":        tailoring,
+        evidence = {
+            # Internal only — never rendered. Used for ranking.
+            "match_score":          match_score,
+            "band":                 band,
+            "matched":              matched,
+            "gaps":                 gaps,
+            "penalties":            fired,
+            "seniority":            ("exec" if is_exec else
+                                     "junior" if is_junior else
+                                     "senior" if is_senior else "mid"),
+            "description_captured": described,
+            "tailoring":            tailoring,
         }
+        # Rule 2: the band is never handed out without its sentence.
+        evidence["reason"] = compose_reason(evidence)
+        return evidence

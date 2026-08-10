@@ -1,10 +1,10 @@
 # Design System — Job Search Automation (JobBot)
 
 ## Product Context
-- **What this is:** A personal job search automation tool for an Analytics/Data Engineer. Scrapes, scores, and presents shortlisted jobs for daily review, then generates tailored resumes and cover letters for approved roles.
-- **Who it's for:** Ghazal — solo user, daily AM review session, Windows 11 desktop.
-- **Space/industry:** Personal tooling / job search / data analytics workflow
-- **Project type:** Web app / internal tool (personal use, not SaaS)
+- **What this is:** A career opportunity mapping product for job-seeking data professionals. Scrapes and scores listings, then presents company-centred opportunity maps for daily review, and generates tailored resumes and cover letters for approved roles.
+- **Who it's for:** Job-seeking data professionals (Analytics Engineer, Data Engineer, Data Analyst, Product Analyst). Ghazal is the author and also a user. Daily review session, desktop-first.
+- **Space/industry:** Job search / data analytics workflow
+- **Project type:** Web app, multi-user
 - **Memorable thing:** "My personal intelligence layer" — every design decision should reinforce the feeling that this tool knows what matters and filters the noise. It surfaces signal, not volume.
 
 ## Aesthetic Direction
@@ -14,7 +14,7 @@
 - **Reference:** Approved Variant A mockup at `~/.gstack/projects/JobSearchautomation/designs/job-review-dashboard-20260528/variant-A.png`
 
 ## Typography
-- **Display/Hero/Scores:** JetBrains Mono — every number feels intentional; terminal precision
+- **Display/Hero/Data:** JetBrains Mono — every data point feels intentional; terminal precision. Note: match scores are never rendered — see Fit Band.
 - **Body/Descriptions:** Inter — readable at density without fatigue
 - **UI Labels/Headers/Chips:** JetBrains Mono, uppercase, letter-spacing 0.05–0.1em, muted color — feels like a terminal log, not a product label
 - **Code:** JetBrains Mono (already the primary)
@@ -25,7 +25,7 @@
   - base: 13px / 1.7 (body, descriptions)
   - md: 14px / 1.5 (row titles, primary list text)
   - lg: 20px / 1.3 (detail panel titles)
-  - xl: 22–32px / 1 (score numbers, hero data)
+  - xl: 22–32px / 1 (hero data, counts)
 
 ## Color
 - **Approach:** Restrained but semantically precise. Color is signal, not decoration.
@@ -41,7 +41,7 @@
 
 ### Accent System
 ```
---cyan:         #00D4FF   /* primary interactive: company names, score numbers, chips (matched), links */
+--cyan:         #00D4FF   /* primary interactive: company names, chips (matched), links */
 --cyan-dim:     rgba(0, 212, 255, 0.6)   /* secondary cyan: reviewed counts, muted interactives */
 --cyan-bg:      rgba(0, 212, 255, 0.08)  /* chip backgrounds for matched keywords */
 --cyan-border:  rgba(0, 212, 255, 0.25)  /* chip borders, badge borders */
@@ -49,9 +49,9 @@
 
 ### Semantic Colors
 ```
---green:        #00D9A3   /* approve, met requirement, high score (75+), Approve button */
---amber:        #F59E0B   /* partial match, medium score (60–74), consider */
---red:          #E05C5C   /* skip, missing skill, low score (<60), Skip button */
+--green:        #00D9A3   /* approve, met requirement, strong fit band, Approve button */
+--amber:        #F59E0B   /* partial match, partial fit band, consider */
+--red:          #E05C5C   /* skip, missing skill, stretch fit band, Skip button */
 ```
 
 ### Text Scale
@@ -64,10 +64,17 @@
 ### Dark Mode Strategy
 This is a dark-mode-only tool. There is no light mode. The dark palette IS the identity.
 
-### Score Color Logic
-- Score ≥ 75: `--green` (#00D9A3)
-- Score 60–74: `--amber` (#F59E0B)
-- Score < 60: `--red` (#E05C5C)
+### Fit Band Color Logic
+The numeric match score is internal and is never rendered. It maps to one of
+three bands, and the band is always accompanied by a reason sentence.
+
+- `strong fit`: `--green` (#00D9A3)
+- `partial fit`: `--amber` (#F59E0B)
+- `stretch`: `--red` (#E05C5C)
+
+A band shown without its reason sentence is a bug. When no job description was
+captured, the band renders in `--text-sec` with reduced-confidence wording
+rather than a colour that implies a verified skill match.
 
 ### Keyword Chip Color Logic
 - `chip-match` (keyword found in profile): cyan border + cyan text on `--cyan-bg`
@@ -96,7 +103,7 @@ This is a dark-mode-only tool. There is no light mode. The dark palette IS the i
 - **Filter bar:** 36px, toggles on Filter button click
 - **Max content width:** Full viewport (this is a full-screen tool, not a constrained-width content site)
 - **Border radius:**
-  - xs: 3px (chips, badges, score bars)
+  - xs: 3px (chips, badges, fit band pills)
   - sm: 4px (buttons, inputs, small controls)
   - md: 5px (primary action buttons)
   - none: rows, panels (no rounding on structural containers)
@@ -113,8 +120,13 @@ This is a dark-mode-only tool. There is no light mode. The dark palette IS the i
 
 ## Components
 
-### Score Bar
-Horizontal track, 4–6px height, `--border` background, color-coded fill, `border-radius: 2px`. Width = score percentage.
+### Fit Band
+Replaces the old score bar and score number. A small pill plus a reason line.
+
+- **Pill:** JetBrains Mono, 10px, uppercase, `letter-spacing: 0.05em`, `padding: 2px 8px`, `border-radius: 3px`. Band colour at 15% opacity background, 35% border, full-strength text. Label is one of `strong fit`, `partial fit`, `stretch`.
+- **Reason line:** Inter, 13px / 1.7, `--text-sec`, directly beneath the pill. One sentence, composed from matched evidence — named skills, seniority band, penalties that fired, location/work-mode fit.
+- **No bar, no percentage, no number.** Length of the reason is the only visual weight.
+- **Reduced confidence:** when no job description was captured, the pill uses `--text-muted` border and `--text-sec` text, and the reason states that the listing had no description.
 
 ### Keyword Chip
 JetBrains Mono, 10px, `letter-spacing: 0.03em`, `padding: 2px 7px`, `border-radius: 3px`, border 1px. Three types: match (cyan), partial (amber), missing (muted).
@@ -140,3 +152,6 @@ Cyan-tinted background (`rgba(0, 212, 255, 0.04)`), 36px height. Filter buttons:
 | 2026-05-28 | Dark mode only | Daily AM review tool. Reduces eye strain. Dark IS the identity, not a preference toggle. |
 | 2026-05-28 | Semantic color = semantic meaning | Cyan/green/amber/red carry fixed meanings (interactive/approve/consider/skip) everywhere. Color is signal, not decoration. |
 | 2026-05-28 | Matched keyword chips stay cyan even on skipped jobs | User should always understand the score, even when passing. Cognitive transparency. |
+| 2026-08-09 | Repositioned from solo personal tool to multi-user product | Ghazal remains a user but is no longer the only one. Anything tuned to one person (keyword weights) becomes per-user data. |
+| 2026-08-09 | Match score is internal; UI shows a fit band + reason sentence | A bare number invites false precision and cannot be argued with. The band gives scannable ordering; the sentence carries the evidence. Replaces the score bar and score number entirely. |
+| 2026-08-09 | Reason sentences are composed from scorer evidence, not written by the LLM | The LLM may phrase the sentence but must not invent the facts. Prevents plausible-sounding fiction in the one place the user places trust. |

@@ -238,6 +238,7 @@ def run_pipeline(config: dict) -> None:
     cat_order = {"Analytics Engineer": 0, "Data Engineer": 1,
                  "Data Analyst": 2, "Product Analyst": 3}
     rows: list[dict] = []
+    scored_jobs: list[dict] = []   # jobs + evidence, for the opportunity map
 
     run_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -247,6 +248,7 @@ def run_pipeline(config: dict) -> None:
         is_filtered = filt_r["verdict"] == "REJECT"
         s = scorer.score_job(job["title"], job["cat"], job["salary"], job["url"],
                              description=job.get("description", ""))
+        scored_jobs.append({**job, **s})
 
         row: dict = {
             # Columns 1-15 — same positions as original job_tracker_updater.py
@@ -258,7 +260,9 @@ def run_pipeline(config: dict) -> None:
             "Posting Date":       job["date"],
             "Apply Link":         job["url"],
             "Match Score":        s["match_score"],
-            "Interview Chance":   s["interview_chance"],
+            # Removed — was a hardcoded lookup table shown as a percentage.
+            # Column kept blank so existing tracker files stay aligned.
+            "Interview Chance":   "",
             "Recommended Resume": "",          # blank — kept for column alignment
             "Tailoring Needed":   s["tailoring"],
             "Application Status": "Filtered Out" if is_filtered else "New",
@@ -363,31 +367,37 @@ def run_pipeline(config: dict) -> None:
     print(f"\n  Tracker: {tracker_path}")
     print("=" * 62)
 
-    # ── Dashboard ──────────────────────────────────────────────────────────
-    # Combine existing + new rows so the dashboard shows the full tracker,
-    # not just today's additions.
-    all_rows = list(existing.values()) + rows
-    _launch_dashboard(all_rows, run_ts)
+    # ── Opportunity map ────────────────────────────────────────────────────
+    # Built from this run's jobs only — the map is a daily "today" view, not
+    # the full tracker history.
+    _launch_map(scored_jobs, shortlist_min)
 
 
-# ── Dashboard helper ──────────────────────────────────────────────────────────
-def _launch_dashboard(rows: list[dict], run_ts: str) -> None:
-    """Generate the job-review-dashboard.html and open it in the browser."""
-    from src.dashboard import generate, open_browser
+# ── Opportunity map helper ────────────────────────────────────────────────────
+def _launch_map(scored_jobs: list[dict], shortlist_min: int) -> None:
+    """Generate opportunity-map.html and open it in the browser."""
+    from src.dashboard import open_browser
+    from src.map_page import render
+    from src.opportunity import build_maps
 
-    template = (Path.home() / ".gstack/projects/JobSearchautomation/designs"
-                / "job-review-dashboard-20260528/finalized.html")
-    output   = _BASE.parent / "job-review-dashboard.html"
-
+    output = _BASE.parent / "opportunity-map.html"
     try:
-        generate(rows, template, output, run_ts)
-        print(f"\n  Dashboard: {output}")
+        # TODO: watched/hidden companies are not persisted yet — needs the
+        # user-action store before they can survive a run.
+        maps = build_maps(scored_jobs, shortlist_min=shortlist_min)
+        html = render(maps, meta={
+            "companies": len(maps),
+            "roles":     len(scored_jobs),
+            "scraped":   datetime.now().strftime("%H:%M"),
+        })
+        output.write_text(html, encoding="utf-8")
+        act_now = sum(1 for m in maps if m["state"] == "ACT_NOW")
+        print(f"\n  Opportunity map: {output}")
+        print(f"  {len(maps)} companies — {act_now} to act on now.")
         open_browser(output)
         print("  Opened in browser.")
-    except FileNotFoundError as e:
-        print(f"\n  Dashboard template not found — skipping browser launch.\n  ({e})")
     except Exception as e:
-        logger.warning("Dashboard generation failed: %s", e)
+        logger.warning("Opportunity map generation failed: %s", e)
 
 
 # ── Tailor one job ─────────────────────────────────────────────────────────────

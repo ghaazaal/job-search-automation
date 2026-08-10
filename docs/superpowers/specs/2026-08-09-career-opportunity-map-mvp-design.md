@@ -8,6 +8,8 @@ Help an actively job-seeking data professional identify and act on the strongest
 
 An Analytics Engineer, Data Engineer, Data Analyst, or Product Analyst who is actively seeking a role and wants a focused daily plan rather than a large, undifferentiated job list.
 
+This is a multi-user product. The author is also a user, but nothing may assume a single candidate — anything tuned to one person, keyword weights above all, is per-user data.
+
 ## Product promise
 
 After uploading a resume and confirming search preferences, the user sees a small set of explainable opportunity maps. Each map answers:
@@ -43,6 +45,20 @@ The map must never recommend a company, role, or person/role type without visibl
 
 ## Phase 1 scope
 
+Phase 1 contains three features that do not depend on each other. Ship them in
+sequence so each is testable on its own, rather than gating everything behind
+one release:
+
+1. **The map** — company entity, `ACT_NOW`/`WATCH`/`DISCOVER`, ranking, evidence.
+   Runs on data the existing pipeline already produces. Single user is fine here.
+2. **Multi-user shell** — resume upload, role confirmation, location and work
+   mode, per-user storage and per-user keyword weights.
+3. **People in context** — only after the map has real use. It introduces a new
+   entity and screen section to produce a public search query, which is the
+   least proven part of the product.
+
+Acceptance criteria below are grouped by which of the three they belong to.
+
 ### Candidate profile
 
 - Canonical resume PDF and extracted text.
@@ -58,8 +74,9 @@ The map must never recommend a company, role, or person/role type without visibl
 
 ### Role intelligence
 
-- Relevant open roles with title, company, location, source URL, posting date, description, salary when available, and 1–10 match score.
-- Visible explanation of matching skills, missing/risk signals, and work-mode/location fit.
+- Relevant open roles with title, company, location, source URL, posting date, description, and salary when available.
+- A fit band — `strong fit`, `partial fit`, or `stretch` — and a one-sentence reason. The underlying numeric score is internal and used only for ranking; it is never rendered.
+- The reason sentence is composed from evidence the scorer actually matched: named skills, seniority band, penalties that fired, and work-mode/location fit. An LLM may phrase it but must not introduce facts the scorer did not produce.
 - Existing resume-tailoring output remains available only after the user chooses to review a role.
 
 ### People in context
@@ -91,12 +108,14 @@ The map must never recommend a company, role, or person/role type without visibl
 
 1. Jobs come from the existing Indeed and LinkedIn Apify integrations.
 2. Duplicate jobs are collapsed with the existing URL and company/title fingerprint logic.
-3. A job match uses the existing configurable scoring model, enhanced with confirmed location and work-mode checks.
-4. A company becomes `ACT_NOW` when it has at least one non-hidden, location-compatible role whose score meets the configured shortlist threshold.
+3. A job match uses the existing configurable scoring model. Location and work-mode checks do not exist yet and are net-new work, not an enhancement — the scrapers currently hardcode remote/worldwide and the scorer has no notion of either.
+4. A company becomes `ACT_NOW` when it has at least one non-hidden, location-compatible role whose internal score meets the configured shortlist threshold.
 5. A company becomes `WATCH` when the user explicitly watches it, or when it had a relevant role but no longer has one during a later check.
 6. A company becomes `DISCOVER` when it is found from job data but does not yet meet the `ACT_NOW` threshold and the user has not watched it.
 7. The home screen ranks `ACT_NOW` maps above `WATCH`, then `DISCOVER`; within each state, it sorts by evidence-backed relevance and recency.
-8. Every score label must be accompanied by a concise explanation; a number alone is not sufficient.
+8. Never render a numeric score. The user sees a fit band and a reason sentence; a band shown without its reason is a bug.
+9. Do not present fabricated precision. `interview_chance` — a hardcoded lookup table rendered as a percentage — is removed and must not be reintroduced.
+10. Scoring keyword weights are tuned per candidate, so they are per-user data, not a single committed config file.
 
 ## Initial data model
 
@@ -104,7 +123,7 @@ The map must never recommend a company, role, or person/role type without visibl
 |---|---|
 | CandidateProfile | resume path, target roles, locations, work mode |
 | Company | id, name, website, careers URL, state, watch status, last checked |
-| Job | id, company id, title, description, location, source URL, posting date, score, explanation |
+| Job | id, company id, title, description, location, source URL, posting date, internal score, fit band, reason sentence, matched evidence |
 | OpportunityMap | candidate id, company id, optional job id, state, explanation, next action |
 | PersonResearchHint | opportunity-map id, role type, relationship explanation, public-search query |
 | UserAction | entity type, entity id, action, recorded timestamp |
@@ -121,7 +140,7 @@ Displays a compact ranked list of company-centered maps. Each map shows the user
 
 ### Role detail
 
-Shows the job description, score explanation, risk signals, source link, and application/tailoring actions.
+Shows the job description, fit band with its reason sentence, risk signals, source link, and application/tailoring actions.
 
 ### Company detail
 
@@ -149,10 +168,22 @@ Track for a private beta:
 
 ## Acceptance criteria
 
-1. A user can complete onboarding with a resume, target roles, location, and work mode.
-2. The product can generate an opportunity map from at least one successfully scraped job.
-3. An `ACT_NOW` map shows a source-linked job, a fit explanation, and an apply action.
-4. A user can watch a company and later see its last checked time and any newly found relevant role.
-5. A people-in-context hint contains a role type, relationship explanation, and a public-search action without storing contact details.
+**Ship 1 — the map**
+
+1. The product can generate an opportunity map from at least one successfully scraped job.
+2. An `ACT_NOW` map shows a source-linked job, a fit band with its reason sentence, and an apply action.
+3. No numeric score appears anywhere in the interface.
+4. A role with no captured job description shows reduced-confidence wording and does not claim a skill-level match.
+5. A user can watch a company and later see its last checked time and any newly found relevant role.
 6. A user can hide an unwanted recommendation.
-7. Automated tests cover scoring/state assignment, ranking, company watch behavior, and missing-source-data fallbacks.
+7. Automated tests cover band assignment, reason composition, state assignment, ranking, company watch behaviour, and missing-source-data fallbacks.
+
+**Ship 2 — multi-user shell**
+
+8. A user can complete onboarding with a resume, target roles, location, and work mode.
+9. Two users with different resumes receive different bands for the same job.
+10. Location and work-mode preferences visibly change which roles appear.
+
+**Ship 3 — people in context**
+
+11. A people-in-context hint contains a role type, relationship explanation, and a public-search action without storing contact details.

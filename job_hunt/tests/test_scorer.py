@@ -61,17 +61,6 @@ def test_seniority_exec_penalized(scorer):
     assert r_exec["match_score"] < r_senior["match_score"]
 
 
-def test_salary_parsing_in_interview_chance(scorer):
-    r_high_sal = scorer.score_job("Senior Analytics Engineer", "Analytics Engineer",
-                                   "$400,000", "https://example.com/job10")
-    r_normal = scorer.score_job("Senior Analytics Engineer", "Analytics Engineer",
-                                "$130,000", "https://example.com/job11")
-    # High salary slightly reduces interview chance base
-    hi = int(r_high_sal["interview_chance"].replace("%", ""))
-    lo = int(r_normal["interview_chance"].replace("%", ""))
-    assert hi <= lo
-
-
 def test_tailoring_field_returned(scorer):
     r = scorer.score_job("Analytics Engineer", "Analytics Engineer",
                          "", "https://example.com/job12")

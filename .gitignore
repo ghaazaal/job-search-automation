@@ -9,6 +9,8 @@ job_tracker_ghazal.xlsx
 # Generated design artifacts
 *.png
 job-review-dashboard.html
+opportunity-map.html
+opportunity-map-demo.html
 gen_dashboard.py
 render_variant_c.py
 

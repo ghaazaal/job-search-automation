@@ -108,6 +108,33 @@ skills:
   experimentation: 3
   skill_max: 20
 
+# Tools commonly named in data job posts. Used only to detect gaps — anything
+# here that appears in a description but is not among the matched `skills`
+# above is reported as "in the post, not on your resume".
+market_tools:
+  - snowflake
+  - databricks
+  - bigquery
+  - redshift
+  - looker
+  - spark
+  - kafka
+  - dagster
+  - prefect
+  - fivetran
+  - terraform
+  - kubernetes
+  - docker
+  - scala
+  - java
+  - "aws"
+  - "gcp"
+  - azure
+  - sigma
+  - segment
+  - snowpark
+  - airbyte
+
 penalties:
   "w2 only":   15
   clearance:   30

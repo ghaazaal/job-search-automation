@@ -1,10 +1,38 @@
 # Job Search Automation — Claude Code Instructions
 
 ## Project
-Personal job search automation tool for Ghazal (Analytics/Data Engineer).
-Scrapes Indeed + LinkedIn via Apify, scores listings, outputs styled Excel tracker.
-AI layer: resume tailoring, cover letter generation, company intelligence.
-Single user, Windows 11, Python + PowerShell environment.
+Career opportunity mapping product for job-seeking data professionals
+(Analytics Engineer, Data Engineer, Data Analyst, Product Analyst).
+Ghazal is both the author and a user — build for multiple users, not just her.
+
+Scrapes Indeed + LinkedIn via Apify, scores listings against the job
+description, and presents company-centred opportunity maps rather than a
+flat job list. AI layer: resume parsing, tailoring, cover letters.
+
+Dev environment: Windows 11, Python + PowerShell.
+
+Design spec: `docs/superpowers/specs/2026-08-09-career-opportunity-map-mvp-design.md`
+
+### Build order
+Phase 1 is three independent features. Ship them in sequence, not together:
+1. The map — company entity, ACT_NOW/WATCH/DISCOVER, ranking, evidence.
+   Runs on existing scrape data. Single user is fine here.
+2. Multi-user shell — resume upload, role confirmation, location + work
+   mode, per-user storage.
+3. People-in-context hints — only if phase 1 gets real use.
+
+## Scoring
+Never show a bare number to the user. Every recommendation is explained in
+one sentence built from evidence the scorer actually matched — named skills,
+seniority band, penalties that fired, location/work-mode fit.
+
+- The numeric score is internal, used for ranking only.
+- The reason sentence is composed from the scorer's breakdown. The LLM may
+  phrase it; it must not invent the facts.
+- Never state a skill-level match when no job description was captured —
+  use reduced-confidence wording instead.
+- Do not present fabricated precision. `interview_chance` was a hardcoded
+  lookup table rendered as a percentage; do not reintroduce that pattern.
 
 ## Design System
 Always read `DESIGN.md` before making any visual or UI decisions.
