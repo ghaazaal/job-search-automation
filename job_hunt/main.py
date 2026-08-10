@@ -396,7 +396,22 @@ def _persist_and_launch(scored_jobs: list[dict], scraped: int,
     finally:
         if conn is not None:
             conn.close()
-    _launch_map(scored_jobs, shortlist_min)
+
+
+def _serve(config: dict, port: int) -> None:
+    """Run the local app. Binds to localhost only."""
+    import webbrowser
+
+    from src.app import create_app
+
+    shortlist_min = config.get("tailoring", {}).get("shortlist_score", 7)
+    name = config.get("resume", {}).get("candidate_name") or "default"
+    app = create_app(user_name=name, shortlist_min=shortlist_min)
+    url = f"http://127.0.0.1:{port}/"
+    print(f"\n  Opportunity map: {url}")
+    print("  Ctrl-C to stop.")
+    webbrowser.open(url)
+    app.run(host="127.0.0.1", port=port, debug=False)
 
 
 def _launch_map(scored_jobs: list[dict], shortlist_min: int) -> None:
@@ -522,6 +537,10 @@ def main() -> None:
                         help="Tailor one job from a JD file")
     parser.add_argument("--jd", type=str, default="",
                         help="Path to job description .txt file (required with --tailor)")
+    parser.add_argument("--serve", action="store_true",
+                        help="Serve the app without scraping")
+    parser.add_argument("--port", type=int, default=5000,
+                        help="Port for the local app (default 5000)")
     args = parser.parse_args()
 
     if args.tailor:
@@ -529,8 +548,11 @@ def main() -> None:
             print("ERROR: --jd <file.txt> is required with --tailor")
             sys.exit(1)
         run_tailor(config, args.jd)
+    elif args.serve:
+        _serve(config, args.port)
     else:
         run_pipeline(config)
+        _serve(config, args.port)
 
 
 if __name__ == "__main__":
