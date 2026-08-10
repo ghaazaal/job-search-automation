@@ -40,7 +40,8 @@ def test_criterion_2_a_status_change_persists(env):
                        json={"status": "APPLIED"}).status_code == 200
     conn = connect(db)
     assert conn.execute(
-        "SELECT status FROM application").fetchone()["status"] == "APPLIED"
+        "SELECT status FROM application WHERE role_id = ?",
+        (role_id,)).fetchone()["status"] == "APPLIED"
     conn.close()
 
 
@@ -79,9 +80,13 @@ def test_criterion_8_an_invalid_status_is_refused(env):
 
 def test_criterion_9_no_score_in_any_response(env):
     client, _, role_id = env
-    client.post(f"/api/roles/{role_id}/status", json={"status": "SAVED"})
-    for path in ("/", "/activity"):
-        assert b"match_score" not in client.get(path).data
+    responses = [
+        client.post(f"/api/roles/{role_id}/status", json={"status": "SAVED"}),
+        client.get("/"),
+        client.get("/activity"),
+    ]
+    for r in responses:
+        assert b"match_score" not in r.data
 
 
 def test_criterion_10_a_missing_database_is_created_on_demand(tmp_path):
