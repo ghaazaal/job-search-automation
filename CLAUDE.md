@@ -47,6 +47,11 @@ Key tokens from DESIGN.md:
 - Dark mode only — no light mode toggle
 
 ## Finalized UI
-The job review dashboard HTML is at:
-`~/.gstack/projects/JobSearchautomation/designs/job-review-dashboard-20260528/finalized.html`
-Wire it to the Python backend by replacing the `JOBS` array with API output.
+The job-list dashboard (`job_hunt/src/dashboard.py`, the `JOBS`-array HTML
+file) is retired — superseded by the company-centred opportunity map.
+
+The live product is a local Flask app (`job_hunt/src/app.py`):
+`GET /` renders the opportunity map (`job_hunt/src/map_page.py`), `GET
+/activity` renders the in-flight application board
+(`job_hunt/src/activity_page.py`), both reading from the SQLite store
+(`job_hunt/src/store/`). Run it with `python main.py --serve`.
