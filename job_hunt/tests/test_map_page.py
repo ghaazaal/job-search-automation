@@ -137,3 +137,29 @@ def test_company_names_are_escaped():
     html = render([_map(name="<script>alert(1)</script>")])
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# ── Sections ──────────────────────────────────────────────────────────────────
+
+def test_earlier_section_gets_a_heading():
+    new = _map(name="Fresh Co")
+    new["section"] = "new"
+    old = _map(name="Older Co")
+    old["section"] = "earlier"
+    body = _body(render([new, old]))
+    assert "still here from earlier" in body
+    assert body.index("Fresh Co") < body.index("still here from earlier")
+    assert body.index("still here from earlier") < body.index("Older Co")
+
+
+def test_no_earlier_heading_when_nothing_is_earlier():
+    m = _map()
+    m["section"] = "new"
+    assert "still here from earlier" not in render([m])
+
+
+def test_maps_without_a_section_are_treated_as_new():
+    """Keeps the in-memory render path working before the store exists."""
+    body = _body(render([_map()]))
+    assert "Acme Analytics" in body
+    assert "still here from earlier" not in body

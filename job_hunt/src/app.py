@@ -38,8 +38,13 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             latest = conn.execute(
                 "SELECT MAX(id) AS i FROM run WHERE user_id = ?",
                 (user_id,)).fetchone()["i"]
+            tagged = (
+                [{**m, "section": "new"} for m in sections["new"]]
+                + [{**m, "section": "earlier"} for m in sections["earlier"]]
+                + [{**m, "section": "watching"} for m in sections["watching"]]
+            )
             html = render_map(
-                sections["new"] + sections["earlier"] + sections["watching"],
+                tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"])})

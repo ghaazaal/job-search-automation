@@ -142,6 +142,11 @@ def _role_meta(role: dict) -> str:
     return " · ".join(b for b in bits if b).upper()
 
 
+def _section_heading(label: str) -> str:
+    return (f'<div class="fold"><i></i><span>{_e(label)}</span>'
+            f'<i></i></div>')
+
+
 def _band_pill(role: dict) -> str:
     """Rule 2 — only emitted by callers that also emit the reason."""
     band = role.get("band")
@@ -340,19 +345,26 @@ def render(maps: list[dict], meta: dict | None = None) -> str:
         roles_seen = sum(len(m["roles"]) for m in listed)
         body.append(_quiet_header(roles_seen, unchecked))
 
-    visible = listed[:_LEAD_VISIBLE]
-    for i, m in enumerate(visible):
-        if not m.get("roles"):
-            continue
-        key = keys[id(m)]
-        body.append(_lead_card(m, key) if i == 0 and act_now
-                    else _compact_card(m, key))
+    fresh = [m for m in listed if m.get("section", "new") == "new"]
+    earlier = [m for m in listed if m.get("section") == "earlier"]
 
-    remaining = len(listed) - len(visible)
-    if remaining > 0:
-        noun = "COMPANY" if remaining == 1 else "COMPANIES"
-        body.append(f'<div class="fold"><i></i><span>{remaining} MORE {noun} '
-                    f'WITH OPEN ROLES</span><i></i></div>')
+    def _emit(group: list[dict], allow_lead: bool) -> None:
+        for i, m in enumerate(group[:_LEAD_VISIBLE]):
+            if not m.get("roles"):
+                continue
+            key = keys[id(m)]
+            body.append(_lead_card(m, key) if i == 0 and allow_lead and act_now
+                        else _compact_card(m, key))
+        left = len(group) - len(group[:_LEAD_VISIBLE])
+        if left > 0:
+            noun = "COMPANY" if left == 1 else "COMPANIES"
+            body.append(f'<div class="fold"><i></i><span>{left} MORE {noun} '
+                        f'WITH OPEN ROLES</span><i></i></div>')
+
+    _emit(fresh, allow_lead=True)
+    if earlier:
+        body.append(_section_heading("still here from earlier"))
+        _emit(earlier, allow_lead=False)
 
     n_co = meta.get("companies", len(maps))
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
