@@ -159,3 +159,37 @@ def test_unique_label_counts_up_around_collisions(conn, user_id):
 
 def test_unique_label_falls_back_when_the_filename_gives_nothing(conn, user_id):
     assert unique_label(conn, user_id, "") == "resume"
+
+
+def _run(conn, user_id) -> int:
+    conn.execute(
+        "INSERT INTO run (user_id, started_at, status) VALUES (?, ?, 'RUNNING')",
+        (user_id, "2026-08-11T06:40:00"))
+    return conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
+
+
+def _company(conn, user_id, name="Acme") -> int:
+    conn.execute(
+        """INSERT INTO company (user_id, name, fingerprint, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, '2026-08-11', '2026-08-11')""",
+        (user_id, name, name.lower()))
+    return conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
+
+
+def test_deleting_a_resume_nulls_its_attribution_on_roles_it_won(conn, user_id):
+    resume_id = _add(conn, user_id)
+    run_id = _run(conn, user_id)
+    company_id = _company(conn, user_id)
+    conn.execute(
+        """INSERT INTO role (user_id, company_id, title, url, url_normalised,
+               resume_id, first_seen_run_id, last_seen_run_id)
+           VALUES (?, ?, 'Analytics Engineer', 'https://x/won', 'https://x/won',
+                   ?, ?, ?)""",
+        (user_id, company_id, resume_id, run_id, run_id))
+    role_id = conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
+
+    delete_resume(conn, user_id, resume_id)
+
+    role = conn.execute("SELECT resume_id FROM role WHERE id = ?",
+                        (role_id,)).fetchone()
+    assert role["resume_id"] is None
