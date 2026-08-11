@@ -152,3 +152,28 @@ def test_band_may_be_null_but_not_arbitrary(conn):
                                      band, first_seen_run_id, last_seen_run_id)
                    VALUES (?, ?, 'T', 'https://x/3', 'https://x/3', 'GREAT', ?, ?)""",
                 (u, c, r, r))
+
+
+def test_invalid_resume_seniority_is_rejected(conn):
+    u = _user(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction(conn):
+            conn.execute(
+                """INSERT INTO resume (user_id, label, orig_filename, sha256,
+                       stored_path, extracted_text, seniority, created_at)
+                   VALUES (?, 'l', 'f.pdf', 's', 'p', 't', 'principal',
+                           '2026-08-11')""", (u,))
+
+
+def test_a_role_cannot_point_at_a_missing_resume(conn):
+    u = _user(conn)
+    r = _run(conn, u)
+    c = _company(conn, u)
+    with pytest.raises(sqlite3.IntegrityError):
+        with transaction(conn):
+            conn.execute(
+                """INSERT INTO role (user_id, company_id, title, url,
+                       url_normalised, resume_id,
+                       first_seen_run_id, last_seen_run_id)
+                   VALUES (?, ?, 'T', 'https://x/9', 'https://x/9', 4242, ?, ?)""",
+                (u, c, r, r))
