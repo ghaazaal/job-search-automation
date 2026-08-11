@@ -176,4 +176,44 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.get("/setup/confirm/<int:resume_id>")
+    def confirm_screen(resume_id: int):
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            resume = get_resume(conn, user_id, resume_id)
+            if resume is None:
+                return jsonify({"error": "not found"}), 404
+            profile = get_profile(conn, user_id)
+            # Where you live is asked once, on the first resume.
+            return render_confirm(resume, profile,
+                                  ask_location=not profile["setup_complete"])
+        finally:
+            conn.close()
+
+    @app.post("/api/resumes/<int:resume_id>")
+    def save_resume(resume_id: int):
+        payload = request.get_json(silent=True) or {}
+        label = str(payload.get("label") or "").strip().lower()[:40]
+        if not label:
+            return jsonify({"error": "A label is required."}), 400
+        conn = _conn()
+        try:
+            update_resume(
+                conn, _user(conn), resume_id, label=label,
+                target_roles=list(payload.get("target_roles") or []),
+                skills=list(payload.get("skills") or []),
+                seniority=str(payload.get("seniority") or "mid"),
+                is_active=bool(payload.get("is_active", True)))
+            return jsonify({"resume_id": resume_id})
+        except ValueError as bad:
+            return jsonify({"error": str(bad)}), 400
+        except LookupError:
+            return jsonify({"error": "not found"}), 404
+        except sqlite3.IntegrityError:
+            return jsonify(
+                {"error": "You already have a resume with that label."}), 409
+        finally:
+            conn.close()
+
     return app

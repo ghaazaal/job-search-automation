@@ -166,3 +166,71 @@ def test_a_failing_parse_still_stores_the_resume(db, tmp_path):
     conn.close()
     assert resume["target_roles"] == []
     assert resume["seniority"] is None
+
+
+def test_the_confirm_screen_shows_what_was_parsed(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    response = client.get(f"/setup/confirm/{resume_id}")
+    assert response.status_code == 200
+    body = response.data.decode("utf-8")
+    assert "BI Developer" in body
+    assert "Power BI" in body
+
+
+def test_the_first_resume_is_asked_where_you_live(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    body = client.get(f"/setup/confirm/{resume_id}").data.decode("utf-8")
+    assert 'id="location"' in body
+
+
+def test_a_missing_resume_is_a_404(client):
+    assert client.get("/setup/confirm/9999").status_code == 404
+
+
+def test_saving_edits_overwrites_roles_skills_and_seniority(client, db):
+    resume_id = _upload(client).get_json()["resume_id"]
+    response = client.post(f"/api/resumes/{resume_id}", json={
+        "label": "BI Dev",
+        "target_roles": [{"title": "BI Analyst", "aliases": []}],
+        "skills": [{"name": "SQL", "tier": "working", "aliases": []}],
+        "seniority": "mid"})
+    assert response.status_code == 200
+
+    from src.store.profile import get_resume
+    conn = connect(db)
+    resume = get_resume(conn, 1, resume_id)
+    conn.close()
+    assert resume["label"] == "bi dev"
+    assert resume["target_roles"] == [{"title": "BI Analyst", "aliases": []}]
+    assert resume["seniority"] == "mid"
+
+
+def test_saving_without_a_label_is_a_400(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    response = client.post(f"/api/resumes/{resume_id}", json={
+        "label": "  ", "target_roles": [], "skills": [], "seniority": "mid"})
+    assert response.status_code == 400
+
+
+def test_saving_an_unknown_seniority_is_a_400(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    response = client.post(f"/api/resumes/{resume_id}", json={
+        "label": "x", "target_roles": [], "skills": [],
+        "seniority": "grand wizard"})
+    assert response.status_code == 400
+
+
+def test_saving_a_missing_resume_is_a_404(client):
+    response = client.post("/api/resumes/9999", json={
+        "label": "x", "target_roles": [], "skills": [], "seniority": "mid"})
+    assert response.status_code == 404
+
+
+def test_reusing_another_resumes_label_is_a_409(client):
+    first = _upload(client, name="one.pdf").get_json()["resume_id"]
+    second = _upload(client, name="two.pdf",
+                     data=_OTHER_PDF).get_json()["resume_id"]
+    assert first != second
+    response = client.post(f"/api/resumes/{second}", json={
+        "label": "one", "target_roles": [], "skills": [], "seniority": "mid"})
+    assert response.status_code == 409
