@@ -17,6 +17,7 @@ render_variant_c.py
 # Tooling (local-only, not project config)
 .claude/
 .gstack/
+.worktrees/
 
 # Python
 __pycache__/
@@ -28,3 +29,6 @@ job_hunt/.env
 job_hunt/output/
 job_hunt/*.db
 job_hunt/.pytest_cache/
+
+# Uploaded resumes — personal data, never committed.
+job_hunt/data/
