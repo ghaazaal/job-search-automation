@@ -133,3 +133,156 @@ def render_upload(message: str = "") -> str:
         "Your resume decides what gets searched and what counts as a good "
         "fit. Nothing runs until it is in.",
         body, _UPLOAD_JS)
+
+
+_CONFIRM_JS = """
+let ROLES = __ROLES__;
+let SKILLS = __SKILLS__;
+const RESUME_ID = __RESUME_ID__;
+const ASK_LOCATION = __ASK_LOCATION__;
+
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+
+function drawRoles(){
+  document.getElementById('roles').innerHTML = ROLES.map(function(r,i){
+    return '<span class="chip">'+esc(r.title)
+      + '<button type="button" data-drop-role="'+i+'" title="remove">\\u00d7</button></span>';
+  }).join('') + '<input type="text" class="add" id="add-role" placeholder="add a role, then Enter">';
+}
+function drawSkills(){
+  document.getElementById('skills').innerHTML = SKILLS.map(function(s,i){
+    const core = s.tier === 'core';
+    return '<span class="chip'+(core?'':' chip-w')+'">'
+      + '<button type="button" data-tier="'+i+'" title="core or working">'
+      + (core?'\\u2605':'\\u2606')+'</button>'
+      + esc(s.name)
+      + '<button type="button" data-drop-skill="'+i+'" title="remove">\\u00d7</button></span>';
+  }).join('') + '<input type="text" class="add" id="add-skill" placeholder="add a skill, then Enter">';
+}
+document.addEventListener('click', function(e){
+  const dr = e.target.closest('[data-drop-role]');
+  if(dr){ ROLES.splice(parseInt(dr.dataset.dropRole,10),1); drawRoles(); return; }
+  const ds = e.target.closest('[data-drop-skill]');
+  if(ds){ SKILLS.splice(parseInt(ds.dataset.dropSkill,10),1); drawSkills(); return; }
+  const t = e.target.closest('[data-tier]');
+  if(t){ const s = SKILLS[parseInt(t.dataset.tier,10)];
+         s.tier = s.tier === 'core' ? 'working' : 'core'; drawSkills(); }
+});
+document.addEventListener('keydown', function(e){
+  if(e.key !== 'Enter') return;
+  if(e.target.id === 'add-role'){
+    e.preventDefault();
+    const v = e.target.value.trim();
+    if(v){ ROLES.push({title:v, aliases:[]}); drawRoles();
+           document.getElementById('add-role').focus(); }
+  }
+  if(e.target.id === 'add-skill'){
+    e.preventDefault();
+    const v = e.target.value.trim();
+    if(v){ SKILLS.push({name:v, tier:'core', aliases:[]}); drawSkills();
+           document.getElementById('add-skill').focus(); }
+  }
+});
+async function post(url, body){
+  const r = await fetch(url, {method:'POST',
+                              headers:{'Content-Type':'application/json'},
+                              body:JSON.stringify(body)});
+  if(r.ok) return null;
+  const data = await r.json().catch(function(){return {};});
+  return data.error || 'That did not save.';
+}
+document.getElementById('save').addEventListener('click', async function(){
+  const out = document.getElementById('msg');
+  out.className = 'note';
+  out.textContent = 'Saving...';
+  const chosen = document.querySelector('input[name=seniority]:checked');
+  let err = await post('/api/resumes/' + RESUME_ID, {
+    label: document.getElementById('label').value.trim(),
+    target_roles: ROLES,
+    skills: SKILLS,
+    seniority: chosen ? chosen.value : 'mid'});
+  if(!err && ASK_LOCATION){
+    const modes = Array.prototype.slice.call(
+      document.querySelectorAll('input[name=mode]:checked')
+    ).map(function(c){return c.value;});
+    err = await post('/api/profile', {
+      location: document.getElementById('location').value.trim(),
+      country: document.getElementById('country').value.trim(),
+      work_modes: modes});
+  }
+  if(err){ out.className = 'note err'; out.textContent = err; return; }
+  location.href = '/profile';
+});
+drawRoles();
+drawSkills();
+"""
+
+
+def _location_block(profile: dict) -> str:
+    modes = profile.get("work_modes") or ["remote"]
+    checks = "".join(
+        f'<label><input type="checkbox" name="mode" value="{mode}"'
+        f'{" checked" if mode in modes else ""}> {mode}</label>'
+        for mode in ("remote", "hybrid", "onsite"))
+    return (
+        '<div class="row"><span class="lab">WHERE</span>'
+        f'<input type="text" id="location" value="{_e(profile.get("location"))}"'
+        ' placeholder="Toronto, ON"></div>'
+        '<div class="row"><span class="lab">COUNTRY CODE</span>'
+        f'<input type="text" id="country" value="{_e(profile.get("country"))}"'
+        ' placeholder="ca"></div>'
+        '<div class="row"><span class="lab">WORK MODE</span>'
+        f'<div class="opts">{checks}</div></div>'
+    )
+
+
+def render_confirm(resume: dict, profile: dict, ask_location: bool) -> str:
+    """The screen where the scoring model gets authored.
+
+    `ask_location` is False for every resume after the first — where you live
+    is asked once, because it belongs to the person, not to the document.
+    """
+    parsed = bool(resume.get("target_roles") or resume.get("skills"))
+    warn = "" if parsed else (
+        '<div class="warn">We could not read this resume automatically. '
+        'Add your roles and skills below by hand — everything the tool does '
+        'next is built on them.</div>')
+
+    seniority = resume.get("seniority") or "mid"
+    radios = "".join(
+        f'<label><input type="radio" name="seniority" value="{band}"'
+        f'{" checked" if band == seniority else ""}> {band}</label>'
+        for band in ("junior", "mid", "senior", "exec"))
+
+    body = (
+        f'<div class="card">{warn}'
+        '<div class="row"><span class="lab">LABEL</span>'
+        f'<input type="text" id="label" value="{_e(resume.get("label"))}">'
+        '<div class="note">What you call this version of your resume.</div></div>'
+        '<div class="row"><span class="lab">TARGET ROLES</span>'
+        '<div class="chips" id="roles"></div>'
+        '<div class="note">These are the searches that get run.</div></div>'
+        '<div class="row"><span class="lab">YOUR SKILLS</span>'
+        '<div class="chips" id="skills"></div>'
+        '<div class="note">A filled star is a core skill — worth more when a '
+        'posting names it. Click a star to change it.</div></div>'
+        '<div class="row"><span class="lab">SENIORITY</span>'
+        f'<div class="opts">{radios}</div></div>'
+        f'{_location_block(profile) if ask_location else ""}'
+        '<div class="foot">'
+        '<button type="button" id="save" class="btn-p">SAVE THIS PROFILE</button>'
+        '<a class="btn-q" href="/profile">SKIP FOR NOW</a>'
+        '<span id="msg" class="note"></span></div></div>'
+    )
+
+    script = (_CONFIRM_JS
+              .replace("__ROLES__", _payload(resume.get("target_roles") or []))
+              .replace("__SKILLS__", _payload(resume.get("skills") or []))
+              .replace("__RESUME_ID__", str(int(resume["id"])))
+              .replace("__ASK_LOCATION__", "true" if ask_location else "false"))
+
+    return _shell(
+        "Confirm your profile", "we read your resume as...",
+        "Change anything that is wrong. Everything the tool does next is "
+        "built on this.",
+        body, script, nav='<a href="/profile">ALL RESUMES &rarr;</a>')
