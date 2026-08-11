@@ -1,0 +1,168 @@
+"""Tests for the setup routes in src/app.py.
+
+No network: the LLM is injected. The PDF is a real, minimal one so pdfminer
+does the extraction it will do in production.
+"""
+import io
+import json
+import re
+
+import pytest
+
+from src.app import create_app
+from src.store.db import connect
+from src.store.ingest import ensure_user
+from src.store.schema import init_db
+from tests.conftest import MockLLMClient
+
+# A handcrafted PDF with one line of text. pdfminer reads it without an xref.
+_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]"
+    b"/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj\n"
+    b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+    b"5 0 obj<</Length 62>>stream\n"
+    b"BT /F1 12 Tf 20 200 Td (Power BI and SQL and dbt) Tj ET\n"
+    b"endstream\nendobj\n"
+    b"trailer<</Root 1 0 R/Size 6>>\n"
+)
+
+# A different resume, for the tests that need two. The replacement is exactly
+# 24 bytes, the same as the text it replaces, so `/Length 62` stays honest.
+_OTHER_PDF = _PDF.replace(b"Power BI and SQL and dbt",
+                          b"Airflow and Python dbt..")
+assert len(_OTHER_PDF) == len(_PDF)
+
+
+def _visible(html: str) -> str:
+    """The document with its CSS and JS stripped — what a reader sees."""
+    return re.sub(r"<(style|script)\b.*?</\1>", "", html, flags=re.DOTALL)
+
+
+_PARSE_REPLY = json.dumps({
+    "target_roles": [{"title": "BI Developer", "aliases": ["bi engineer"]}],
+    "skills": [{"name": "Power BI", "tier": "core", "aliases": ["dax"]}],
+    "seniority": "senior",
+})
+
+
+@pytest.fixture
+def db(tmp_path):
+    path = tmp_path / "test.db"
+    conn = connect(path)
+    init_db(conn)
+    ensure_user(conn, "G")
+    conn.close()
+    return path
+
+
+@pytest.fixture
+def client(db, tmp_path):
+    app = create_app(db_path=db, user_name="G",
+                     data_root=tmp_path / "data",
+                     llm_factory=lambda: MockLLMClient(_PARSE_REPLY))
+    app.config.update(TESTING=True)
+    return app.test_client()
+
+
+def _upload(client, name="Ghazal BI.pdf", data=_PDF):
+    return client.post("/api/resumes",
+                       data={"resume": (io.BytesIO(data), name)},
+                       content_type="multipart/form-data")
+
+
+def test_the_setup_screen_renders(client):
+    response = client.get("/setup")
+    assert response.status_code == 200
+    assert b"YOUR RESUME" in response.data
+
+
+def test_uploading_a_pdf_returns_a_resume_id(client):
+    response = _upload(client)
+    assert response.status_code == 201
+    assert isinstance(response.get_json()["resume_id"], int)
+
+
+def test_uploading_stores_the_file_under_the_data_root(client, tmp_path):
+    _upload(client)
+    written = list((tmp_path / "data" / "resumes").rglob("*.pdf"))
+    assert len(written) == 1
+    assert written[0].read_bytes() == _PDF
+
+
+def test_uploading_runs_the_parse_and_saves_the_result(client, db):
+    resume_id = _upload(client).get_json()["resume_id"]
+    from src.store.profile import get_resume
+    conn = connect(db)
+    resume = get_resume(conn, 1, resume_id)
+    conn.close()
+    assert resume["seniority"] == "senior"
+    assert resume["target_roles"][0]["title"] == "BI Developer"
+    assert resume["skills"][0]["name"] == "Power BI"
+    assert "Power BI" in resume["extracted_text"]
+
+
+def test_the_label_comes_from_the_filename(client, db):
+    resume_id = _upload(client, name="Ghazal BI.pdf").get_json()["resume_id"]
+    from src.store.profile import get_resume
+    conn = connect(db)
+    label = get_resume(conn, 1, resume_id)["label"]
+    conn.close()
+    assert label == "ghazal bi"
+
+
+def test_a_second_file_with_the_same_name_gets_its_own_label(client, db):
+    _upload(client, name="resume.pdf", data=_PDF)
+    resume_id = _upload(client, name="resume.pdf",
+                        data=_OTHER_PDF).get_json()["resume_id"]
+    from src.store.profile import get_resume
+    conn = connect(db)
+    label = get_resume(conn, 1, resume_id)["label"]
+    conn.close()
+    assert label == "resume 2"
+
+
+def test_the_same_file_twice_is_refused(client):
+    _upload(client)
+    response = _upload(client, name="a different name.pdf")
+    assert response.status_code == 409
+    assert "already uploaded" in response.get_json()["error"]
+
+
+def test_a_non_pdf_is_refused_with_its_own_message(client):
+    response = _upload(client, name="resume.docx", data=b"PK\x03\x04zip")
+    assert response.status_code == 400
+    assert "not a PDF" in response.get_json()["error"]
+
+
+def test_an_oversized_pdf_is_refused_with_its_own_message(client):
+    response = _upload(client, data=_PDF + b"x" * (5 * 1024 * 1024))
+    assert response.status_code == 400
+    assert "5 MB" in response.get_json()["error"]
+
+
+def test_sending_no_file_is_a_400(client):
+    response = client.post("/api/resumes", data={},
+                           content_type="multipart/form-data")
+    assert response.status_code == 400
+
+
+def test_a_failing_parse_still_stores_the_resume(db, tmp_path):
+    """The confirm screen asks for the details by hand rather than 500ing."""
+    def _explode():
+        raise RuntimeError("no API key")
+
+    app = create_app(db_path=db, user_name="G", data_root=tmp_path / "data",
+                     llm_factory=_explode)
+    app.config.update(TESTING=True)
+    response = _upload(app.test_client())
+    assert response.status_code == 201
+
+    from src.store.profile import get_resume
+    conn = connect(db)
+    resume = get_resume(conn, 1, response.get_json()["resume_id"])
+    conn.close()
+    assert resume["target_roles"] == []
+    assert resume["seniority"] is None

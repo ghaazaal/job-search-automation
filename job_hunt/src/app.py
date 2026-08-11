@@ -3,24 +3,53 @@
 No SQL lives here. Routes call the store and hand read models to renderers.
 Binds to localhost only — this is a local application, not a service.
 """
+import logging
 import sqlite3
 from pathlib import Path
 
 from flask import Flask, jsonify, request
 
+from . import resume_intake as intake
 from .activity_page import render as render_activity
+from .agents.profile_parser import parse_profile
+from .llm.base import LLMClient
 from .map_page import render as render_map
+from .setup_page import render_confirm, render_profile, render_upload
 from .store.db import DEFAULT_PATH, connect
 from .store.ingest import ensure_user
+from .store.profile import (create_resume, delete_resume, get_profile,
+                            get_resume, list_resumes, resume_by_sha,
+                            set_profile, unique_label, update_resume)
 from .store.queries import activity_board, map_sections, mark_seen
 from .store.schema import init_db
 from .store.tracking import COMPANY_STATES, STATUSES, set_company_state, set_role_status
+from .utils.pdf import extract_text
+
+logger = logging.getLogger(__name__)
+
+# Uploaded resumes live next to the database, not in the source tree.
+DEFAULT_DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+
+
+def _default_llm() -> LLMClient:
+    """Build the configured client. Only called when a resume is uploaded."""
+    import yaml
+
+    from .llm.factory import get_client
+
+    config_path = Path(__file__).resolve().parent.parent / "config.yaml"
+    with open(config_path, encoding="utf-8") as handle:
+        return get_client(yaml.safe_load(handle))
 
 
 def create_app(db_path: Path | str = DEFAULT_PATH,
                user_name: str = "default",
-               shortlist_min: int = 7) -> Flask:
+               shortlist_min: int = 7,
+               data_root: Path | str = DEFAULT_DATA_ROOT,
+               llm_factory=None) -> Flask:
     app = Flask(__name__)
+    data_root = Path(data_root)
+    build_llm = llm_factory or _default_llm
 
     def _conn():
         conn = connect(db_path)
@@ -92,6 +121,58 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             # state is already validated above, so the only FK this can trip
             # is company_id referencing a company that doesn't exist.
             return jsonify({"error": "not found"}), 404
+        finally:
+            conn.close()
+
+    @app.get("/setup")
+    def setup_screen():
+        return render_upload()
+
+    @app.post("/api/resumes")
+    def add_resume():
+        upload = request.files.get("resume")
+        if upload is None:
+            return jsonify({"error": "No file was sent."}), 400
+        data = upload.read()
+        filename = upload.filename or ""
+        try:
+            intake.validate(filename, data)
+        except intake.UploadRejected as rejected:
+            return jsonify({"error": str(rejected)}), 400
+
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            sha256 = intake.digest(data)
+            if resume_by_sha(conn, user_id, sha256):
+                return jsonify(
+                    {"error": "You have already uploaded this resume."}), 409
+
+            stored_path = intake.store(data_root, user_id, sha256, data)
+            try:
+                text = extract_text(data_root / stored_path)
+            except Exception:
+                logger.exception("PDF text extraction failed")
+                return jsonify({"error": "That PDF could not be read. Try "
+                                         "exporting it again."}), 400
+
+            label = unique_label(conn, user_id, Path(filename).stem)
+            resume_id = create_resume(
+                conn, user_id, label=label, orig_filename=filename,
+                sha256=sha256, stored_path=stored_path, extracted_text=text)
+
+            # A parse failure must not lose the upload — the confirm screen
+            # asks for the roles and skills by hand instead.
+            try:
+                parsed = parse_profile(text, build_llm())
+            except Exception:
+                logger.exception("Resume parse failed for resume %s", resume_id)
+            else:
+                update_resume(conn, user_id, resume_id, label=label,
+                              target_roles=parsed["target_roles"],
+                              skills=parsed["skills"],
+                              seniority=parsed["seniority"])
+            return jsonify({"resume_id": resume_id}), 201
         finally:
             conn.close()
 
