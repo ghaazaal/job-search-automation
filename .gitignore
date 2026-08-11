@@ -17,6 +17,7 @@ render_variant_c.py
 # Tooling (local-only, not project config)
 .claude/
 .gstack/
+.worktrees/
 
 # Python
 __pycache__/
