@@ -197,12 +197,16 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         label = str(payload.get("label") or "").strip().lower()[:40]
         if not label:
             return jsonify({"error": "A label is required."}), 400
+        roles_raw = payload.get("target_roles")
+        skills_raw = payload.get("skills")
+        target_roles = roles_raw if isinstance(roles_raw, list) else []
+        skills = skills_raw if isinstance(skills_raw, list) else []
         conn = _conn()
         try:
             update_resume(
                 conn, _user(conn), resume_id, label=label,
-                target_roles=list(payload.get("target_roles") or []),
-                skills=list(payload.get("skills") or []),
+                target_roles=target_roles,
+                skills=skills,
                 seniority=str(payload.get("seniority") or "mid"),
                 is_active=bool(payload.get("is_active", True)))
             return jsonify({"resume_id": resume_id})

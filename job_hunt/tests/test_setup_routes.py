@@ -234,3 +234,17 @@ def test_reusing_another_resumes_label_is_a_409(client):
     response = client.post(f"/api/resumes/{second}", json={
         "label": "one", "target_roles": [], "skills": [], "seniority": "mid"})
     assert response.status_code == 409
+
+
+def test_a_non_list_target_roles_is_treated_as_empty_not_a_500(client, db):
+    """A malformed payload degrades gracefully instead of crashing list()."""
+    resume_id = _upload(client).get_json()["resume_id"]
+    response = client.post(f"/api/resumes/{resume_id}", json={
+        "label": "x", "target_roles": 5, "skills": [], "seniority": "mid"})
+    assert response.status_code == 200
+
+    from src.store.profile import get_resume
+    conn = connect(db)
+    resume = get_resume(conn, 1, resume_id)
+    conn.close()
+    assert resume["target_roles"] == []
