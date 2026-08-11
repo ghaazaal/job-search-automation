@@ -49,3 +49,11 @@ def test_at_least_one_work_mode_is_required(conn, user_id):
 def test_the_profile_of_a_missing_user_raises(conn):
     with pytest.raises(ValueError, match="no user"):
         get_profile(conn, 9999)
+
+
+def test_none_location_and_country_are_treated_as_empty_strings(conn, user_id):
+    set_profile(conn, user_id, location=None, country=None,
+                work_modes=["remote"])
+    assert get_profile(conn, user_id) == {
+        "location": "", "country": "",
+        "work_modes": ["remote"], "setup_complete": True}

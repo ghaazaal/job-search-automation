@@ -43,6 +43,9 @@ def set_profile(conn: sqlite3.Connection, user_id: int, *,
     Validation happens before the transaction opens so a bad value never
     starts a write.
     """
+    location = str(location or "")
+    country = str(country or "")
+
     unknown = [m for m in work_modes if m not in WORK_MODES]
     if unknown:
         raise ValueError(f"unknown work mode: {unknown[0]!r}")
