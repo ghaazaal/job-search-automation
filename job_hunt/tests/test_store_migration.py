@@ -108,3 +108,33 @@ def test_existing_users_default_to_setup_incomplete(tmp_path):
                        "FROM user").fetchone()
     assert row["s"] == 0
     assert row["l"] is None
+
+
+def test_a_database_ahead_of_this_code_keeps_its_version(tmp_path):
+    """A database already migrated by newer code (plausible across
+    worktrees/branches) must not be silently downgraded. The table shape is
+    untouched and still newer than what this code knows how to write —
+    dragging the stored version number down would make the next run of the
+    newer code replay ALTERs against columns that already exist."""
+    conn = connect(tmp_path / "ahead.db")
+    init_db(conn)
+    conn.execute("PRAGMA user_version = 99")
+    init_db(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 99
+
+
+def test_migration_survives_a_crash_between_create_and_version_stamp(tmp_path):
+    """`executescript` autocommits each CREATE TABLE as it runs, so a
+    process killed after the tables are created but before the final
+    PRAGMA user_version write leaves a fully-shaped table sitting behind a
+    stale (pre-migration) version number. Re-running init_db against that
+    state must not try to add columns that already exist."""
+    from src.store.schema import _DDL
+
+    conn = connect(tmp_path / "crashed.db")
+    conn.executescript(_DDL)  # simulate the fresh-create having completed
+    # PRAGMA user_version defaults to 0 — never stamped, as if killed here.
+
+    init_db(conn)  # must not raise "duplicate column name"
+
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION

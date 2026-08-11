@@ -125,16 +125,25 @@ CREATE INDEX IF NOT EXISTS idx_resume_user ON resume(user_id, is_active);
 # defaults to NULL, and allows NOT NULL only with a non-null default. Both
 # rules are already satisfied below; changing a default here can break the
 # migration on a populated database.
-_MIGRATIONS: dict[int, tuple[str, ...]] = {
+#
+# Entries are (table, column, ddl) rather than bare SQL strings so each
+# statement can check for its own column before running — see
+# `_add_column_if_missing`. That check is what makes a migration safe to
+# replay against a database whose CREATE TABLE already has the column but
+# whose `user_version` hasn't caught up yet (see `init_db`'s docstring).
+_MIGRATIONS: dict[int, tuple[tuple[str, str, str], ...]] = {
     2: (
-        "ALTER TABLE user ADD COLUMN location TEXT",
-        "ALTER TABLE user ADD COLUMN country TEXT",
-        "ALTER TABLE user ADD COLUMN work_modes TEXT",
-        "ALTER TABLE user ADD COLUMN setup_complete INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE role ADD COLUMN resume_id INTEGER REFERENCES resume(id)",
-        "ALTER TABLE run ADD COLUMN stage TEXT",
-        "ALTER TABLE run ADD COLUMN progress TEXT NOT NULL DEFAULT '{}'",
-        "ALTER TABLE run ADD COLUMN error TEXT",
+        ("user", "location", "ALTER TABLE user ADD COLUMN location TEXT"),
+        ("user", "country", "ALTER TABLE user ADD COLUMN country TEXT"),
+        ("user", "work_modes", "ALTER TABLE user ADD COLUMN work_modes TEXT"),
+        ("user", "setup_complete",
+         "ALTER TABLE user ADD COLUMN setup_complete INTEGER NOT NULL DEFAULT 0"),
+        ("role", "resume_id",
+         "ALTER TABLE role ADD COLUMN resume_id INTEGER REFERENCES resume(id)"),
+        ("run", "stage", "ALTER TABLE run ADD COLUMN stage TEXT"),
+        ("run", "progress",
+         "ALTER TABLE run ADD COLUMN progress TEXT NOT NULL DEFAULT '{}'"),
+        ("run", "error", "ALTER TABLE run ADD COLUMN error TEXT"),
     ),
 }
 
@@ -149,6 +158,26 @@ def _is_fresh(conn: sqlite3.Connection) -> bool:
     return conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='user'"
     ).fetchone() is None
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str,
+                            ddl: str) -> None:
+    """Run an ADD COLUMN statement unless the column is already there.
+
+    `_DDL` always describes the current (post-migration) shape of every
+    table. `executescript` autocommits each statement as it runs, so a
+    process killed partway through a fresh CREATE TABLE run can leave a
+    table that already has every v2 column while `user_version` still reads
+    0 or 1 — the version counter and the actual table shape can disagree.
+    Checking the column directly, instead of trusting the counter, is what
+    makes replaying a migration after that kind of crash safe.
+    """
+    if column not in _columns(conn, table):
+        conn.execute(ddl)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -166,7 +195,14 @@ def init_db(conn: sqlite3.Connection) -> None:
     if not fresh and version < SCHEMA_VERSION:
         with transaction(conn):
             for target in range(version + 1, SCHEMA_VERSION + 1):
-                for statement in _MIGRATIONS.get(target, ()):
-                    conn.execute(statement)
+                for table, column, ddl in _MIGRATIONS.get(target, ()):
+                    _add_column_if_missing(conn, table, column, ddl)
 
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    # A database already migrated by newer code (version > SCHEMA_VERSION,
+    # plausible across worktrees/branches during development) must not have
+    # its stored version number dragged back down — the table shape here is
+    # untouched and still newer than what this code knows how to write. That
+    # would make the next run of the newer code see a stale low version and
+    # replay ALTERs against columns that already exist.
+    if fresh or version <= SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
