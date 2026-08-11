@@ -358,6 +358,7 @@ def test_the_confirm_screen_leaks_no_score(client):
 def test_no_json_response_leaks_a_score(client):
     resume_id = _upload(client).get_json()["resume_id"]
     responses = [
+        _upload(client, name="second.pdf", data=_OTHER_PDF),
         client.post(f"/api/resumes/{resume_id}", json={
             "label": "x", "target_roles": [], "skills": [], "seniority": "mid"}),
         client.post("/api/profile", json={"location": "T", "country": "ca",
