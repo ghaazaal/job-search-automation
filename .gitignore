@@ -29,3 +29,6 @@ job_hunt/.env
 job_hunt/output/
 job_hunt/*.db
 job_hunt/.pytest_cache/
+
+# Uploaded resumes — personal data, never committed.
+job_hunt/data/

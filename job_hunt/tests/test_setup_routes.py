@@ -332,3 +332,47 @@ def test_the_profile_screen_shows_the_saved_location(client):
     body = client.get("/profile").data.decode("utf-8")
     assert "Toronto, ON" in body
     assert "remote, hybrid" in body
+
+
+_NEW_ROUTES = ["/setup", "/profile"]
+
+
+def test_no_new_screen_leaks_a_score(client):
+    """CLAUDE.md: the numeric score is internal. No new route may emit it,
+    and no new route may render a bare percentage."""
+    _upload(client)
+    for route in _NEW_ROUTES:
+        body = _visible(client.get(route).data.decode("utf-8"))
+        assert "match_score" not in body, route
+        assert "%" not in body, route
+
+
+def test_the_confirm_screen_leaks_no_score(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    body = _visible(
+        client.get(f"/setup/confirm/{resume_id}").data.decode("utf-8"))
+    assert "match_score" not in body
+    assert "%" not in body
+
+
+def test_no_json_response_leaks_a_score(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    responses = [
+        client.post(f"/api/resumes/{resume_id}", json={
+            "label": "x", "target_roles": [], "skills": [], "seniority": "mid"}),
+        client.post("/api/profile", json={"location": "T", "country": "ca",
+                                          "work_modes": ["remote"]}),
+        client.delete(f"/api/resumes/{resume_id}"),
+    ]
+    for response in responses:
+        body = response.data.decode("utf-8")
+        assert "match_score" not in body
+        assert "%" not in body
+
+
+def test_the_extracted_text_never_reaches_a_screen(client):
+    """A whole resume rendered into a page is a lot of personal data on
+    screen for no reason. Only the parsed profile is shown."""
+    _upload(client)
+    for route in _NEW_ROUTES:
+        assert b"Power BI and SQL and dbt" not in client.get(route).data
