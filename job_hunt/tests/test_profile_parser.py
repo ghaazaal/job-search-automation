@@ -83,6 +83,23 @@ def test_the_lists_are_capped():
     assert len(result["skills"]) == 20
 
 
+def test_a_dict_instead_of_a_list_produces_no_bogus_entries():
+    """A dict's keys must not get promoted into fabricated role/skill entries."""
+    reply = json.dumps({"target_roles": {"weird": "shape"},
+                        "skills": {"also": "weird"}, "seniority": "mid"})
+    result = parse_profile("x", MockLLMClient(reply))
+    assert result["target_roles"] == []
+    assert result["skills"] == []
+
+
+def test_a_scalar_instead_of_a_list_does_not_raise_type_error():
+    """parse_profile's documented contract is ValueError, never TypeError."""
+    reply = json.dumps({"target_roles": 5, "skills": 5, "seniority": "mid"})
+    result = parse_profile("x", MockLLMClient(reply))
+    assert result["target_roles"] == []
+    assert result["skills"] == []
+
+
 def test_a_reply_with_no_json_raises():
     with pytest.raises(ValueError, match="no JSON"):
         parse_profile("x", MockLLMClient("I cannot help with that."))

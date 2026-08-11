@@ -63,8 +63,9 @@ def _strings(value) -> list[str]:
 
 
 def _normalise(raw: dict) -> dict:
+    roles_raw = raw.get("target_roles")
     roles: list[dict] = []
-    for item in raw.get("target_roles") or []:
+    for item in (roles_raw if isinstance(roles_raw, list) else []):
         if isinstance(item, str):
             item = {"title": item}
         if not isinstance(item, dict):
@@ -73,8 +74,9 @@ def _normalise(raw: dict) -> dict:
         if title:
             roles.append({"title": title, "aliases": _strings(item.get("aliases"))})
 
+    skills_raw = raw.get("skills")
     skills: list[dict] = []
-    for item in raw.get("skills") or []:
+    for item in (skills_raw if isinstance(skills_raw, list) else []):
         if isinstance(item, str):
             item = {"name": item}
         if not isinstance(item, dict):
