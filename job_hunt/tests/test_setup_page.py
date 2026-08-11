@@ -106,3 +106,48 @@ def test_a_hostile_skill_name_cannot_break_out_of_the_script_block():
         {"name": "</script><script>alert(1)</script>", "tier": "core", "aliases": []}]}
     html = render_confirm(evil, _EMPTY_PROFILE, ask_location=True)
     assert "</script><script>alert(1)</script>" not in html
+
+
+from src.setup_page import render_profile
+
+_RESUMES = [
+    {"id": 1, "label": "bi developer", "seniority": "senior", "is_active": True,
+     "target_roles": [{"title": "BI Developer", "aliases": []}],
+     "skills": [{"name": "Power BI", "tier": "core", "aliases": []}]},
+    {"id": 2, "label": "data engineer", "seniority": "mid", "is_active": False,
+     "target_roles": [], "skills": []},
+]
+
+
+def test_the_profile_screen_lists_every_resume():
+    html = render_profile(_RESUMES, _SET_PROFILE)
+    assert "bi developer" in html
+    assert "data engineer" in html
+
+
+def test_an_inactive_resume_is_marked():
+    assert "INACTIVE" in render_profile(_RESUMES, _SET_PROFILE)
+
+
+def test_each_resume_links_to_its_confirm_screen():
+    html = render_profile(_RESUMES, _SET_PROFILE)
+    assert 'href="/setup/confirm/1"' in html
+    assert 'data-delete="2"' in html
+
+
+def test_the_profile_screen_shows_where_you_are_looking():
+    html = render_profile(_RESUMES, _SET_PROFILE)
+    assert "Toronto, ON" in html
+    assert "remote" in html
+
+
+def test_with_no_resumes_it_points_at_the_upload_screen():
+    html = render_profile([], _EMPTY_PROFILE)
+    assert "No resumes yet" in html
+    assert 'href="/setup"' in html
+
+
+def test_the_profile_screen_never_shows_a_score():
+    html = _visible(render_profile(_RESUMES, _SET_PROFILE))
+    assert "match_score" not in html
+    assert "%" not in html

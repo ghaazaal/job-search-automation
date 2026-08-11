@@ -288,3 +288,54 @@ def render_confirm(resume: dict, profile: dict, ask_location: bool) -> str:
         "Change anything that is wrong. Everything the tool does next is "
         "built on this.",
         body, script, nav='<a href="/profile">ALL RESUMES &rarr;</a>')
+
+
+_PROFILE_JS = """
+document.addEventListener('click', async function(e){
+  const d = e.target.closest('[data-delete]');
+  if(!d) return;
+  if(!confirm('Delete this resume? Roles it already scored keep their scores.')) return;
+  const r = await fetch('/api/resumes/' + d.dataset.delete, {method:'DELETE'});
+  if(r.ok){ location.reload(); } else { alert('That did not delete.'); }
+});
+"""
+
+
+def _resume_item(resume: dict) -> str:
+    active = resume.get("is_active")
+    inactive_meta = "" if active else " &middot; INACTIVE"
+    return (
+        f'<div class="ritem{"" if active else " off"}">'
+        f'<div class="rname">{_e(resume["label"])}</div>'
+        f'<div class="rmeta">{len(resume.get("target_roles") or [])} ROLES '
+        f'&middot; {len(resume.get("skills") or [])} SKILLS &middot; '
+        f'{_e((resume.get("seniority") or "unset").upper())}{inactive_meta}</div>'
+        f'<a class="btn-q" href="/setup/confirm/{int(resume["id"])}">EDIT</a>'
+        f'<button type="button" class="btn-q" data-delete="{int(resume["id"])}">'
+        'DELETE</button></div>'
+    )
+
+
+def render_profile(resumes: list[dict], profile: dict) -> str:
+    """One person, many resumes. Each active one adds its roles to the search."""
+    if resumes:
+        listing = (f'<div class="rlist">'
+                   f'{"".join(_resume_item(r) for r in resumes)}</div>')
+    else:
+        listing = ('<div class="note">No resumes yet. '
+                   '<a href="/setup">Add one</a>.</div>')
+
+    where = profile.get("location") or "not set"
+    modes = ", ".join(profile.get("work_modes") or []) or "not set"
+    body = (
+        f'<div class="card"><span class="lab">YOUR RESUMES</span>{listing}'
+        '<div class="foot"><a class="btn-p" href="/setup">ADD A RESUME</a>'
+        '</div></div>'
+        '<div class="card"><span class="lab">WHERE YOU ARE LOOKING</span>'
+        f'<div class="note">{_e(where)} &middot; {_e(modes)}</div></div>'
+    )
+    return _shell(
+        "Your profile", "your profile",
+        "One person, many resumes. Each active resume adds its target roles "
+        "to the search.",
+        body, _PROFILE_JS, nav='<a href="/">&larr; BACK TO MAP</a>')
