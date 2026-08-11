@@ -220,4 +220,33 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.delete("/api/resumes/<int:resume_id>")
+    def remove_resume(resume_id: int):
+        conn = _conn()
+        try:
+            stored_path = delete_resume(conn, _user(conn), resume_id)
+            if stored_path is None:
+                return jsonify({"error": "not found"}), 404
+            (data_root / stored_path).unlink(missing_ok=True)
+            return jsonify({"resume_id": resume_id, "deleted": True})
+        finally:
+            conn.close()
+
+    @app.post("/api/profile")
+    def save_profile():
+        payload = request.get_json(silent=True) or {}
+        modes_raw = payload.get("work_modes")
+        work_modes = modes_raw if isinstance(modes_raw, list) else []
+        conn = _conn()
+        try:
+            set_profile(conn, _user(conn),
+                        location=str(payload.get("location") or ""),
+                        country=str(payload.get("country") or ""),
+                        work_modes=work_modes)
+            return jsonify({"saved": True})
+        except ValueError as bad:
+            return jsonify({"error": str(bad)}), 400
+        finally:
+            conn.close()
+
     return app

@@ -248,3 +248,65 @@ def test_a_non_list_target_roles_is_treated_as_empty_not_a_500(client, db):
     resume = get_resume(conn, 1, resume_id)
     conn.close()
     assert resume["target_roles"] == []
+
+
+def test_deleting_a_resume_removes_the_row_and_the_file(client, db, tmp_path):
+    resume_id = _upload(client).get_json()["resume_id"]
+    assert list((tmp_path / "data" / "resumes").rglob("*.pdf"))
+
+    response = client.delete(f"/api/resumes/{resume_id}")
+    assert response.status_code == 200
+
+    from src.store.profile import get_resume
+    conn = connect(db)
+    assert get_resume(conn, 1, resume_id) is None
+    conn.close()
+    assert not list((tmp_path / "data" / "resumes").rglob("*.pdf"))
+
+
+def test_deleting_a_missing_resume_is_a_404(client):
+    assert client.delete("/api/resumes/9999").status_code == 404
+
+
+def test_saving_the_profile_records_location_and_work_modes(client, db):
+    response = client.post("/api/profile", json={
+        "location": "Toronto, ON", "country": "CA",
+        "work_modes": ["remote", "hybrid"]})
+    assert response.status_code == 200
+
+    from src.store.profile import get_profile as read
+    conn = connect(db)
+    profile = read(conn, 1)
+    conn.close()
+    assert profile == {"location": "Toronto, ON", "country": "ca",
+                       "work_modes": ["remote", "hybrid"],
+                       "setup_complete": True}
+
+
+def test_saving_the_profile_with_no_work_mode_is_a_400(client):
+    response = client.post("/api/profile", json={
+        "location": "Toronto", "country": "ca", "work_modes": []})
+    assert response.status_code == 400
+
+
+def test_saving_the_profile_with_an_unknown_work_mode_is_a_400(client):
+    response = client.post("/api/profile", json={
+        "location": "Toronto", "country": "ca", "work_modes": ["telepathic"]})
+    assert response.status_code == 400
+
+
+def test_a_non_list_work_modes_is_a_400_not_a_500(client):
+    """Same malformed-payload class as target_roles: degrade, don't crash."""
+    response = client.post("/api/profile", json={
+        "location": "Toronto", "country": "ca", "work_modes": 5})
+    assert response.status_code == 400
+
+
+def test_a_second_resume_is_not_asked_where_you_live_again(client):
+    client.post("/api/profile", json={"location": "Toronto, ON",
+                                      "country": "ca",
+                                      "work_modes": ["remote"]})
+    resume_id = _upload(client, name="second.pdf",
+                        data=_OTHER_PDF).get_json()["resume_id"]
+    body = client.get(f"/setup/confirm/{resume_id}").data.decode("utf-8")
+    assert 'id="location"' not in body
