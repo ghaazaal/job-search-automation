@@ -310,3 +310,25 @@ def test_a_second_resume_is_not_asked_where_you_live_again(client):
                         data=_OTHER_PDF).get_json()["resume_id"]
     body = client.get(f"/setup/confirm/{resume_id}").data.decode("utf-8")
     assert 'id="location"' not in body
+
+
+def test_the_profile_screen_lists_the_uploaded_resume(client):
+    _upload(client, name="Ghazal BI.pdf")
+    response = client.get("/profile")
+    assert response.status_code == 200
+    assert b"ghazal bi" in response.data
+
+
+def test_the_profile_screen_works_before_anything_is_uploaded(client):
+    response = client.get("/profile")
+    assert response.status_code == 200
+    assert b"No resumes yet" in response.data
+
+
+def test_the_profile_screen_shows_the_saved_location(client):
+    client.post("/api/profile", json={"location": "Toronto, ON",
+                                      "country": "ca",
+                                      "work_modes": ["remote", "hybrid"]})
+    body = client.get("/profile").data.decode("utf-8")
+    assert "Toronto, ON" in body
+    assert "remote, hybrid" in body

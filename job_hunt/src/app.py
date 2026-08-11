@@ -249,4 +249,14 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.get("/profile")
+    def profile_screen():
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            return render_profile(list_resumes(conn, user_id),
+                                  get_profile(conn, user_id))
+        finally:
+            conn.close()
+
     return app
