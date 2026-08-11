@@ -99,3 +99,10 @@ def test_the_confirm_screen_never_shows_a_score():
     html = _visible(render_confirm(_RESUME, _EMPTY_PROFILE, ask_location=True))
     assert "match_score" not in html
     assert "%" not in html
+
+
+def test_a_hostile_skill_name_cannot_break_out_of_the_script_block():
+    evil = {**_RESUME, "skills": [
+        {"name": "</script><script>alert(1)</script>", "tier": "core", "aliases": []}]}
+    html = render_confirm(evil, _EMPTY_PROFILE, ask_location=True)
+    assert "</script><script>alert(1)</script>" not in html

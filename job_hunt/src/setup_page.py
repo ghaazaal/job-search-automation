@@ -201,6 +201,8 @@ document.getElementById('save').addEventListener('click', async function(){
     target_roles: ROLES,
     skills: SKILLS,
     seniority: chosen ? chosen.value : 'mid'});
+  // If the resume save above succeeds but this profile save fails, the user
+  // only sees the profile error — known Ship-1 limitation, not addressed here.
   if(!err && ASK_LOCATION){
     const modes = Array.prototype.slice.call(
       document.querySelectorAll('input[name=mode]:checked')
