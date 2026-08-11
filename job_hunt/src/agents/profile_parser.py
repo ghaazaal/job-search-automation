@@ -13,8 +13,8 @@ import json
 import re
 
 from ..llm.base import LLMClient
+from ..store.profile import SENIORITIES
 
-SENIORITIES = ("junior", "mid", "senior", "exec")
 TIERS = ("core", "working")
 
 MAX_ROLES = 5

@@ -12,6 +12,8 @@ proofread, and it is the model's job to get them roughly right.
 import json
 from html import escape
 
+from .store.profile import WORK_MODES
+
 _CSS = """
 *{box-sizing:border-box}
 html,body{margin:0;background:#F7F2E6}
@@ -225,7 +227,7 @@ def _location_block(profile: dict) -> str:
     checks = "".join(
         f'<label><input type="checkbox" name="mode" value="{mode}"'
         f'{" checked" if mode in modes else ""}> {mode}</label>'
-        for mode in ("remote", "hybrid", "onsite"))
+        for mode in WORK_MODES)
     return (
         '<div class="row"><span class="lab">WHERE</span>'
         f'<input type="text" id="location" value="{_e(profile.get("location"))}"'

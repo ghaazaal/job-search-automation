@@ -143,6 +143,12 @@ def test_an_oversized_pdf_is_refused_with_its_own_message(client):
     assert "5 MB" in response.get_json()["error"]
 
 
+def test_a_request_body_far_over_the_cap_is_rejected_by_flask_itself(client):
+    huge = _PDF + b"x" * (21 * 1024 * 1024)
+    response = _upload(client, data=huge)
+    assert response.status_code == 413
+
+
 def test_sending_no_file_is_a_400(client):
     response = client.post("/api/resumes", data={},
                            content_type="multipart/form-data")

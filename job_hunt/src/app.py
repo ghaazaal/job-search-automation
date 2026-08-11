@@ -48,6 +48,17 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                data_root: Path | str = DEFAULT_DATA_ROOT,
                llm_factory=None) -> Flask:
     app = Flask(__name__)
+
+    # Defense in depth: reject a request body far larger than any legitimate
+    # upload before it is buffered into memory. resume_intake.MAX_BYTES (5 MB)
+    # is the real, user-facing limit — this is a coarser ceiling that only
+    # ever fires for requests that check would also reject.
+    app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
+    @app.errorhandler(413)
+    def _too_large(_error):
+        return jsonify({"error": "That file is too large."}), 413
+
     data_root = Path(data_root)
     build_llm = llm_factory or _default_llm
 
