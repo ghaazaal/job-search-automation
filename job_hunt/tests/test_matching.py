@@ -100,3 +100,57 @@ def test_no_target_roles_is_the_floor_not_a_crash():
 
 def test_an_empty_title_is_the_floor_not_a_crash():
     assert title_tier("", [_role("Data Engineer")], _STOP) == "none"
+
+
+# ── seniority_band / band_distance ─────────────────────────────────────────────
+
+from src.scoring.matching import band_distance, seniority_band
+
+_SENIORITY = {
+    "senior_keywords": ["senior", "sr.", "staff", "principal", "lead",
+                        "manager", "director", "head of", "vp ",
+                        "vice president"],
+    "junior_keywords": ["junior", "jr.", "intern", "entry", "associate "],
+    "exec_keywords":   ["vp ", "vice president", "director", "head of",
+                        "executive"],
+}
+
+
+def test_a_plain_title_reads_as_mid():
+    assert seniority_band("Data Engineer", _SENIORITY) == "mid"
+
+
+def test_senior_is_recognised():
+    assert seniority_band("Senior Data Engineer", _SENIORITY) == "senior"
+
+
+def test_junior_is_recognised():
+    assert seniority_band("Junior Data Engineer", _SENIORITY) == "junior"
+
+
+def test_exec_beats_senior_when_a_title_reads_as_both():
+    """`Director` is in both lists. An exec title is an exec title."""
+    assert seniority_band("Director of Data", _SENIORITY) == "exec"
+
+
+def test_an_empty_title_reads_as_mid():
+    assert seniority_band("", _SENIORITY) == "mid"
+
+
+def test_the_same_band_is_no_distance():
+    assert band_distance("senior", "senior") == 0
+
+
+def test_neighbouring_bands_are_one_apart():
+    assert band_distance("mid", "senior") == 1
+    assert band_distance("senior", "mid") == 1
+
+
+def test_the_ends_of_the_scale_are_far_apart():
+    assert band_distance("junior", "exec") == 3
+
+
+def test_an_unknown_band_is_treated_as_mid():
+    """A resume saved before the seniority field existed must not crash."""
+    assert band_distance("wizard", "mid") == 0
+    assert band_distance(None, "senior") == 1

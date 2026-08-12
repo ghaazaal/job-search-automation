@@ -79,3 +79,32 @@ def title_tier(job_title: str, target_roles: list[dict], stopwords) -> str:
         if any(w in present for w in wanted):
             best = "some_tokens"
     return best
+
+
+def seniority_band(job_title: str, seniority_cfg: dict) -> str:
+    """The band a posting's title implies.
+
+    Checked exec-first because the lists overlap — `director` and `head of`
+    appear in both the senior and the exec list, and an exec title is an exec
+    title.
+    """
+    title = (job_title or "").lower()
+    if any(k in title for k in seniority_cfg.get("exec_keywords") or []):
+        return "exec"
+    if any(k in title for k in seniority_cfg.get("junior_keywords") or []):
+        return "junior"
+    if any(k in title for k in seniority_cfg.get("senior_keywords") or []):
+        return "senior"
+    return "mid"
+
+
+def band_distance(one: str, other: str) -> int:
+    """How many bands apart two seniority levels are.
+
+    Anything unrecognised reads as `mid` rather than raising — a resume
+    written before the field existed should score, not crash the run.
+    """
+    def _index(band) -> int:
+        return BANDS.index(band) if band in BANDS else BANDS.index("mid")
+
+    return abs(_index(one) - _index(other))
