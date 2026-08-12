@@ -224,6 +224,13 @@ def test_core_skills_are_reported_before_working_ones():
     assert matched == ["Power BI", "Tableau"]
 
 
+def test_a_missing_or_unrecognised_tier_is_treated_as_working():
+    """An old resume saved before tiers existed must still score, not crash."""
+    no_tier = {"name": "Airflow", "aliases": []}
+    _, points = skill_hits("airflow", [no_tier], _SKILL_SCORES)
+    assert points == _SKILL_SCORES["working"]
+
+
 # ── gaps ──────────────────────────────────────────────────────────────────────
 
 def test_a_tool_in_the_post_that_is_not_yours_is_a_gap():
@@ -263,6 +270,13 @@ def test_a_dense_post_with_some_of_your_tools_lands_softly():
 def test_a_post_that_is_mostly_your_tools_is_not_penalised():
     body = "snowflake, spark, kafka and airflow"
     mine = {"snowflake", "spark", "kafka"}
+    assert mismatch_penalty(body, _TOOLS, mine, _MISMATCH) == 0
+
+
+def test_a_ratio_exactly_at_the_soft_threshold_is_not_penalised():
+    """2 of 4 named tools are yours — exactly 0.5, not under it."""
+    body = "snowflake, spark, react and angular experience required"
+    mine = {"snowflake", "spark"}
     assert mismatch_penalty(body, _TOOLS, mine, _MISMATCH) == 0
 
 

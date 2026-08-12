@@ -135,6 +135,14 @@ def skill_hits(body: str, skills: list[dict],
     the reason sentence reads like the resume. Core skills are considered
     first, so the cap is spent on the strongest signals and the sentence names
     them in that order.
+
+    A missing or unrecognised tier is treated as 'working' rather than
+    raising, for the same reason band_distance treats an unrecognised
+    seniority as mid.
+
+    Expects body to already be lowercased — unlike gaps/mismatch_penalty,
+    this does not lowercase internally, to avoid re-lowercasing a body the
+    caller may reuse across several skill_hits calls.
     """
     core_points = scores.get("core", 5)
     working_points = scores.get("working", 2)
