@@ -113,6 +113,24 @@ class Scorer:
         evidence["reason"] = compose_reason(evidence)
         return evidence
 
+    def best_match(self, title: str, description: str,
+                   resumes: list[dict]) -> dict:
+        """Score against every active resume and keep the strongest.
+
+        Someone with a Data Engineer resume and a BI Developer resume should
+        see each posting judged by whichever of the two actually fits it, and
+        be told which one that was.
+
+        Ties go to the earliest resume — `list_resumes` orders by creation, and
+        `max` keeps the first of equals — so re-running a scrape cannot
+        reshuffle the map for no reason.
+        """
+        if not resumes:
+            raise ValueError("cannot score without at least one active resume")
+        scored = [self.score_job(title, description, resume)
+                  for resume in resumes]
+        return max(scored, key=lambda evidence: evidence["match_score"])
+
     def _constraints(self, body: str, jd_band: str,
                      my_band: str) -> tuple[int, list[str]]:
         """Employment constraints that rule a posting out whatever your stack."""

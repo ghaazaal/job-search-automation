@@ -133,3 +133,48 @@ def test_every_penalty_stacking_still_floors_at_one(scorer):
     assert set(result["penalties"]) == {
         "w2 only", "clearance", "visa restriction", "executive role",
         "little overlap with the tools this post names"}
+
+
+_BI_RESUME = {
+    "id": 2,
+    "label": "bi developer",
+    "seniority": "senior",
+    "target_roles": [{"title": "BI Developer", "aliases": ["bi engineer"]}],
+    "skills": [{"name": "Power BI", "tier": "core", "aliases": ["dax"]},
+               {"name": "SQL", "tier": "core", "aliases": []}],
+}
+
+
+def test_the_best_fitting_resume_wins(scorer):
+    """A BI posting should be judged by the BI resume, not the AE one."""
+    jd = "You will build Power BI dashboards and write SQL. Heavy dax work."
+    best = scorer.best_match("Senior BI Developer", jd, [_RESUME, _BI_RESUME])
+    assert best["resume_id"] == 2
+    assert best["resume_label"] == "bi developer"
+
+
+def test_the_other_resume_wins_for_the_other_posting(scorer):
+    best = scorer.best_match("Senior Analytics Engineer", _STRONG_JD,
+                             [_RESUME, _BI_RESUME])
+    assert best["resume_id"] == 1
+
+
+def test_a_tie_goes_to_the_earlier_resume(scorer):
+    """Two identical resumes must not reshuffle the map between runs."""
+    twin = {**_RESUME, "id": 99, "label": "copy"}
+    best = scorer.best_match("Senior Analytics Engineer", _STRONG_JD,
+                             [_RESUME, twin])
+    assert best["resume_id"] == 1
+
+
+def test_one_resume_behaves_like_scoring_against_it_directly(scorer):
+    direct = scorer.score_job("Senior Analytics Engineer", _STRONG_JD, _RESUME)
+    best = scorer.best_match("Senior Analytics Engineer", _STRONG_JD, [_RESUME])
+    assert best == direct
+
+
+def test_scoring_with_no_resumes_raises(scorer):
+    """There is nothing to judge against, and silently scoring zero would
+    fill the map with meaningless rows."""
+    with pytest.raises(ValueError, match="active resume"):
+        scorer.best_match("Data Engineer", _STRONG_JD, [])
