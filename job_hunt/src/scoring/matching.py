@@ -19,11 +19,18 @@ def has_term(term: str, haystack: str) -> bool:
     Descriptions are long enough that substring matching produces false
     positives on short tokens — 'opt' inside 'optimize', 'bi' inside
     'ambitious'. Boundaries keep multi-word terms ('power bi') working.
+
+    Uses lookarounds rather than `\\b` because `\\b` only anchors on a
+    transition to/from a word character, and a term ending in `+` or `#`
+    (a skill named "C++", say) has no such transition at its own edge —
+    `\\b` would silently fail to match it in the ordinary case of the term
+    being followed by whitespace or punctuation.
     """
     term = (term or "").strip()
     if not term:
         return False
-    return bool(re.search(r"\b" + re.escape(term) + r"\b", haystack))
+    pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+    return bool(re.search(pattern, haystack))
 
 
 def tokens(text: str) -> list[str]:

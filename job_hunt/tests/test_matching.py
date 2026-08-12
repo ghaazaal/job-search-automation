@@ -38,6 +38,15 @@ def test_has_term_handles_multi_word_terms():
     assert has_term("power bi", "you will build power bi dashboards")
 
 
+def test_has_term_matches_a_term_ending_in_a_symbol():
+    assert has_term("c++", "we use c++ daily")
+    assert has_term("c#", "we use c# daily")
+
+
+def test_has_term_does_not_match_a_longer_word_sharing_a_symbol_prefix():
+    assert not has_term("c++", "we use c++x daily")
+
+
 # ── title_tier ────────────────────────────────────────────────────────────────
 
 def test_an_exact_title_is_the_top_tier():
