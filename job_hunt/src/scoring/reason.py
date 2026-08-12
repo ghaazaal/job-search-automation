@@ -34,9 +34,16 @@ def compose_reason(evidence: dict) -> str:
 
     clauses: list[str] = []
 
+    # Naming the resume is the answer to the question a person actually has
+    # when several are active: which of mine got me this?
+    label = str(evidence.get("resume_label") or "").strip()
+    whose = f"your {label} resume" if label else "your resume"
+
     matched = list(evidence.get("matched") or [])[:_MAX_SKILLS]
     if matched:
-        clauses.append(f"matches {_readable_list(matched)} from your resume")
+        clauses.append(f"matches {_readable_list(matched)} from {whose}")
+    elif label:
+        clauses.append(f"nothing on {whose} was named in this posting")
 
     phrase = _SENIORITY_PHRASE.get(evidence.get("seniority", "mid"))
     if phrase:
