@@ -154,3 +154,124 @@ def test_an_unknown_band_is_treated_as_mid():
     """A resume saved before the seniority field existed must not crash."""
     assert band_distance("wizard", "mid") == 0
     assert band_distance(None, "senior") == 1
+
+
+from src.scoring.matching import (gaps, mismatch_penalty, resume_terms,
+                                  skill_hits)
+
+_SKILL_SCORES = {"core": 5, "working": 2, "cap": 20}
+_MISMATCH = {"min_tools": 4, "hard_ratio": 0.25, "hard_value": 20,
+             "soft_ratio": 0.5, "soft_value": 10}
+_TOOLS = ["snowflake", "databricks", "spark", "kafka", "airflow", "react",
+          "angular", "terraform"]
+
+
+def _skill(name, tier="core", *aliases):
+    return {"name": name, "tier": tier, "aliases": list(aliases)}
+
+
+# ── resume_terms ──────────────────────────────────────────────────────────────
+
+def test_resume_terms_collects_names_and_aliases_lowercased():
+    skills = [_skill("Power BI", "core", "PowerBI", "DAX")]
+    assert resume_terms(skills) == {"power bi", "powerbi", "dax"}
+
+
+def test_resume_terms_of_nothing_is_empty():
+    assert resume_terms([]) == set()
+
+
+# ── skill_hits ────────────────────────────────────────────────────────────────
+
+def test_a_named_skill_is_matched_and_scored():
+    matched, points = skill_hits("we run airflow daily",
+                                 [_skill("Airflow")], _SKILL_SCORES)
+    assert matched == ["Airflow"]
+    assert points == 5
+
+
+def test_an_alias_matches_but_the_display_name_is_reported():
+    """The reason sentence should read like the resume, not like the JD."""
+    matched, _ = skill_hits("heavy dax work ahead",
+                            [_skill("Power BI", "core", "dax")], _SKILL_SCORES)
+    assert matched == ["Power BI"]
+
+
+def test_a_working_skill_is_worth_less_than_a_core_one():
+    _, core = skill_hits("airflow", [_skill("Airflow", "core")], _SKILL_SCORES)
+    _, working = skill_hits("airflow", [_skill("Airflow", "working")],
+                            _SKILL_SCORES)
+    assert core > working
+
+
+def test_unnamed_skills_score_nothing():
+    matched, points = skill_hits("we use spreadsheets",
+                                 [_skill("Airflow")], _SKILL_SCORES)
+    assert matched == []
+    assert points == 0
+
+
+def test_the_skill_total_is_capped():
+    many = [_skill(f"Tool{i}") for i in range(10)]
+    body = " ".join(f"tool{i}" for i in range(10))
+    _, points = skill_hits(body, many, _SKILL_SCORES)
+    assert points == _SKILL_SCORES["cap"]
+
+
+def test_core_skills_are_reported_before_working_ones():
+    skills = [_skill("Tableau", "working"), _skill("Power BI", "core")]
+    matched, _ = skill_hits("tableau and power bi", skills, _SKILL_SCORES)
+    assert matched == ["Power BI", "Tableau"]
+
+
+# ── gaps ──────────────────────────────────────────────────────────────────────
+
+def test_a_tool_in_the_post_that_is_not_yours_is_a_gap():
+    assert "snowflake" in gaps("we run snowflake", _TOOLS, {"airflow"})
+
+
+def test_a_tool_you_have_is_not_a_gap():
+    assert gaps("we run airflow", _TOOLS, {"airflow"}) == []
+
+
+def test_gaps_come_from_the_description_only():
+    """The title is not evidence of a tool being used."""
+    assert gaps("", _TOOLS, set()) == []
+
+
+# ── mismatch_penalty ──────────────────────────────────────────────────────────
+
+def test_too_few_tools_named_is_never_a_mismatch():
+    """Three tools is too small a sample to conclude anything."""
+    body = "we use snowflake, spark and kafka"
+    assert mismatch_penalty(body, _TOOLS, set(), _MISMATCH) == 0
+
+
+def test_a_dense_post_with_none_of_your_tools_lands_hard():
+    body = "react, angular, terraform and kafka experience required"
+    assert mismatch_penalty(body, _TOOLS, {"airflow"},
+                            _MISMATCH) == _MISMATCH["hard_value"]
+
+
+def test_a_dense_post_with_some_of_your_tools_lands_softly():
+    """Four named, one of them yours — a quarter, under the soft threshold."""
+    body = "react, angular, terraform and airflow experience required"
+    assert mismatch_penalty(body, _TOOLS, {"airflow"},
+                            _MISMATCH) == _MISMATCH["soft_value"]
+
+
+def test_a_post_that_is_mostly_your_tools_is_not_penalised():
+    body = "snowflake, spark, kafka and airflow"
+    mine = {"snowflake", "spark", "kafka"}
+    assert mismatch_penalty(body, _TOOLS, mine, _MISMATCH) == 0
+
+
+def test_the_same_post_lands_softly_for_someone_whose_stack_it_is():
+    """The point of the ratio: a React post is only a mismatch for a
+    non-React person."""
+    body = "react, angular, terraform and kafka experience required"
+    data_person = mismatch_penalty(body, _TOOLS, {"airflow"}, _MISMATCH)
+    react_person = mismatch_penalty(body, _TOOLS,
+                                    {"react", "angular", "terraform"},
+                                    _MISMATCH)
+    assert data_person > react_person == 0
