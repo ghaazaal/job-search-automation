@@ -92,10 +92,10 @@ def test_migrating_twice_is_a_no_op(tmp_path):
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
-def test_a_fresh_database_lands_on_version_two(tmp_path):
+def test_a_fresh_database_lands_on_the_current_version(tmp_path):
     conn = connect(tmp_path / "fresh.db")
     init_db(conn)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert {"location", "country", "work_modes",
             "setup_complete"} <= _columns(conn, "user")
     assert "resume" in _tables(conn)
@@ -138,3 +138,41 @@ def test_migration_survives_a_crash_between_create_and_version_stamp(tmp_path):
     init_db(conn)  # must not raise "duplicate column name"
 
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_the_sole_existing_user_is_renamed_to_default(tmp_path):
+    """Ship 2 stops reading CANDIDATE_NAME. Without this the user's whole
+    map would be stranded behind a name nothing sets any more."""
+    conn = _v1_database(tmp_path / "v1.db")
+    conn.execute("UPDATE user SET name = 'Ghazal Izadi'")
+    init_db(conn)
+    assert conn.execute("SELECT name FROM user").fetchone()["name"] == "default"
+
+
+def test_the_renamed_user_keeps_their_rows(tmp_path):
+    conn = _v1_database(tmp_path / "v1.db")
+    conn.execute("UPDATE user SET name = 'Ghazal Izadi'")
+    init_db(conn)
+    row = conn.execute(
+        "SELECT u.name, COUNT(r.id) AS roles FROM user u"
+        " LEFT JOIN role r ON r.user_id = u.id GROUP BY u.id").fetchone()
+    assert row["name"] == "default"
+    assert row["roles"] == 1
+
+
+def test_several_users_are_left_alone(tmp_path):
+    """The rename is a rescue for the single-user case, not a policy."""
+    conn = _v1_database(tmp_path / "v1.db")
+    conn.execute("UPDATE user SET name = 'Ghazal Izadi'")
+    conn.execute("INSERT INTO user (name, created_at) VALUES ('Other', '2026-01-01')")
+    init_db(conn)
+    names = {r["name"] for r in conn.execute("SELECT name FROM user")}
+    assert names == {"Ghazal Izadi", "Other"}
+
+
+def test_the_rename_is_safe_to_replay(tmp_path):
+    conn = _v1_database(tmp_path / "v1.db")
+    conn.execute("UPDATE user SET name = 'Ghazal Izadi'")
+    init_db(conn)
+    init_db(conn)
+    assert conn.execute("SELECT name FROM user").fetchone()["name"] == "default"
