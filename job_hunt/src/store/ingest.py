@@ -79,6 +79,7 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
         job.get("match_score"), job.get("band"), job.get("reason"),
         json.dumps(list(job.get("matched") or [])),
         json.dumps(list(job.get("gaps") or [])),
+        job.get("resume_id"),
     )
 
     if existing:
@@ -86,7 +87,7 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
             """UPDATE role SET title=?, location=?, salary=?, platform=?,
                    posted_date=?, description=?, description_captured=?,
                    match_score=?, band=?, reason=?, matched=?, gaps=?,
-                   last_seen_run_id=?
+                   resume_id=?, last_seen_run_id=?
                WHERE id=?""",
             (*values, run_id, existing["id"]))
     else:
@@ -94,8 +95,8 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
             """INSERT INTO role (user_id, company_id, url, url_normalised,
                    title, location, salary, platform, posted_date, description,
                    description_captured, match_score, band, reason, matched, gaps,
-                   first_seen_run_id, last_seen_run_id)
-               VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?, ?,?)""",
+                   resume_id, first_seen_run_id, last_seen_run_id)
+               VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?)""",
             (user_id, company_id, job["url"], url_n, *values, run_id, run_id))
 
 
