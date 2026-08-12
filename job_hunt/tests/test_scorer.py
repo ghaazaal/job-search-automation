@@ -120,3 +120,16 @@ def test_a_description_is_optional(scorer):
 def test_tailoring_is_reported(scorer):
     result = _score(scorer, "Analytics Engineer", _STRONG_JD)
     assert result["tailoring"] in ("Minor", "Moderate", "Significant", "N/A")
+
+
+def test_every_penalty_stacking_still_floors_at_one(scorer):
+    """Four constraint penalties plus a hard mismatch, all firing together —
+    raw goes deeply negative, and the clamp must still land on a valid score."""
+    jd = ("React, Angular, Terraform and Kafka experience required. "
+          "W2 only. Active security clearance required. "
+          "We cannot sponsor CPT or OPT.")
+    result = _score(scorer, "VP of Warehouse Operations", jd)
+    assert result["match_score"] == 1
+    assert set(result["penalties"]) == {
+        "w2 only", "clearance", "visa restriction", "executive role",
+        "little overlap with the tools this post names"}
