@@ -96,6 +96,15 @@ def test_indeed_falls_back_when_the_actor_returns_nothing(monkeypatch):
     assert len(jobs) == 1
 
 
+def test_indeed_returns_nothing_gracefully_when_the_retry_also_fails(monkeypatch):
+    seen = _capture(monkeypatch, indeed, [[], []])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Toronto, ON", country="ca",
+                         work_modes=["onsite"])
+    assert jobs == []
+    assert len(seen) == 2
+
+
 def test_indeed_does_not_retry_when_it_already_used_the_legacy_values(monkeypatch):
     seen = _capture(monkeypatch, indeed, [[]])
     indeed.scrape("BI Developer", "BI Developer", "actor~id",
@@ -139,6 +148,15 @@ def test_linkedin_falls_back_when_the_actor_returns_nothing(monkeypatch):
     assert seen[1]["location"] == "Worldwide"
     assert seen[1]["remote"] == ["2"]
     assert len(jobs) == 1
+
+
+def test_linkedin_returns_nothing_gracefully_when_the_retry_also_fails(monkeypatch):
+    seen = _capture(monkeypatch, linkedin, [[], []])
+    jobs = linkedin.scrape("BI Developer", "BI Developer", "actor~id",
+                           location="Toronto, ON", country="ca",
+                           work_modes=["onsite"])
+    assert jobs == []
+    assert len(seen) == 2
 
 
 def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
