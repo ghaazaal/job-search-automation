@@ -24,8 +24,12 @@ from dotenv import load_dotenv
 
 # ── Config ────────────────────────────────────────────────────────────────────
 _BASE = Path(__file__).resolve().parent
-CONFIG_PATH   = _BASE / "config.yaml"
-KEYWORDS_PATH = _BASE / "keywords.yaml"
+CONFIG_PATH     = _BASE / "config.yaml"
+VOCABULARY_PATH = _BASE / "vocabulary.yaml"
+
+# One user, no authentication — see the Identity section of the design spec.
+# Schema version 3 renames any pre-existing user to this.
+DEFAULT_USER = "default"
 
 # Load .env from the job_hunt/ directory (where this file lives).
 # os.environ values already set take precedence — dotenv never overwrites them.
@@ -33,9 +37,8 @@ load_dotenv(_BASE / ".env")
 
 
 def _load_config() -> dict:
-    from src.config import apply_env_overrides
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return apply_env_overrides(yaml.safe_load(f))
+        return yaml.safe_load(f)
 
 
 # ── Imports ───────────────────────────────────────────────────────────────────
@@ -70,6 +73,35 @@ def _check_deps(config: dict) -> None:
         sys.exit(1)
 
 
+def _open_store():
+    """A connection with the schema present. The caller closes it."""
+    from src.store.db import connect
+    from src.store.ingest import ensure_user
+    from src.store.schema import init_db
+
+    conn = connect()
+    init_db(conn)
+    return conn, ensure_user(conn, DEFAULT_USER)
+
+
+def _search_titles(resumes: list[dict]) -> list[str]:
+    """Every target role across the active resumes, deduplicated.
+
+    Two resumes that both target 'Data Engineer' must not scrape it twice.
+    Order follows the resumes so a run is reproducible.
+    """
+    seen: set[str] = set()
+    titles: list[str] = []
+    for resume in resumes:
+        for role in resume.get("target_roles") or []:
+            title = str(role.get("title") or "").strip()
+            key = title.lower()
+            if title and key not in seen:
+                seen.add(key)
+                titles.append(title)
+    return titles
+
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                     datefmt="%H:%M:%S")
@@ -89,8 +121,9 @@ def run_pipeline(config: dict) -> None:
     from src.scrapers import indeed as indeed_scraper
     from src.scrapers import linkedin as li_scraper
     from src.scoring.scorer import Scorer
-    from src.agents.resume_agent import parse_resume, generate_role_variant
+    from src.agents.resume_agent import generate_role_variant
     from src.agents.tailoring_agent import shortlist_decision
+    from src.store.profile import get_profile, list_resumes
     from src.tracker import excel
     from src.llm.factory import get_client
 
@@ -106,37 +139,44 @@ def run_pipeline(config: dict) -> None:
 
     apify_cfg     = config.get("apify", {})
     search_cfg    = config.get("search", {})
-    categories    = search_cfg.get("categories", [])
     days_posted   = search_cfg.get("days_posted", 7)
     jobs_per_cat  = search_cfg.get("jobs_per_category", 50)
     run_timeout   = search_cfg.get("run_timeout", 120)
     shortlist_min = config.get("tailoring", {}).get("shortlist_score", 7)
 
     print("=" * 62)
-    print("  Job Hunt Automation — Ghazal Izadi")
+    print("  Job Hunt Automation")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 62)
 
-    # ── 1. Parse resume ────────────────────────────────────────────────────
-    print("\n[1/8] Parsing resume...")
-    # Validate the API key for the configured provider before doing any work
-    _provider_key = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "groq":      "GROQ_API_KEY",
-        "gemini":    "GEMINI_API_KEY",
-    }
-    _provider = config.get("llm", {}).get("provider", "anthropic").lower()
-    _key_name  = _provider_key.get(_provider, "ANTHROPIC_API_KEY")
-    if not os.environ.get(_key_name):
-        print(f"  ERROR: {_key_name} is not set.")
-        print(f"  Add it to job_hunt/.env:  {_key_name}=your_key_here")
-        sys.exit(1)
+    # ── 1. Read the profile ────────────────────────────────────────────────
+    print("\n[1/8] Reading your profile...")
+    conn, user_id = _open_store()
     try:
-        parsed_resume = parse_resume(config, output_dir, llm)
-        print(f"  Skills: {', '.join(parsed_resume.get('skills', [])[:8])}")
-    except Exception as e:
-        print(f"  ERROR: Resume parse failed: {e}")
+        resumes = list_resumes(conn, user_id, active_only=True)
+        profile = get_profile(conn, user_id)
+    finally:
+        conn.close()
+
+    if not resumes:
+        print("  ERROR: no active resume on file, so there is nothing to "
+              "search for.")
+        print("  Run:  python main.py --serve")
+        print("  Then open http://127.0.0.1:5000/setup and upload one.")
         sys.exit(1)
+
+    titles = _search_titles(resumes)
+    if not titles:
+        print("  ERROR: your resumes have no target roles between them.")
+        print("  Open http://127.0.0.1:5000/profile and add at least one.")
+        sys.exit(1)
+
+    work_modes = profile["work_modes"] or ["remote"]
+    print(f"  {len(resumes)} resume(s): "
+          f"{', '.join(r['label'] for r in resumes)}")
+    print(f"  Searching: {', '.join(titles)}")
+    print(f"  Where: {profile['location'] or 'remote'} "
+          f"({', '.join(work_modes)})")
 
     # ── 2. Read existing tracker ───────────────────────────────────────────
     print("\n[2/8] Reading existing tracker...")
@@ -152,20 +192,23 @@ def run_pipeline(config: dict) -> None:
 
     print(f"\n[3/8] Scraping Indeed + LinkedIn (last {days_posted} days)...")
     all_scraped: list[dict] = []
-    for cat in categories:
-        category, title = cat["category"], cat["title"]
-        print(f"\n  Indeed / {category}...")
+    for title in titles:
+        print(f"\n  Indeed / {title}...")
         jobs = indeed_scraper.scrape(
-            category, title, apify_cfg.get("indeed_actor", "valig~indeed-jobs-scraper"),
-            days_posted, jobs_per_cat, run_timeout)
+            title, title, apify_cfg.get("indeed_actor", "valig~indeed-jobs-scraper"),
+            days_posted, jobs_per_cat, run_timeout,
+            location=profile["location"], country=profile["country"] or "us",
+            work_modes=work_modes)
         print(f"    -> {len(jobs)} fetched")
         all_scraped.extend(jobs)
         time.sleep(1)
 
-        print(f"  LinkedIn / {category}...")
+        print(f"  LinkedIn / {title}...")
         jobs = li_scraper.scrape(
-            category, title, apify_cfg.get("linkedin_actor", "valig~linkedin-jobs-scraper"),
-            days_posted, jobs_per_cat, run_timeout)
+            title, title, apify_cfg.get("linkedin_actor", "valig~linkedin-jobs-scraper"),
+            days_posted, jobs_per_cat, run_timeout,
+            location=profile["location"], country=profile["country"] or "us",
+            work_modes=work_modes)
         print(f"    -> {len(jobs)} fetched")
         all_scraped.extend(jobs)
         time.sleep(1)
@@ -234,10 +277,11 @@ def run_pipeline(config: dict) -> None:
             job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
 
     # ── 6. Score ───────────────────────────────────────────────────────────
-    print(f"\n[6/8] Scoring {len(new_jobs)} jobs...")
-    scorer = Scorer(config, KEYWORDS_PATH)
-    cat_order = {"Analytics Engineer": 0, "Data Engineer": 1,
-                 "Data Analyst": 2, "Product Analyst": 3}
+    print(f"\n[6/8] Scoring {len(new_jobs)} jobs against "
+          f"{len(resumes)} resume(s)...")
+    scorer = Scorer(config, VOCABULARY_PATH)
+    cat_order = {title: i for i, title in enumerate(titles)}
+    by_resume = {r["id"]: r for r in resumes}
     rows: list[dict] = []
     scored_jobs: list[dict] = []   # jobs + evidence, for the opportunity map
 
@@ -247,8 +291,7 @@ def run_pipeline(config: dict) -> None:
         intel  = job["_intel"]
         filt_r = job["_filter"]
         is_filtered = filt_r["verdict"] == "REJECT"
-        s = scorer.score_job(job["title"], job["cat"], job["salary"], job["url"],
-                             description=job.get("description", ""))
+        s = scorer.best_match(job["title"], job.get("description", ""), resumes)
         scored_jobs.append({**job, **s})
 
         row: dict = {
@@ -264,7 +307,7 @@ def run_pipeline(config: dict) -> None:
             # Removed — was a hardcoded lookup table shown as a percentage.
             # Column kept blank so existing tracker files stay aligned.
             "Interview Chance":   "",
-            "Recommended Resume": "",          # blank — kept for column alignment
+            "Recommended Resume": s["resume_label"],
             "Tailoring Needed":   s["tailoring"],
             "Application Status": "Filtered Out" if is_filtered else "New",
             "Date Applied":       "",
@@ -284,6 +327,7 @@ def run_pipeline(config: dict) -> None:
             "_score":             s["match_score"],
             "_description":       job.get("description", ""),
             "_cat_order":         cat_order.get(job["cat"], 9),
+            "_resume_id":         s["resume_id"],
             "Low Growth Signal":  bool(filt_r.get("warn")),
         }
         rows.append(row)
@@ -298,13 +342,12 @@ def run_pipeline(config: dict) -> None:
     print(f"  {len(shortlist)} jobs in shortlist")
 
     for row in shortlist:
-        # Use cached role variant text if available
-        safe_role = row["Search Category"].replace(" ", "_")
-        variant_file = output_dir / f"resume_{safe_role}.txt"
+        winner = by_resume.get(row["_resume_id"]) or resumes[0]
+        variant_file = output_dir / f"resume_{row['Search Category'].replace(' ', '_')}.txt"
         if variant_file.exists():
             resume_text = variant_file.read_text(encoding="utf-8")
         else:
-            resume_text = parsed_resume.get("extracted_text", "")
+            resume_text = winner.get("extracted_text", "")
 
         # Fall back to the title line only when the actor returned no body.
         jd_text = row["_description"] or f"{row['Job Title']} at {row['Company']}"
@@ -324,10 +367,9 @@ def run_pipeline(config: dict) -> None:
     apply_now_jobs = [r for r in rows if r.get("Apply_Now") == "yes"]
     if apply_now_jobs:
         print(f"\n  Generating resume variants for {len(apply_now_jobs)} apply-now jobs...")
-        roles_needed = {r["Search Category"] for r in apply_now_jobs}
-        for role in roles_needed:
+        for role in {r["Search Category"] for r in apply_now_jobs}:
             try:
-                generate_role_variant(role, parsed_resume, config, output_dir, llm)
+                generate_role_variant(role, resumes[0], output_dir, llm)
             except Exception as e:
                 logger.warning("Role variant failed for %s: %s", role, e)
 
@@ -377,19 +419,10 @@ def _persist_and_launch(scored_jobs: list[dict], scraped: int,
                         shortlist_min: int, config: dict) -> None:
     """Write the run to the store. Rendering happens separately via _serve()."""
     from src.pipeline_store import persist_run
-    from src.store.db import connect
-    from src.store.ingest import ensure_user
-    from src.store.schema import init_db
 
     conn = None
     try:
-        conn = connect()
-        init_db(conn)
-        candidate_name = config.get("resume", {}).get("candidate_name") or "default"
-        if candidate_name == "default":
-            logger.warning("No CANDIDATE_NAME set — storing this run under the "
-                           "'default' user. Set CANDIDATE_NAME in job_hunt/.env.")
-        user_id = ensure_user(conn, candidate_name)
+        conn, user_id = _open_store()
         persist_run(conn, user_id, scored_jobs, scraped)
         print(f"  Stored {len(scored_jobs)} roles.")
     except Exception as e:
@@ -406,46 +439,19 @@ def _serve(config: dict, port: int) -> None:
     from src.app import create_app
 
     shortlist_min = config.get("tailoring", {}).get("shortlist_score", 7)
-    name = config.get("resume", {}).get("candidate_name") or "default"
-    if name == "default":
-        logger.warning("No CANDIDATE_NAME set — storing this run under the "
-                       "'default' user. Set CANDIDATE_NAME in job_hunt/.env.")
-    app = create_app(user_name=name, shortlist_min=shortlist_min)
+    app = create_app(user_name=DEFAULT_USER, shortlist_min=shortlist_min)
     url = f"http://127.0.0.1:{port}/"
     print(f"\n  Opportunity map: {url}")
+    print(f"  Your resumes:    http://127.0.0.1:{port}/profile")
     print("  Ctrl-C to stop.")
     webbrowser.open(url)
     app.run(host="127.0.0.1", port=port, debug=False)
 
 
-def _launch_map(scored_jobs: list[dict], shortlist_min: int) -> None:
-    """Generate opportunity-map.html and open it in the browser."""
-    from src.map_page import open_browser, render
-    from src.opportunity import build_maps
-
-    output = _BASE.parent / "opportunity-map.html"
-    try:
-        # TODO: watched/hidden companies are not persisted yet — needs the
-        # user-action store before they can survive a run.
-        maps = build_maps(scored_jobs, shortlist_min=shortlist_min)
-        html = render(maps, meta={
-            "companies": len(maps),
-            "roles":     len(scored_jobs),
-            "scraped":   datetime.now().strftime("%H:%M"),
-        })
-        output.write_text(html, encoding="utf-8")
-        act_now = sum(1 for m in maps if m["state"] == "ACT_NOW")
-        print(f"\n  Opportunity map: {output}")
-        print(f"  {len(maps)} companies — {act_now} to act on now.")
-        open_browser(output)
-        print("  Opened in browser.")
-    except Exception as e:
-        logger.warning("Opportunity map generation failed: %s", e)
-
-
 # ── Tailor one job ─────────────────────────────────────────────────────────────
 def run_tailor(config: dict, jd_file: str) -> None:
     from src.agents.tailoring_agent import tailor_job, save_tailoring_output
+    from src.store.profile import list_resumes
     from src.tracker import excel
     from src.llm.factory import get_client
     from pathlib import Path
@@ -478,24 +484,36 @@ def run_tailor(config: dict, jd_file: str) -> None:
         company_name = input("Company name: ").strip()
         role_title   = input("Role title: ").strip()
         row_data = {"Company": company_name, "Job Title": role_title,
-                    "Search Category": "Analytics Engineer"}
+                    "Search Category": ""}
 
-    category  = row_data.get("Search Category", "Analytics Engineer")
+    from src.store.profile import list_resumes
+
+    conn, user_id = _open_store()
+    try:
+        active = list_resumes(conn, user_id, active_only=True)
+    finally:
+        conn.close()
+    if not active:
+        print("ERROR: no active resume on file. Upload one at /setup first.")
+        sys.exit(1)
+    resume = active[0]
+
+    # A cached role variant is a better starting point than the raw resume,
+    # because it was already rewritten for this kind of role.
+    category  = row_data.get("Search Category", "")
     safe_role = category.replace(" ", "_")
-    variant_file = output_dir / f"resume_{safe_role}.txt"
-    if variant_file.exists():
+    variant_file = output_dir / f"resume_{safe_role}.txt" if safe_role else None
+    if variant_file and variant_file.exists():
         resume_text = variant_file.read_text(encoding="utf-8")
     else:
-        cache_file = output_dir / "resume_parsed.json"
-        import json
-        resume_text = (json.loads(cache_file.read_text()).get("extracted_text", "")
-                       if cache_file.exists() else "")
+        resume_text = resume.get("extracted_text", "")
 
     result = tailor_job(
         jd_text, resume_text,
         row_data.get("Job Title", ""),
         row_data.get("Company", ""),
         llm,
+        resume=resume,
     )
     if result is None:
         print("ERROR: Tailoring failed. Check your LLM API key in job_hunt/.env.")

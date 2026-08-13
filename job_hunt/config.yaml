@@ -4,17 +4,7 @@
 #                $env:ANTHROPIC_API_KEY = "sk-ant-..."
 # This file is safe to commit. Add to .gitignore: output/, *.db, .env
 
-# Personal details are NOT stored here — this file is public.
-# Set them in job_hunt/.env (gitignored):
-#   CANDIDATE_NAME, CANDIDATE_EMAIL, CANDIDATE_LINKEDIN, RESUME_PATH
-resume: {}
-
 search:
-  categories:
-    - {title: "Analytics Engineer", category: "Analytics Engineer"}
-    - {title: "Data Engineer",      category: "Data Engineer"}
-    - {title: "Data Analyst",       category: "Data Analyst"}
-    - {title: "Product Analyst",    category: "Product Analyst"}
   days_posted: 7
   jobs_per_category: 50
   run_timeout: 120
@@ -25,12 +15,9 @@ apify:
   company_actor:  "curious_coder~linkedin-company-scraper"
 
 scoring:
-  weights:
-    title_match:    0.40
-    category_bonus: 0.10
-    seniority:      0.20
-    skills:         0.20
-    penalty:        0.10
+  bands:
+    strong: 8
+    partial: 5
 
 company_filter:
   reject_stages: ["enterprise"]
