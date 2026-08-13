@@ -121,7 +121,7 @@ def run_pipeline(config: dict) -> None:
     from src.scrapers import indeed as indeed_scraper
     from src.scrapers import linkedin as li_scraper
     from src.scoring.scorer import Scorer
-    from src.agents.resume_agent import generate_role_variant
+    from src.agents.resume_agent import generate_role_variant, _safe
     from src.agents.tailoring_agent import shortlist_decision
     from src.store.profile import get_profile, list_resumes
     from src.tracker import excel
@@ -343,7 +343,7 @@ def run_pipeline(config: dict) -> None:
 
     for row in shortlist:
         winner = by_resume.get(row["_resume_id"]) or resumes[0]
-        variant_file = output_dir / f"resume_{row['Search Category'].replace(' ', '_')}.txt"
+        variant_file = output_dir / f"resume_{_safe(row['Search Category'])}.txt"
         if variant_file.exists():
             resume_text = variant_file.read_text(encoding="utf-8")
         else:
@@ -367,9 +367,16 @@ def run_pipeline(config: dict) -> None:
     apply_now_jobs = [r for r in rows if r.get("Apply_Now") == "yes"]
     if apply_now_jobs:
         print(f"\n  Generating resume variants for {len(apply_now_jobs)} apply-now jobs...")
-        for role in {r["Search Category"] for r in apply_now_jobs}:
+        # rows is already sorted by (cat_order, -_score), so the first apply-now
+        # row seen for a category is that category's highest-scoring job — use
+        # its winning resume, not an arbitrary one.
+        role_resume: dict[str, dict] = {}
+        for r in apply_now_jobs:
+            role_resume.setdefault(r["Search Category"],
+                                   by_resume.get(r["_resume_id"]) or resumes[0])
+        for role, winner in role_resume.items():
             try:
-                generate_role_variant(role, resumes[0], output_dir, llm)
+                generate_role_variant(role, winner, output_dir, llm)
             except Exception as e:
                 logger.warning("Role variant failed for %s: %s", role, e)
 
@@ -450,6 +457,7 @@ def _serve(config: dict, port: int) -> None:
 
 # ── Tailor one job ─────────────────────────────────────────────────────────────
 def run_tailor(config: dict, jd_file: str) -> None:
+    from src.agents.resume_agent import _safe
     from src.agents.tailoring_agent import tailor_job, save_tailoring_output
     from src.store.profile import list_resumes
     from src.tracker import excel
@@ -501,7 +509,7 @@ def run_tailor(config: dict, jd_file: str) -> None:
     # A cached role variant is a better starting point than the raw resume,
     # because it was already rewritten for this kind of role.
     category  = row_data.get("Search Category", "")
-    safe_role = category.replace(" ", "_")
+    safe_role = _safe(category)
     variant_file = output_dir / f"resume_{safe_role}.txt" if safe_role else None
     if variant_file and variant_file.exists():
         resume_text = variant_file.read_text(encoding="utf-8")
