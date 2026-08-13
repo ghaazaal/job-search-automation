@@ -18,7 +18,7 @@ Phase 1 is three independent features. Ship them in sequence, not together:
 1. The map — company entity, ACT_NOW/WATCH/DISCOVER, ranking, evidence.
    Runs on existing scrape data. Single user is fine here.
 2. Multi-user shell — resume upload, role confirmation, location + work
-   mode, per-user storage.
+   mode, per-user storage. SHIPPED (Ship 1 + Ship 2).
 3. People-in-context hints — only if phase 1 gets real use.
 
 ## Scoring
@@ -33,6 +33,11 @@ seniority band, penalties that fired, location/work-mode fit.
   use reduced-confidence wording instead.
 - Do not present fabricated precision. `interview_chance` was a hardcoded
   lookup table rendered as a percentage; do not reintroduce that pattern.
+
+Scoring input comes from the user's active resumes in the store, not from a
+keyword file. `vocabulary.yaml` holds only language and market facts —
+seniority wording, known tools, employment constraints, point values. Nothing
+in it may describe a particular person.
 
 ## Design System
 Always read `DESIGN.md` before making any visual or UI decisions.
