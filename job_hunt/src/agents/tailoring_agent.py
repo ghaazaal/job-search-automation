@@ -11,17 +11,37 @@ from ..llm.base import LLMClient
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """\
-You are a professional resume coach helping Ghazal Izadi, a senior Analytics Engineer
-with 5+ years of experience in dbt, Airflow, Power BI, ClickHouse, and Python.
-Her target roles are Analytics Engineer, Data Engineer, and Data Analyst.
-Her canonical resume is provided. Always write in first person, professional tone.
-Output strictly as JSON with no prose preamble or markdown fences."""
+def build_system_prompt(resume: dict) -> str:
+    """Describe the candidate from their resume, not from a hardcoded person.
+
+    This prompt used to name one user, her stack and her target roles, which
+    quietly wrote every other user's cover letters as if they were her.
+    """
+    skills = [str(s.get("name") or "").strip()
+              for s in resume.get("skills") or []]
+    skills = [s for s in skills if s][:8]
+    roles = [str(r.get("title") or "").strip()
+             for r in resume.get("target_roles") or []]
+    roles = [r for r in roles if r]
+    seniority = str(resume.get("seniority") or "").strip()
+
+    lines = ["You are a professional resume coach helping a candidate."]
+    if seniority:
+        lines.append(f"They describe themselves as {seniority} level.")
+    if skills:
+        lines.append(f"Their main skills are {', '.join(skills)}.")
+    if roles:
+        lines.append(f"Their target roles are {', '.join(roles)}.")
+    lines.append("Their resume is provided. Always write in first person, "
+                 "professional tone.")
+    lines.append("Output strictly as JSON with no prose preamble or markdown "
+                 "fences.")
+    return "\n".join(lines)
 
 
 def tailor_job(job_description: str, resume_text: str,
                role_title: str, company_name: str,
-               llm: LLMClient) -> dict | None:
+               llm: LLMClient, resume: dict | None = None) -> dict | None:
     """Generate cover letter + highlights. Returns None on LLM failure."""
     prompt = (
         f"Job description:\n{job_description}\n\n"
@@ -30,7 +50,8 @@ def tailor_job(job_description: str, resume_text: str,
         'Output JSON: {"cover_letter":"...","highlights":["...","...","..."]}'
     )
     try:
-        text = llm.complete(prompt, system=_SYSTEM_PROMPT, max_tokens=1500)
+        text = llm.complete(prompt, system=build_system_prompt(resume or {}),
+                            max_tokens=1500)
         m = re.search(r'\{.*\}', text, re.DOTALL)
         if not m:
             logger.error("Non-JSON response from %s for %s: %s",
