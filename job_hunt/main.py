@@ -133,7 +133,7 @@ def run_pipeline(config: dict) -> None:
     output_dir = _BASE / config.get("output_dir", "output/")
     output_dir.mkdir(exist_ok=True)
 
-    tracker_path = Path(config.get("tracker_path", "../job_tracker_ghazal.xlsx"))
+    tracker_path = Path(config.get("tracker_path", "../job_tracker.xlsx"))
     if not tracker_path.is_absolute():
         tracker_path = (_BASE / tracker_path).resolve()
 
@@ -469,7 +469,7 @@ def run_tailor(config: dict, jd_file: str) -> None:
 
     output_dir = _BASE / config.get("output_dir", "output/")
     output_dir.mkdir(exist_ok=True)
-    tracker_path = Path(config.get("tracker_path", "../job_tracker_ghazal.xlsx"))
+    tracker_path = Path(config.get("tracker_path", "../job_tracker.xlsx"))
     if not tracker_path.is_absolute():
         tracker_path = (_BASE / tracker_path).resolve()
 

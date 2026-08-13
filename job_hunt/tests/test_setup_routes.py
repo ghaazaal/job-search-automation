@@ -403,6 +403,7 @@ def test_no_personal_detail_survives_in_the_committed_config():
         config = yaml.safe_load(handle)
     assert "resume" not in config
     assert "categories" not in config.get("search", {})
+    assert "ghazal" not in str(config).lower()
 
 
 def test_the_scoring_modules_name_no_individual():

@@ -30,7 +30,7 @@ tailoring:
   shortlist_score: 7       # minimum score for LLM decision layer
 
 output_dir: "output/"
-tracker_path: "../job_tracker_ghazal.xlsx"
+tracker_path: "../job_tracker.xlsx"
 
 # Company enrichment — Apify company scraper + LLM intel (stage, headcount, growth score)
 # Disabled by default while the core scrape→score→tailor pipeline stabilises.
