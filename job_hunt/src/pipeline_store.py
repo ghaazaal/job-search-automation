@@ -6,13 +6,17 @@ running a scrape.
 import sqlite3
 
 from .store.ingest import upsert_jobs
-from .store.runs import finish_run, start_run
+from .store.runs import finish_run
 
 
-def persist_run(conn: sqlite3.Connection, user_id: int,
+def persist_run(conn: sqlite3.Connection, user_id: int, run_id: int,
                 scored_jobs: list[dict], scraped: int) -> int:
-    """Write a completed scrape. Marks the run FAILED if ingest raises."""
-    run_id = start_run(conn, user_id)
+    """Write a completed scrape into a run that already exists.
+
+    The caller creates the run. A browser-triggered run needs its id returned
+    to the page before any scraping starts, so creating it here would be too
+    late; the terminal path calls `start_run` for the same reason.
+    """
     try:
         upsert_jobs(conn, user_id, run_id, scored_jobs)
     except Exception:

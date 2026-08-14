@@ -426,11 +426,13 @@ def _persist_and_launch(scored_jobs: list[dict], scraped: int,
                         shortlist_min: int, config: dict) -> None:
     """Write the run to the store. Rendering happens separately via _serve()."""
     from src.pipeline_store import persist_run
+    from src.store.runs import start_run
 
     conn = None
     try:
         conn, user_id = _open_store()
-        persist_run(conn, user_id, scored_jobs, scraped)
+        run_id = start_run(conn, user_id)
+        persist_run(conn, user_id, run_id, scored_jobs, scraped)
         print(f"  Stored {len(scored_jobs)} roles.")
     except Exception as e:
         logger.warning("Persisting the run failed: %s", e)
