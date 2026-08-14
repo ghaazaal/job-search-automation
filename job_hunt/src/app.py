@@ -9,7 +9,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, request
 
 from . import resume_intake as intake
 from .activity_page import render as render_activity
@@ -91,20 +91,31 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         conn = _conn()
         try:
             user_id = _user(conn)
+
+            # Nothing to show and nothing to search for — send them to setup
+            # rather than to an empty map they cannot act on.
+            profile = get_profile(conn, user_id)
+            resumes = list_resumes(conn, user_id, active_only=True)
+            if not resumes or not profile.get("setup_complete"):
+                return redirect("/setup")
+
             sections = map_sections(conn, user_id, shortlist_min)
-            latest = conn.execute(
-                "SELECT MAX(id) AS i FROM run WHERE user_id = ?",
-                (user_id,)).fetchone()["i"]
             tagged = (
                 [{**m, "section": "new"} for m in sections["new"]]
                 + [{**m, "section": "earlier"} for m in sections["earlier"]]
                 + [{**m, "section": "watching"} for m in sections["watching"]]
             )
+            in_flight = active_run(conn, user_id)
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
-                                   sections["new"] + sections["earlier"])})
+                                   sections["new"] + sections["earlier"])},
+                running_run_id=in_flight["id"] if in_flight else None)
+
+            # Only a finished run may be marked seen. Marking the in-flight
+            # run would file every role it is about to store as already seen.
+            latest = latest_ok_run(conn, user_id)
             if latest:
                 mark_seen(conn, user_id, latest)
             return html

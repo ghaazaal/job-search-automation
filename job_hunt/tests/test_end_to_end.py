@@ -6,6 +6,7 @@ import pytest
 from src.app import create_app
 from src.store.db import connect
 from src.store.ingest import ensure_user, upsert_jobs
+from src.store.profile import create_resume, set_profile, update_resume
 from src.store.runs import finish_run, start_run
 from src.store.schema import init_db
 
@@ -19,12 +20,28 @@ def _job(url, title="Analytics Engineer", **kw):
     return {**base, **kw}
 
 
+def _finish_setup(conn, user_id):
+    """Give the user an active resume and a complete profile, the two
+    things map_screen now requires before it will render the map at all."""
+    resume_id = create_resume(conn, user_id, label="ae",
+                              orig_filename="ae.pdf", sha256="abc",
+                              stored_path="resumes/1/abc.pdf",
+                              extracted_text="dbt")
+    update_resume(conn, user_id, resume_id, label="ae",
+                  target_roles=[{"title": "Analytics Engineer", "aliases": []}],
+                  skills=[{"name": "dbt", "tier": "core", "aliases": []}],
+                  seniority="senior")
+    set_profile(conn, user_id, location="Toronto, ON", country="ca",
+                work_modes=["remote"])
+
+
 @pytest.fixture
 def env(tmp_path):
     db = tmp_path / "e2e.db"
     conn = connect(db)
     init_db(conn)
     user_id = ensure_user(conn, "G")
+    _finish_setup(conn, user_id)
     run_id = start_run(conn, user_id)
     upsert_jobs(conn, user_id, run_id, [_job("https://x/1")])
     finish_run(conn, run_id, scraped=1, kept=1)
@@ -91,6 +108,14 @@ def test_criterion_9_no_score_in_any_response(env):
 
 
 def test_criterion_10_a_missing_database_is_created_on_demand(tmp_path):
-    app = create_app(db_path=tmp_path / "brand-new.db", user_name="G")
+    db = tmp_path / "brand-new.db"
+    assert not db.exists()
+    app = create_app(db_path=db, user_name="G")
     app.config.update(TESTING=True)
-    assert app.test_client().get("/").status_code == 200
+    # No resume or profile exists for a genuinely brand-new user, so the map
+    # route sends them to setup instead of erroring — but the db file itself
+    # must now exist, proving it was created rather than the app crashing.
+    response = app.test_client().get("/")
+    assert response.status_code == 302
+    assert "/setup" in response.headers["Location"]
+    assert db.exists()

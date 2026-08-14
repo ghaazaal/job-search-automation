@@ -5,6 +5,7 @@ from src.app import create_app
 from src.store.db import connect
 from src.store.schema import init_db
 from src.store.ingest import ensure_user, upsert_jobs
+from src.store.profile import create_resume, set_profile, update_resume
 from src.store.runs import start_run, finish_run
 
 
@@ -17,12 +18,28 @@ def _job(url, title="Analytics Engineer"):
             "matched": ["dbt"], "gaps": []}
 
 
+def _finish_setup(conn, user_id):
+    """Give the user an active resume and a complete profile, the two
+    things map_screen now requires before it will render the map at all."""
+    resume_id = create_resume(conn, user_id, label="ae",
+                              orig_filename="ae.pdf", sha256="abc",
+                              stored_path="resumes/1/abc.pdf",
+                              extracted_text="dbt")
+    update_resume(conn, user_id, resume_id, label="ae",
+                  target_roles=[{"title": "Analytics Engineer", "aliases": []}],
+                  skills=[{"name": "dbt", "tier": "core", "aliases": []}],
+                  seniority="senior")
+    set_profile(conn, user_id, location="Toronto, ON", country="ca",
+                work_modes=["remote"])
+
+
 @pytest.fixture
 def client(tmp_path):
     db = tmp_path / "test.db"
     conn = connect(db)
     init_db(conn)
     user_id = ensure_user(conn, "G")
+    _finish_setup(conn, user_id)
     run_id = start_run(conn, user_id)
     upsert_jobs(conn, user_id, run_id, [_job("https://x/1")])
     finish_run(conn, run_id, scraped=1, kept=1)
@@ -64,6 +81,7 @@ def test_earlier_section_appears_after_a_second_run(tmp_path):
     conn = connect(db)
     init_db(conn)
     user_id = ensure_user(conn, "G")
+    _finish_setup(conn, user_id)
 
     first_run = start_run(conn, user_id)
     upsert_jobs(conn, user_id, first_run,

@@ -109,6 +109,16 @@ a:hover{color:#A83519}
 .btn-n{margin-left:auto;border:0;background:transparent;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
 .btn-n:hover{color:#3A4557}
 .hidden{display:none}
+.banner{display:block;margin:0 0 20px;padding:11px 16px;border-radius:4px;
+background:#FBEFE9;border:1px solid #E8B9A6;color:#A83519;
+font:500 12.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.02em}
+.empty{padding:64px 0;text-align:center;color:#8A93A1}
+.go{margin-top:16px;display:inline-block;padding:9px 18px;border-radius:3px;
+cursor:pointer;background:#D6482B;color:#FFFDF8;border:1px solid #D6482B;
+font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
+.go:hover{background:#A83519;border-color:#A83519}
+.go.alt{background:transparent;color:#D6482B}
+.go.alt:hover{background:transparent;color:#A83519}
 """
 
 _PILL_CLASS = {"STRONG FIT": "pill-strong",
@@ -349,7 +359,8 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openKey){cl
 """
 
 
-def render(maps: list[dict], meta: dict | None = None) -> str:
+def render(maps: list[dict], meta: dict | None = None,
+           running_run_id: int | None = None) -> str:
     """Build the full opportunity map page."""
     meta = meta or {}
     listed = [m for m in maps if m.get("state") != "WATCH"]
@@ -393,6 +404,34 @@ def render(maps: list[dict], meta: dict | None = None) -> str:
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 
+    # Only counts the run has actually produced. While scraping, the total is
+    # unknown, so the banner never shows a denominator — inventing one would
+    # be the fabricated-precision pattern this project bans.
+    banner = ""
+    if running_run_id:
+        banner = (f'<a class="banner" href="/searching/{running_run_id}">'
+                  f'searching now &middot; see progress</a>')
+
+    empty = ""
+    again = ""
+    if maps:
+        again = ('<div class="again">'
+                 '<button class="go alt" onclick="startRun()">SEARCH AGAIN'
+                 '</button></div>')
+    else:
+        empty = ('<div class="empty"><p>nothing searched yet</p>'
+                 '<button class="go" onclick="startRun()">START SEARCHING'
+                 '</button></div>')
+
+    starter = """<script>
+async function startRun(){
+  const r = await fetch('/api/runs', {method:'POST'});
+  const body = await r.json();
+  if(body.run_id){ window.location = '/searching/' + body.run_id; }
+  else { alert(body.error || 'Could not start a search.'); }
+}
+</script>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -418,12 +457,16 @@ def render(maps: list[dict], meta: dict | None = None) -> str:
 </div>
 </div></div>
 <div class="wrap"><div class="col">
+{banner}
+{empty}
 {"".join(body)}
+{again}
 {_watch_shelf(watching)}
 </div></div>
 </div>
 <div id="shell" class="shell hidden"></div>
 <script>{_JS.replace("__DATA__", payload)}</script>
+{starter}
 </body>
 </html>
 """
