@@ -3,8 +3,10 @@ Resume/
 Linkedin_Profile.pdf
 data.csv
 
-# Excel tracker — binary, changes every run
-job_tracker_ghazal.xlsx
+# Excel tracker — binary, changes every run, holds real scraped listings.
+# Glob rather than one filename: the default is job_tracker.xlsx, but
+# tracker_path is configurable and each user picks their own.
+job_tracker*.xlsx
 
 # Generated design artifacts
 *.png

@@ -81,3 +81,36 @@ def test_sentence_never_ends_with_a_separator():
 def test_sentence_is_not_empty_for_any_input():
     assert compose_reason(_ev(band="STRETCH", matched=[], penalties=[],
                               seniority="mid")).strip()
+
+
+def test_the_matched_clause_names_the_resume():
+    """A person with three resumes needs to know which one this was."""
+    sentence = compose_reason({
+        "description_captured": True,
+        "matched": ["dbt", "Airflow"],
+        "seniority": "senior",
+        "penalties": [],
+        "resume_label": "bi developer",
+    })
+    assert "from your bi developer resume" in sentence
+
+
+def test_an_unlabelled_resume_still_reads_as_a_sentence():
+    sentence = compose_reason({
+        "description_captured": True,
+        "matched": ["dbt"],
+        "seniority": "mid",
+        "penalties": [],
+    })
+    assert "from your resume" in sentence
+
+
+def test_the_resume_is_named_even_when_nothing_matched():
+    sentence = compose_reason({
+        "description_captured": True,
+        "matched": [],
+        "seniority": "senior",
+        "penalties": [],
+        "resume_label": "data engineer",
+    })
+    assert "your data engineer resume" in sentence

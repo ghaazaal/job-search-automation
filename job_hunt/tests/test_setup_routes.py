@@ -383,3 +383,34 @@ def test_the_extracted_text_never_reaches_a_screen(client):
     _upload(client)
     for route in _NEW_ROUTES:
         assert b"Power BI and SQL and dbt" not in client.get(route).data
+
+
+def test_the_scorer_never_reads_a_keyword_file(client):
+    """keywords.yaml is gone. Nothing may quietly recreate it."""
+    from pathlib import Path
+    assert not (Path(__file__).parent.parent / "keywords.yaml").exists()
+
+
+def test_no_personal_detail_survives_in_the_committed_config():
+    """config.yaml is public. The four hardcoded search titles described one
+    person and are now the resume's job."""
+    from pathlib import Path
+
+    import yaml
+
+    with open(Path(__file__).parent.parent / "config.yaml",
+              encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+    assert "resume" not in config
+    assert "categories" not in config.get("search", {})
+    assert "ghazal" not in str(config).lower()
+
+
+def test_the_scoring_modules_name_no_individual():
+    """Ship 2's whole point: this tool works for whoever loads a resume."""
+    from pathlib import Path
+
+    src = Path(__file__).parent.parent / "src"
+    offenders = [path.name for path in src.rglob("*.py")
+                 if "ghazal" in path.read_text(encoding="utf-8").lower()]
+    assert offenders == []

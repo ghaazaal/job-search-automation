@@ -123,3 +123,50 @@ def test_a_failing_batch_leaves_no_partial_rows(conn):
     with pytest.raises(KeyError):
         upsert_jobs(conn, u, run_id, [_job(url="https://x/1"), bad])
     assert conn.execute("SELECT COUNT(*) c FROM role").fetchone()["c"] == 0
+
+
+def _resume_row(conn, user_id, label="ae", sha="sha-ae"):
+    from src.store.profile import create_resume
+    return create_resume(conn, user_id, label=label, orig_filename="cv.pdf",
+                         sha256=sha, stored_path=f"resumes/{user_id}/{sha}.pdf",
+                         extracted_text="dbt and Airflow")
+
+
+def test_the_winning_resume_is_recorded_on_the_role(conn):
+    user_id = ensure_user(conn, "G")
+    resume_id = _resume_row(conn, user_id)
+    run_id = start_run(conn, user_id)
+    upsert_jobs(conn, user_id, run_id,
+                [_job(url="https://x/attributed", resume_id=resume_id)])
+    stored = conn.execute(
+        "SELECT resume_id FROM role WHERE url = ?",
+        ("https://x/attributed",)).fetchone()["resume_id"]
+    assert stored == resume_id
+
+
+def test_a_job_scored_without_a_resume_stores_null(conn):
+    """Roles ingested before Ship 2 have no attribution and must not break."""
+    user_id = ensure_user(conn, "G")
+    run_id = start_run(conn, user_id)
+    upsert_jobs(conn, user_id, run_id, [_job(url="https://x/plain")])
+    stored = conn.execute(
+        "SELECT resume_id FROM role WHERE url = ?",
+        ("https://x/plain",)).fetchone()["resume_id"]
+    assert stored is None
+
+
+def test_re_running_a_scrape_updates_the_attribution(conn):
+    """A second resume can win a posting the first one won last week."""
+    user_id = ensure_user(conn, "G")
+    first = _resume_row(conn, user_id, label="ae", sha="sha-ae")
+    second = _resume_row(conn, user_id, label="bi", sha="sha-bi")
+    run_one = start_run(conn, user_id)
+    upsert_jobs(conn, user_id, run_one,
+                [_job(url="https://x/moves", resume_id=first)])
+    run_two = start_run(conn, user_id)
+    upsert_jobs(conn, user_id, run_two,
+                [_job(url="https://x/moves", resume_id=second)])
+    stored = conn.execute(
+        "SELECT resume_id FROM role WHERE url = ?",
+        ("https://x/moves",)).fetchone()["resume_id"]
+    assert stored == second

@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -126,12 +126,10 @@ CREATE INDEX IF NOT EXISTS idx_resume_user ON resume(user_id, is_active);
 # rules are already satisfied below; changing a default here can break the
 # migration on a populated database.
 #
-# Entries are (table, column, ddl) rather than bare SQL strings so each
-# statement can check for its own column before running — see
-# `_add_column_if_missing`. That check is what makes a migration safe to
-# replay against a database whose CREATE TABLE already has the column but
-# whose `user_version` hasn't caught up yet (see `init_db`'s docstring).
-_MIGRATIONS: dict[int, tuple[tuple[str, str, str], ...]] = {
+# Entries are (table, column, sql). A `column` of None marks a data migration
+# that always runs; otherwise the statement adds a column and is skipped when
+# that column already exists — see `_run_step`.
+_MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
     2: (
         ("user", "location", "ALTER TABLE user ADD COLUMN location TEXT"),
         ("user", "country", "ALTER TABLE user ADD COLUMN country TEXT"),
@@ -144,6 +142,16 @@ _MIGRATIONS: dict[int, tuple[tuple[str, str, str], ...]] = {
         ("run", "progress",
          "ALTER TABLE run ADD COLUMN progress TEXT NOT NULL DEFAULT '{}'"),
         ("run", "error", "ALTER TABLE run ADD COLUMN error TEXT"),
+    ),
+    3: (
+        # Ship 2 stops reading CANDIDATE_NAME from .env, but that value is the
+        # key `ensure_user` looks the user row up by. Rename the sole existing
+        # user rather than strand their whole map behind a name nothing sets
+        # any more. Guarded to one user, so a genuinely multi-user database is
+        # left alone, and idempotent, so replaying it is a no-op.
+        (None, None,
+         "UPDATE user SET name = 'default'"
+         " WHERE (SELECT COUNT(*) FROM user) = 1"),
     ),
 }
 
@@ -164,20 +172,27 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str,
-                            ddl: str) -> None:
-    """Run an ADD COLUMN statement unless the column is already there.
+def _run_step(conn: sqlite3.Connection, table: str | None,
+              column: str | None, sql: str) -> None:
+    """Run one migration statement.
 
-    `_DDL` always describes the current (post-migration) shape of every
-    table. `executescript` autocommits each statement as it runs, so a
-    process killed partway through a fresh CREATE TABLE run can leave a
-    table that already has every v2 column while `user_version` still reads
-    0 or 1 — the version counter and the actual table shape can disagree.
-    Checking the column directly, instead of trusting the counter, is what
-    makes replaying a migration after that kind of crash safe.
+    `column is None` marks a data migration — SQL that changes rows rather
+    than shape. Those always run, so they have to be written to be safe to
+    replay; the guard is in the statement, not here.
+
+    Otherwise the statement adds a column and is skipped when the column is
+    already present. `_DDL` always describes the current (post-migration)
+    shape of every table, and `executescript` autocommits each statement as it
+    runs, so a process killed partway through a fresh CREATE TABLE run can
+    leave a table that already has every column while `user_version` still
+    reads 0. Checking the column directly, instead of trusting the counter, is
+    what makes replaying a migration after that kind of crash safe.
     """
+    if column is None:
+        conn.execute(sql)
+        return
     if column not in _columns(conn, table):
-        conn.execute(ddl)
+        conn.execute(sql)
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -195,8 +210,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     if not fresh and version < SCHEMA_VERSION:
         with transaction(conn):
             for target in range(version + 1, SCHEMA_VERSION + 1):
-                for table, column, ddl in _MIGRATIONS.get(target, ()):
-                    _add_column_if_missing(conn, table, column, ddl)
+                for table, column, sql in _MIGRATIONS.get(target, ()):
+                    _run_step(conn, table, column, sql)
 
     # A database already migrated by newer code (version > SCHEMA_VERSION,
     # plausible across worktrees/branches during development) must not have

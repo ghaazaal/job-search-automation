@@ -1,25 +1,67 @@
 """LinkedIn scraper — wraps Apify valig~linkedin-jobs-scraper."""
 from datetime import date
+import logging
 
 from .base import call_actor, extract_description
 from ..utils._dates import normalize_date, parse_salary
 
+logger = logging.getLogger(__name__)
 
 _DATE_MAP = {1: "r86400", 7: "r604800", 14: "r604800", 30: "r2592000"}
+
+# LinkedIn's own filter codes for how a job is worked.
+_REMOTE_CODES = {"onsite": "1", "remote": "2", "hybrid": "3"}
+
+# What this scraper sent before it knew where the user lives.
+_LEGACY_LOCATION = "Worldwide"
+_LEGACY_REMOTE = ["2"]
+
+
+def _filters_for(location: str, work_modes) -> tuple[str, list[str]]:
+    """Location and remote codes for one search.
+
+    A remote-only search is worldwide by definition. Any other combination has
+    to name the place, because 'hybrid in Worldwide' is not a thing.
+    """
+    modes = [str(m).strip().lower() for m in work_modes or ()]
+    modes = [m for m in modes if m in _REMOTE_CODES]
+    if not modes:
+        return _LEGACY_LOCATION, list(_LEGACY_REMOTE)
+    codes = [_REMOTE_CODES[m] for m in modes]
+    if modes == ["remote"]:
+        return _LEGACY_LOCATION, codes
+    return ((location or "").strip() or _LEGACY_LOCATION), codes
 
 
 def scrape(category: str, title: str,
            actor_id: str, days_posted: int = 7,
            jobs_per_category: int = 50,
-           run_timeout: int = 120) -> list[dict]:
+           run_timeout: int = 120,
+           location: str = _LEGACY_LOCATION,
+           country: str = "us",
+           work_modes=("remote",)) -> list[dict]:
+    where, codes = _filters_for(location, work_modes)
     payload = {
         "title":      title,
-        "location":   "Worldwide",
-        "remote":     ["2"],
+        "location":   where,
+        "remote":     codes,
         "datePosted": _DATE_MAP.get(days_posted, "r604800"),
         "limit":      jobs_per_category,
     }
     raw = call_actor(actor_id, payload, f"LinkedIn/{category}", run_timeout)
+
+    # See the note in indeed.py: a rejected payload is indistinguishable from
+    # an empty search, so retry once with the values known to work.
+    legacy = {**payload, "location": _LEGACY_LOCATION,
+              "remote": list(_LEGACY_REMOTE)}
+    if not raw and legacy != payload:
+        logger.warning(
+            "LinkedIn returned nothing for %s with location=%r remote=%r — "
+            "retrying with the legacy Worldwide/remote payload",
+            category, payload["location"], payload["remote"])
+        raw = call_actor(actor_id, legacy, f"LinkedIn/{category} (legacy)",
+                         run_timeout)
+
     today = date.today().isoformat()
     jobs: list[dict] = []
     for item in raw:

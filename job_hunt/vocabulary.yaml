@@ -1,0 +1,126 @@
+# vocabulary.yaml — language and market facts, not personal preferences.
+#
+# What a person is good at lives in their resume. This file holds only what is
+# true regardless of who is searching: how seniority is worded in job titles,
+# which tools the market names, which employment constraints rule a posting
+# out, and the point values the scorer spends.
+
+# Words that carry no signal when comparing a target role to a job title.
+# Seniority words are here on purpose: seniority is scored separately, so a
+# target role of "Senior Data Engineer" should still match a "Data Engineer"
+# posting on the title and let the seniority rule decide the rest.
+stopwords:
+  - the
+  - and
+  - for
+  - with
+  - our
+  - you
+  - your
+  - job
+  - role
+  - new
+  - senior
+  - junior
+  - staff
+  - principal
+  - lead
+  - entry
+  - intern
+  - associate
+  - head
+  - chief
+
+seniority:
+  senior_keywords: ["senior", "sr.", "sr ", "staff", "principal", "lead",
+                    "manager", "director", "head of", "vp ", "vice president"]
+  junior_keywords: ["junior", "jr.", "jr ", "intern", "entry", "associate ",
+                    "analyst i ", "engineer i "]
+  exec_keywords:   ["vp ", "vice president", "director", "head of", "executive"]
+
+# Technology commonly named in job posts. Two jobs: anything here that appears
+# in a description but is not on the resume is reported as a gap, and the
+# ratio of named-to-yours drives the mismatch penalty below.
+#
+# The second block is what the deleted `legacy_tech` and `frontend_tech`
+# penalty lists used to name. They are market facts — these tools exist and
+# get named in postings — so they belong here. Whether any of them counts
+# against you is now decided by the ratio rule, not by a hardcoded verdict
+# that React is bad.
+market_tools:
+  - snowflake
+  - databricks
+  - bigquery
+  - redshift
+  - looker
+  - spark
+  - kafka
+  - dagster
+  - prefect
+  - fivetran
+  - terraform
+  - kubernetes
+  - docker
+  - scala
+  - java
+  - "aws"
+  - "gcp"
+  - azure
+  - sigma
+  - segment
+  - snowpark
+  - airbyte
+  - react
+  - angular
+  - vue
+  - ruby
+  - rails
+  - ios
+  - android
+  - php
+  - salesforce
+  - sharepoint
+  - cobol
+  - mainframe
+  - coldfusion
+
+# Fires when a posting names plenty of tooling and almost none of it is yours.
+# Replaces the old hardcoded legacy_tech/frontend_tech lists, which only made
+# sense for a data person — a ratio lands hard on a React posting for someone
+# whose stack is dbt, and softly on the same posting for a React developer.
+# The floor exists so a posting naming two tools cannot be judged on a sample
+# that small.
+mismatch:
+  min_tools:  4
+  hard_ratio: 0.25
+  hard_value: 20
+  soft_ratio: 0.5
+  soft_value: 10
+
+# Employment constraints. These rule a posting out whatever your skills are.
+penalties:
+  "w2 only":    15
+  clearance:    30
+  secret:       30
+  cpt:          20
+  opt:          20
+  exec_penalty: 10
+
+# Point values. Kept here rather than in code so the weights can be tuned
+# without a commit to src/. These are seeds, not findings — validating them
+# against real outcomes is what the `event` table is for.
+title_scores:
+  exact:       40
+  all_tokens:  25
+  some_tokens: 15
+  none:        5
+
+seniority_scores:
+  same:      20
+  one_apart: 12
+  far:       4
+
+skill_scores:
+  core:    5
+  working: 2
+  cap:     20
