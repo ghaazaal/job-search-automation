@@ -3,6 +3,7 @@
 The runner is injected through create_app so no test scrapes anything.
 """
 import json
+import re
 
 import pytest
 
@@ -309,3 +310,46 @@ def test_starting_a_run_before_setup_is_complete_is_refused(tmp_path, monkeypatc
     response = _client(path, tmp_path).post("/api/runs")
     assert response.status_code == 400
     assert "setup" in response.get_json()["error"].lower()
+
+
+def test_no_new_route_exposes_a_score_or_a_percentage(client, db):
+    """The product rule: a number is for ranking, never for reading."""
+    run_id = client.post("/api/runs").get_json()["run_id"]
+
+    for path in ("/api/runs/%s" % run_id, "/searching/%s" % run_id):
+        body = client.get(path).get_data(as_text=True)
+        assert "match_score" not in body, path
+        assert "interview_chance" not in body.lower(), path
+        # /searching/<id> is HTML and legitimately has "%" in its CSS
+        # (border-radius:50%), so check the visible text only, not the
+        # markup and stylesheet. /api/runs/<id> is plain JSON with no such
+        # false positive, so the raw body is fine there.
+        visible = re.sub(r"<style.*?</style>", "", body, flags=re.S)
+        visible = re.sub(r"<script.*?</script>", "", visible, flags=re.S)
+        visible = re.sub(r"<[^>]+>", " ", visible)
+        assert "%" not in visible, path
+
+
+def test_the_worker_never_writes_excel():
+    """The browser run stops after scoring. Excel belongs to the terminal."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "src" / "run_core.py").read_text(
+        encoding="utf-8")
+    import_lines = [line for line in source.splitlines()
+                    if re.match(r"^\s*(import|from)\s", line)]
+    assert not any("excel" in line.lower() for line in import_lines)
+
+
+def test_the_core_knows_nothing_about_flask_or_threads():
+    """run_core is shared by a request handler and a CLI. It stays pure."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).parent.parent / "src" / "run_core.py").read_text(
+        encoding="utf-8")
+    import_lines = [line for line in source.splitlines()
+                    if re.match(r"^\s*(import|from)\s", line)]
+    assert not any("flask" in line.lower() for line in import_lines)
+    assert not any("threading" in line.lower() for line in import_lines)

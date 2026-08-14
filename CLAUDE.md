@@ -59,4 +59,9 @@ The live product is a local Flask app (`job_hunt/src/app.py`):
 `GET /` renders the opportunity map (`job_hunt/src/map_page.py`), `GET
 /activity` renders the in-flight application board
 (`job_hunt/src/activity_page.py`), both reading from the SQLite store
-(`job_hunt/src/store/`). Run it with `python main.py --serve`.
+(`job_hunt/src/store/`). Run it with `python main.py --serve`. Scrapes
+start from the browser: `POST /api/runs` opens a run, `GET
+/searching/<id>` watches it, and `/` redirects to `/setup` until a resume
+and a location are on file. The browser run stops after scoring — the LLM
+shortlist, resume variants and the Excel tracker still belong to `python
+main.py`.
