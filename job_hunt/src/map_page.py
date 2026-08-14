@@ -109,6 +109,10 @@ a:hover{color:#A83519}
 .btn-n{margin-left:auto;border:0;background:transparent;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
 .btn-n:hover{color:#3A4557}
 .hidden{display:none}
+.fold-btn{display:flex;align-items:center;gap:14px;margin-top:4px;align-self:stretch;border:0;background:transparent;padding:0;cursor:pointer;text-align:left}
+.fold-btn span.lbl{flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
+.fold-btn:hover span.lbl{color:#4C5768}
+.fold-btn i{flex:1;height:1px;background:#DED5C1}
 .banner{display:block;margin:0 0 20px;padding:11px 16px;border-radius:4px;
 background:#FBEFE9;border:1px solid #E8B9A6;color:#A83519;
 font:500 12.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.02em}
@@ -343,7 +347,9 @@ document.addEventListener('click',function(e){
   if(e.target.closest('[data-close]')){close();return;}
   const t=e.target.closest('.tab'); if(t){roleIdx=parseInt(t.getAttribute('data-i'),10);render();return;}
   const n=e.target.closest('[data-next]');
-  if(n){const co=DATA[openKey]; if(roleIdx<co.roles.length-1){roleIdx++;render();}else{close();}}
+  if(n){const co=DATA[openKey]; if(roleIdx<co.roles.length-1){roleIdx++;render();}else{close();}return;}
+  const f=e.target.closest('[data-expand]');
+  if(f){const grp=document.getElementById(f.getAttribute('data-expand'));if(grp){grp.classList.remove('hidden');}f.remove();}
 });
 async function post(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -379,23 +385,27 @@ def render(maps: list[dict], meta: dict | None = None,
     fresh = [m for m in listed if m.get("section", "new") == "new"]
     earlier = [m for m in listed if m.get("section") == "earlier"]
 
-    def _emit(group: list[dict], allow_lead: bool) -> None:
+    def _emit(group: list[dict], allow_lead: bool, group_id: str) -> None:
         for i, m in enumerate(group[:_LEAD_VISIBLE]):
             if not m.get("roles"):
                 continue
             key = keys[id(m)]
             body.append(_lead_card(m, key) if i == 0 and allow_lead and act_now
                         else _compact_card(m, key))
-        left = len(group) - len(group[:_LEAD_VISIBLE])
-        if left > 0:
-            noun = "COMPANY" if left == 1 else "COMPANIES"
-            body.append(f'<div class="fold"><i></i><span>{left} MORE {noun} '
-                        f'WITH OPEN ROLES</span><i></i></div>')
+        rest = [m for m in group[_LEAD_VISIBLE:] if m.get("roles")]
+        if rest:
+            noun = "COMPANY" if len(rest) == 1 else "COMPANIES"
+            rest_html = "".join(_compact_card(m, keys[id(m)]) for m in rest)
+            body.append(
+                f'<button type="button" class="fold-btn" data-expand="{group_id}">'
+                f'<i></i><span class="lbl">{len(rest)} MORE {noun} '
+                f'WITH OPEN ROLES</span><i></i></button>'
+                f'<div id="{group_id}" class="hidden">{rest_html}</div>')
 
-    _emit(fresh, allow_lead=True)
+    _emit(fresh, allow_lead=True, group_id="more-fresh")
     if earlier:
         body.append(_section_heading("still here from earlier"))
-        _emit(earlier, allow_lead=False)
+        _emit(earlier, allow_lead=False, group_id="more-earlier")
 
     n_co = meta.get("companies", len(maps))
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
