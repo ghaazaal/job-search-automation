@@ -4,7 +4,9 @@ No SQL lives here. Routes call the store and hand read models to renderers.
 Binds to localhost only — this is a local application, not a service.
 """
 import logging
+import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -14,13 +16,16 @@ from .activity_page import render as render_activity
 from .agents.profile_parser import parse_profile
 from .llm.base import LLMClient
 from .map_page import render as render_map
+from .run_core import search_titles
+from .run_worker import run_in_background, work
 from .setup_page import render_confirm, render_profile, render_upload
-from .store.db import DEFAULT_PATH, connect
+from .store.db import DEFAULT_PATH, connect, transaction
 from .store.ingest import ensure_user
 from .store.profile import (create_resume, delete_resume, get_profile,
                             get_resume, list_resumes, resume_by_sha,
                             set_profile, unique_label, update_resume)
 from .store.queries import activity_board, map_sections, mark_seen
+from .store.runs import active_run, fail_run, get_run, is_stale, latest_ok_run
 from .store.schema import init_db
 from .store.tracking import COMPANY_STATES, STATUSES, set_company_state, set_role_status
 from .utils.pdf import extract_text
@@ -29,6 +34,10 @@ logger = logging.getLogger(__name__)
 
 # Uploaded resumes live next to the database, not in the source tree.
 DEFAULT_DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _default_llm() -> LLMClient:
@@ -46,7 +55,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                user_name: str = "default",
                shortlist_min: int = 7,
                data_root: Path | str = DEFAULT_DATA_ROOT,
-               llm_factory=None) -> Flask:
+               llm_factory=None,
+               runner=None,
+               run_in_thread: bool = True) -> Flask:
     app = Flask(__name__)
 
     # Defense in depth: reject a request body far larger than any legitimate
@@ -61,6 +72,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
 
     data_root = Path(data_root)
     build_llm = llm_factory or _default_llm
+
+    # Injected so tests drive a run synchronously instead of chasing a thread.
+    run_runner = runner
 
     def _conn():
         conn = connect(db_path)
@@ -257,6 +271,74 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             return jsonify({"saved": True})
         except ValueError as bad:
             return jsonify({"error": str(bad)}), 400
+        finally:
+            conn.close()
+
+    @app.post("/api/runs")
+    def start_scrape():
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+
+            # Refuse before creating a row. A run that exists only to fail two
+            # seconds later is worse than a clear message now.
+            resumes = list_resumes(conn, user_id, active_only=True)
+            if not resumes:
+                return jsonify({"error": "Upload a resume before searching."}), 400
+            if not search_titles(resumes):
+                return jsonify({"error": "Your resumes name no target roles. "
+                                         "Add one on the profile screen."}), 400
+            if not os.environ.get("APIFY_TOKEN"):
+                return jsonify({"error": "APIFY_TOKEN is not set, so no "
+                                         "search can run."}), 400
+
+            # Check and insert together: transaction() uses BEGIN IMMEDIATE,
+            # so two rapid posts cannot both find no RUNNING run.
+            with transaction(conn):
+                existing = active_run(conn, user_id)
+                if existing and not is_stale(existing["started_at"]):
+                    return jsonify(
+                        {"error": "A search is already running.",
+                         "run_id": existing["id"]}), 409
+                if existing:
+                    conn.execute(
+                        "UPDATE run SET status = 'FAILED', error = ?"
+                        " WHERE id = ?",
+                        ("abandoned — superseded by a new search",
+                         existing["id"]))
+                conn.execute(
+                    "INSERT INTO run (user_id, started_at, status)"
+                    " VALUES (?, ?, 'RUNNING')", (user_id, _utc_now()))
+            run_id = conn.execute(
+                "SELECT last_insert_rowid() AS i").fetchone()["i"]
+        finally:
+            conn.close()
+
+        try:
+            if run_in_thread:
+                run_in_background(db_path, user_id, run_id, run_runner)
+            else:
+                work(db_path, user_id, run_id, run_runner)
+        except Exception as exc:
+            fail_conn = connect(db_path)
+            try:
+                fail_run(fail_conn, run_id, str(exc))
+            finally:
+                fail_conn.close()
+            return jsonify({"error": "Could not start the search."}), 500
+        return jsonify({"run_id": run_id}), 201
+
+    @app.get("/api/runs/<int:run_id>")
+    def poll_scrape(run_id: int):
+        conn = _conn()
+        try:
+            stored = get_run(conn, run_id)
+            if stored is None:
+                return jsonify({"error": "not found"}), 404
+            return jsonify({"status": stored["status"],
+                            "stage": stored["stage"],
+                            "progress": stored["progress"],
+                            "error": stored["error"]})
         finally:
             conn.close()
 
