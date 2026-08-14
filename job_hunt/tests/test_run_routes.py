@@ -286,3 +286,26 @@ def test_the_progress_screen_polls_its_own_run(client):
 
 def test_the_progress_screen_404s_for_an_unknown_run(client):
     assert client.get("/searching/9999").status_code == 404
+
+
+def test_starting_a_run_before_setup_is_complete_is_refused(tmp_path, monkeypatch):
+    """Skipping the location step on the confirm screen must not let a
+    search start with no location on file."""
+    monkeypatch.setenv("APIFY_TOKEN", "apify_test")
+    path = tmp_path / "no_profile.db"
+    conn = connect(path)
+    init_db(conn)
+    user_id = ensure_user(conn, "default")
+    resume_id = create_resume(conn, user_id, label="bi",
+                              orig_filename="bi.pdf", sha256="abc",
+                              stored_path="resumes/1/abc.pdf",
+                              extracted_text="Power BI")
+    update_resume(conn, user_id, resume_id, label="bi",
+                  target_roles=[{"title": "BI Developer", "aliases": []}],
+                  skills=[{"name": "Power BI", "tier": "core", "aliases": []}],
+                  seniority="senior")
+    conn.close()  # deliberately no set_profile call — setup_complete stays 0
+
+    response = _client(path, tmp_path).post("/api/runs")
+    assert response.status_code == 400
+    assert "setup" in response.get_json()["error"].lower()

@@ -55,6 +55,23 @@ input[type=text]:focus{outline:0;border-color:#2E7D5B}
 .rname{font:500 15px/1.3 Inter,sans-serif;color:#1F2937}
 .rmeta{margin-left:auto;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
 .off{opacity:.55}
+.go{display:inline-block;padding:9px 16px;border-radius:3px;
+cursor:pointer;background:#D6482B;color:#FFFDF8;border:1px solid #D6482B;
+font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
+.go:hover{background:#A83519;border-color:#A83519}
+"""
+
+# Both screens start a run the same way. Kept here rather than duplicated so
+# the two cannot drift apart.
+_STARTER = """
+<script>
+async function startRun() {
+  const r = await fetch('/api/runs', {method: 'POST'});
+  const body = await r.json();
+  if (body.run_id) { window.location = '/searching/' + body.run_id; }
+  else { alert(body.error || 'Could not start a search.'); }
+}
+</script>
 """
 
 
@@ -215,7 +232,8 @@ document.getElementById('save').addEventListener('click', async function(){
       work_modes: modes});
   }
   if(err){ out.className = 'note err'; out.textContent = err; return; }
-  location.href = '/profile';
+  out.textContent = 'Starting your first search...';
+  await startRun();
 });
 drawRoles();
 drawSkills();
@@ -274,7 +292,8 @@ def render_confirm(resume: dict, profile: dict, ask_location: bool) -> str:
         f'<div class="opts">{radios}</div></div>'
         f'{_location_block(profile) if ask_location else ""}'
         '<div class="foot">'
-        '<button type="button" id="save" class="btn-p">SAVE THIS PROFILE</button>'
+        '<button type="button" id="save" class="btn-p">'
+        'LOOKS RIGHT &mdash; START SEARCHING</button>'
         '<a class="btn-q" href="/profile">SKIP FOR NOW</a>'
         '<span id="msg" class="note"></span></div></div>'
     )
@@ -289,7 +308,8 @@ def render_confirm(resume: dict, profile: dict, ask_location: bool) -> str:
         "Confirm your profile", "we read your resume as...",
         "Change anything that is wrong. Everything the tool does next is "
         "built on this.",
-        body, script, nav='<a href="/profile">ALL RESUMES &rarr;</a>')
+        body + _STARTER, script,
+        nav='<a href="/profile">ALL RESUMES &rarr;</a>')
 
 
 _PROFILE_JS = """
@@ -327,17 +347,30 @@ def render_profile(resumes: list[dict], profile: dict) -> str:
         listing = ('<div class="note">No resumes yet. '
                    '<a href="/setup">Add one</a>.</div>')
 
-    where = profile.get("location") or "not set"
-    modes = ", ".join(profile.get("work_modes") or []) or "not set"
+    complete = bool(profile.get("setup_complete"))
+    search = ('<button class="go" onclick="startRun()">SEARCH NOW</button>'
+              if resumes and complete else "")
+
+    if complete:
+        where = profile.get("location") or "not set"
+        modes = ", ".join(profile.get("work_modes") or []) or "not set"
+        where_note = f'<div class="note">{_e(where)} &middot; {_e(modes)}</div>'
+    else:
+        fix_href = (f"/setup/confirm/{int(resumes[0]['id'])}" if resumes
+                    else "/setup")
+        where_note = (f'<div class="note">Not set. '
+                      f'<a href="{fix_href}">Add it</a> before searching.</div>')
+
     body = (
         f'<div class="card"><span class="lab">YOUR RESUMES</span>{listing}'
         '<div class="foot"><a class="btn-p" href="/setup">ADD A RESUME</a>'
-        '</div></div>'
+        f'{search}</div></div>'
         '<div class="card"><span class="lab">WHERE YOU ARE LOOKING</span>'
-        f'<div class="note">{_e(where)} &middot; {_e(modes)}</div></div>'
+        f'{where_note}</div></div>'
     )
     return _shell(
         "Your profile", "your profile",
         "One person, many resumes. Each active resume adds its target roles "
         "to the search.",
-        body, _PROFILE_JS, nav='<a href="/">&larr; BACK TO MAP</a>')
+        body + _STARTER, _PROFILE_JS,
+        nav='<a href="/">&larr; BACK TO MAP</a>')

@@ -304,6 +304,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             if not os.environ.get("APIFY_TOKEN"):
                 return jsonify({"error": "APIFY_TOKEN is not set, so no "
                                          "search can run."}), 400
+            if not get_profile(conn, user_id).get("setup_complete"):
+                return jsonify({"error": "Finish setup — add your location "
+                                         "and work mode — before searching."}), 400
 
             # Check and insert together: transaction() uses BEGIN IMMEDIATE,
             # so two rapid posts cannot both find no RUNNING run.
