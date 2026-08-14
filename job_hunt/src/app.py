@@ -25,7 +25,8 @@ from .store.profile import (create_resume, delete_resume, get_profile,
                             get_resume, list_resumes, resume_by_sha,
                             set_profile, unique_label, update_resume)
 from .store.queries import activity_board, map_sections, mark_seen
-from .store.runs import active_run, fail_run, get_run, is_stale, latest_ok_run
+from .store.runs import (active_run, clear_running, fail_run, get_run,
+                         is_stale, latest_ok_run)
 from .store.schema import init_db
 from .store.tracking import COMPANY_STATES, STATUSES, set_company_state, set_role_status
 from .utils.pdf import extract_text
@@ -351,5 +352,24 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                                   get_profile(conn, user_id))
         finally:
             conn.close()
+
+    # Any RUNNING run belongs to a process that is no longer here — at boot
+    # none of ours are alive yet. Without this one hard kill locks the user
+    # out of ever starting another run, because POST /api/runs sees a RUNNING
+    # row and refuses.
+    #
+    # This must stay in create_app, which runs once. init_db() is called by
+    # _conn() on every single request; recovering there would mark the run
+    # currently in flight as failed.
+    _boot_conn = connect(db_path)
+    try:
+        init_db(_boot_conn)
+        cleared = clear_running(_boot_conn,
+                                "interrupted — the app restarted mid-run")
+        if cleared:
+            logger.info("Cleared %s run(s) left running by a previous process",
+                        cleared)
+    finally:
+        _boot_conn.close()
 
     return app
