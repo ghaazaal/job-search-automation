@@ -5,7 +5,8 @@ running a scrape.
 """
 import sqlite3
 
-from .store.ingest import finish_run, start_run, upsert_jobs
+from .store.ingest import upsert_jobs
+from .store.runs import finish_run, start_run
 
 
 def persist_run(conn: sqlite3.Connection, user_id: int,

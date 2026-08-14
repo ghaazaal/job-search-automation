@@ -5,7 +5,8 @@ import pytest
 
 from src.app import create_app
 from src.store.db import connect
-from src.store.ingest import ensure_user, finish_run, start_run, upsert_jobs
+from src.store.ingest import ensure_user, upsert_jobs
+from src.store.runs import finish_run, start_run
 from src.store.schema import init_db
 
 

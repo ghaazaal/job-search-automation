@@ -30,23 +30,6 @@ def ensure_user(conn: sqlite3.Connection, name: str, email: str = "") -> int:
     return conn.execute("SELECT id FROM user WHERE name = ?", (name,)).fetchone()["id"]
 
 
-def start_run(conn: sqlite3.Connection, user_id: int) -> int:
-    with transaction(conn):
-        conn.execute(
-            "INSERT INTO run (user_id, started_at, status) VALUES (?, ?, 'RUNNING')",
-            (user_id, _now()))
-    return conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
-
-
-def finish_run(conn: sqlite3.Connection, run_id: int,
-               scraped: int, kept: int, ok: bool = True) -> None:
-    with transaction(conn):
-        conn.execute(
-            """UPDATE run SET status = ?, finished_at = ?, scraped = ?, kept = ?
-               WHERE id = ?""",
-            ("OK" if ok else "FAILED", _now(), scraped, kept, run_id))
-
-
 def _company_id(conn: sqlite3.Connection, user_id: int, name: str) -> int:
     fp = fingerprint({"company": name, "title": ""})
     row = conn.execute(
