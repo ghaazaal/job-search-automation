@@ -8,7 +8,7 @@ from src.store.schema import init_db
 from src.store.ingest import ensure_user, upsert_jobs
 from src.store.runs import start_run, finish_run
 from src.store.tracking import set_role_status, set_company_state
-from src.store.queries import map_sections, activity_board, mark_seen
+from src.store.queries import map_sections, activity_board, mark_seen, known_listings
 
 
 def _job(url, company="Acme", title="Analytics Engineer", score=9, **kw):
@@ -180,3 +180,37 @@ def test_activity_read_model_carries_no_score(conn):
     role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
     set_role_status(conn, u, role_id, "SAVED")
     assert "match_score" not in json.dumps(activity_board(conn, u), default=str)
+
+
+def test_nothing_is_known_in_an_empty_store(conn):
+    u = ensure_user(conn, "G")
+    urls, rows = known_listings(conn, u)
+    assert (urls, rows) == ([], [])
+
+
+def test_a_stored_role_is_reported_by_url(conn):
+    u = ensure_user(conn, "G")
+    upsert_jobs(conn, u, start_run(conn, u), [_job("https://example.com/j1")])
+
+    urls, _ = known_listings(conn, u)
+    assert urls == ["https://example.com/j1"]
+
+
+def test_company_and_title_come_back_for_fingerprinting(conn):
+    """dedupe needs these to catch a repost whose URL changed."""
+    u = ensure_user(conn, "G")
+    upsert_jobs(conn, u, start_run(conn, u),
+                [_job("https://example.com/j1", title="BI Developer", company="Acme")])
+
+    _, rows = known_listings(conn, u)
+    assert rows == [{"company": "Acme", "title": "BI Developer"}]
+
+
+def test_another_users_roles_are_not_reported(conn):
+    mine = ensure_user(conn, "G")
+    theirs = ensure_user(conn, "someone else")
+    upsert_jobs(conn, theirs, start_run(conn, theirs),
+                [_job("https://example.com/theirs")])
+
+    urls, rows = known_listings(conn, mine)
+    assert (urls, rows) == ([], [])
