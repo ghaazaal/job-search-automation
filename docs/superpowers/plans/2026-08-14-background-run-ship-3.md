@@ -1185,20 +1185,59 @@ git commit -m "feat: one scrape-and-score path both callers share"
 ## Task 6: The terminal runs on the core
 
 **Files:**
-- Modify: `job_hunt/main.py:120-421` (`run_pipeline`)
-- Test: `job_hunt/tests/test_pipeline_titles.py` (existing — update the import)
+- Modify: `job_hunt/main.py:120-441` (`run_pipeline`, then delete `_persist_and_launch`)
+- Modify: `job_hunt/tests/test_pipeline_titles.py` (existing — update the import)
+- Modify: `job_hunt/tests/test_pipeline_store.py` (remove one obsolete test)
 
-No behaviour change is intended here. The live smoke test in Task 14 is what
-proves it. Adds 0 tests.
+**Correction found during pre-dispatch verification (2026-08-14), before any
+task-5 code existed to check against:** the original draft of this task
+dropped real company enrichment (hardcoding the "disabled" branch even when
+`config.yaml` turns it on), left a now-unused `excel.read_existing()` call in
+place as dead code, and didn't account for `_persist_and_launch` becoming
+fully dead code whose only remaining caller is a Task-2 regression test. All
+three are fixed below. Net effect on the suite: **-1 test** (461, not 464) —
+Task 5 ended at 462; this task removes one obsolete test and adds none.
+
+**Second correction, caught during implementation:** the given code below only
+renumbers the steps inside the block it replaces (`[2/7]` through `[5/7]`).
+The untouched step-1 print ("Reading your profile") still reads `[1/8]`, and
+the untouched trailing steps (LLM shortlist, saving the tracker) still read
+`[7/8]`/`[8/8]` — a mix of two denominators with `[6/...]` skipped entirely.
+Those three prints, outside this task's given code block, must also change:
+`[1/8]` → `[1/7]`, `[7/8]` → `[6/7]`, `[8/8]` → `[7/7]`.
+
+**Third correction, caught by code-quality review:** `_announce`'s `_printed`
+flag (below) was originally written to mutate the step dict itself — that
+worked when steps were a single mutable list shared across every progress
+event, but a prior task's review fixed `run_core.execute()`'s `report()` to
+emit a fresh copy of every step on every call (so a caller retaining an event
+can't have it corrupted by later mutation). That fix silently broke this
+de-duplication: a flag set on one call's copy is gone by the next call, so
+every already-completed step re-prints on every subsequent progress event.
+The `_announce` given below already has the fix — a `printed_steps` set
+captured by the closure, keyed by `(source, role)`, instead of a per-dict
+flag.
 
 - [ ] **Step 1: Move search_titles out of main.py**
 
 `main.py` has its own `_search_titles`. `run_core.search_titles` is the same
-function and is now the shared one. Delete `_search_titles` from `main.py` and
-add to the imports inside `run_pipeline`:
+function and is now the shared one. Delete `_search_titles` from `main.py`
+(lines 87-102) and add to the imports inside `run_pipeline`:
 
 ```python
     from src.run_core import execute as run_core_execute, search_titles
+```
+
+Change the call site inside `run_pipeline` from:
+
+```python
+    titles = _search_titles(resumes)
+```
+
+to:
+
+```python
+    titles = search_titles(resumes)
 ```
 
 Update `job_hunt/tests/test_pipeline_titles.py` to import from the new home —
@@ -1217,49 +1256,95 @@ from src.run_core import search_titles as _search_titles
 - [ ] **Step 2: Replace steps 2 through 6 of run_pipeline**
 
 In `job_hunt/main.py`, replace everything from the `# ── 2. Read existing
-tracker ───` comment through the `rows.sort(...)` line (currently lines
-181-335) with:
+tracker ───` comment through the `rows.sort(...)` line (lines 181-335) with:
 
 ```python
-    # ── 2. Read existing tracker ───────────────────────────────────────────
-    print("\n[2/8] Reading existing tracker...")
-    existing = excel.read_existing(tracker_path)
-    print(f"  Loaded {len(existing)} existing jobs.")
-
-    # ── 3. Scrape ──────────────────────────────────────────────────────────
+    # ── 2. Scrape (steps 2-5 happen inside run_core.execute) ────────────────
     if not os.environ.get("APIFY_TOKEN"):
         print("\n  ERROR: APIFY_TOKEN not set.")
         print("  PowerShell:  $env:APIFY_TOKEN = 'apify_api_xxx'")
         sys.exit(1)
 
-    print(f"\n[3/8] Scraping Indeed + LinkedIn (last {days_posted} days)...")
+    print(f"\n[2/7] Scraping Indeed + LinkedIn (last {days_posted} days)...")
 
-    # Company enrichment is disabled by default; when it is on it runs between
-    # dedupe and scoring, which is what run_core's enrich hook is for.
+    # Company enrichment is disabled by default; the block below — unchanged
+    # from before this refactor — only runs when config turns it on. It sits
+    # inside run_core's enrich hook because that is the one point between
+    # dedupe and scoring that both callers of execute() share.
+    enrichment_enabled = config.get("company_enrichment", {}).get("enabled", False)
+
     def _enrich(new_jobs: list[dict]) -> list[dict]:
-        print("\n[4/8] Deduplicating...")
+        print("\n[3/7] Deduplicating...")
         print(f"  {len(new_jobs)} new jobs")
-        print("\n[5/8] Company enrichment: disabled "
-              "(set company_enrichment.enabled: true in config.yaml "
-              "to activate)")
-        _passthrough = {"headcount_range": "", "stage": "", "growth_score": "",
-                        "source": ""}
-        for job in new_jobs:
-            job["_intel"] = _passthrough
-            job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
-        print(f"\n[6/8] Scoring {len(new_jobs)} jobs against "
+
+        if enrichment_enabled:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from src.agents.company_agent import lookup as company_lookup
+            from src.filters.company_filter import CompanyFilter
+            from src.tracker.cache import CompanyCache
+
+            unique_companies = list({j["company"] for j in new_jobs if j["company"]})
+            print(f"\n[4/7] Company enrichment ({len(unique_companies)} companies)...")
+            cache = CompanyCache(
+                ttl_days=config.get("company_filter", {}).get("cache_ttl_days", 7))
+            company_intel: dict[str, dict] = {}
+
+            def _fetch_intel(company: str) -> tuple[str, dict]:
+                return company, company_lookup(company, config, llm, cache)
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
+                for done_idx, fut in enumerate(as_completed(futures), start=1):
+                    c, intel = fut.result()
+                    company_intel[c] = intel
+                    if done_idx % 10 == 0:
+                        print(f"  {done_idx}/{len(unique_companies)} resolved")
+            print(f"  Done — {len(company_intel)} companies enriched")
+
+            filt = CompanyFilter(config)
+            filtered = 0
+            for job in new_jobs:
+                intel  = company_intel.get(job["company"],
+                                           {"stage": "unknown", "growth_score": 5})
+                result = filt.evaluate(job["company"], intel)
+                job["_intel"]  = intel
+                job["_filter"] = result
+                if result["verdict"] == "REJECT":
+                    filtered += 1
+            print(f"  {len(new_jobs) - filtered} pass | {filtered} filtered")
+        else:
+            print("\n[4/7] Company enrichment: disabled "
+                  "(set company_enrichment.enabled: true in config.yaml "
+                  "to activate)")
+            _passthrough = {"stage": "", "growth_score": "", "headcount_range": "",
+                            "source": "", "verdict": "PASS"}
+            for job in new_jobs:
+                job["_intel"]  = _passthrough
+                job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
+
+        print(f"\n[5/7] Scoring {len(new_jobs)} jobs against "
               f"{len(resumes)} resume(s)...")
         return new_jobs
 
+    printed_steps: set[tuple[str, str]] = set()
+
     def _announce(event: dict) -> None:
-        """Print each scrape step as it finishes, as this always has."""
+        """Print each scrape step as it finishes, as this always has.
+
+        `event["steps"]` is a fresh copy on every call — run_core.execute's
+        report() snapshots it so a caller that retains an event can't have it
+        mutated later. That means de-duplication can't be tracked by mutating
+        the step dicts themselves (a `_printed` flag set here is discarded the
+        instant this function returns); it has to live in this closure.
+        """
         for step in event["steps"]:
-            if step.get("state") == "done" and not step.get("_printed"):
-                step["_printed"] = True
+            key = (step["source"], step["role"])
+            if step.get("state") == "done" and key not in printed_steps:
+                printed_steps.add(key)
                 print(f"  {step['source']} / {step['role']}...")
                 print(f"    -> {step['found']} fetched")
-            elif step.get("state") == "failed" and not step.get("_printed"):
-                step["_printed"] = True
+            elif step.get("state") == "failed" and key not in printed_steps:
+                printed_steps.add(key)
                 print(f"  {step['source']} / {step['role']}... FAILED")
 
     conn, user_id = _open_store()
@@ -1276,7 +1361,6 @@ tracker ───` comment through the `rows.sort(...)` line (currently lines
         conn.close()
 
     print(f"\n  Total scraped: {result.scraped}")
-    filtered_out_count = 0
 
     # ── Build the tracker rows from what the core scored ───────────────────
     cat_order = {title: i for i, title in enumerate(result.titles)}
@@ -1329,7 +1413,23 @@ tracker ───` comment through the `rows.sort(...)` line (currently lines
         rows.append(row)
 
     rows.sort(key=lambda r: (r["_cat_order"], -r["_score"]))
+    filtered_out_count = sum(1 for r in rows
+                             if r["Application Status"] == "Filtered Out")
 ```
+
+Two deliberate departures from the pre-Task-5 code, both because the store
+now dedupes for both callers of `execute()`:
+
+- **The old "Reading existing tracker" step is gone.** It only ever fed
+  `existing_urls`/`existing_rows` into `dedupe()`. `execute()` now dedupes
+  against the store via `known_listings`, which has full history across every
+  run regardless of what a human has since done to the workbook — a strictly
+  better source. The workbook itself is unaffected: `excel.save()` appends
+  onto whatever is already on disk: `read_existing()` was never involved in
+  preserving old rows, only in feeding the now-removed dedupe call.
+- **Step numbers changed from `/8` to `/7`** — one real step (reading the
+  tracker for dedupe) no longer exists, so the count printed to the user
+  should say so rather than silently skip a number.
 
 - [ ] **Step 3: Add the new imports**
 
@@ -1339,23 +1439,58 @@ At the top of `run_pipeline`, alongside the other local imports, add:
     from src.store.runs import fail_run, start_run
 ```
 
-- [ ] **Step 4: Delete the now-duplicated persist call**
+- [ ] **Step 4: Delete the persist call and the now-dead function it called**
 
-At the end of `run_pipeline`, `_persist_and_launch(...)` is now redundant —
-`run_core.execute` already persisted through `persist_run`. Delete this line:
+At the end of `run_pipeline`, replace:
 
 ```python
     _persist_and_launch(scored_jobs, len(all_scraped), shortlist_min, config)
 ```
 
-and replace it with:
+with:
 
 ```python
     print(f"  Stored {result.kept} roles.")
 ```
 
 Then delete the whole `_persist_and_launch` function (and its `# ──
-Opportunity map helper ──` banner comment), which now has no callers.
+Opportunity map helper ──` banner comment) — `run_core.execute` already
+persists through `persist_run` internally, so nothing in `main.py` calls
+`_persist_and_launch` any more.
+
+`_persist_and_launch` used to be a narrow, best-effort step that ran *after*
+the Excel tracker was already safely saved — if it failed, the terminal still
+printed a working summary and the user still had their spreadsheet, so
+swallowing the exception and logging a warning was correct. That responsibility
+doesn't exist any more: `run_core.execute` now does the scraping and scoring
+*and* the persisting as one unit, so if it fails there is no `result` to build
+`rows` from at all — the whole run has failed, and letting the exception
+propagate (as Step 2's `except Exception as exc: fail_run(...); raise` does)
+is the correct behavior for what this step has become.
+
+The only remaining caller of `_persist_and_launch` is a regression test from
+Task 2, `test_setup_failure_does_not_raise` in
+`job_hunt/tests/test_pipeline_store.py`, which exists specifically to verify
+that narrow swallow-and-log behavior. Since the function it exercises no
+longer exists and the behavior it checks no longer applies, delete that test:
+
+```python
+def test_setup_failure_does_not_raise(monkeypatch):
+    """A broken connect()/start_run()/persist_run() must not crash the
+    pipeline — main() always calls _serve() afterward regardless of what
+    happened here."""
+    import main
+
+    def _boom(*a, **k):
+        raise RuntimeError("db is locked")
+
+    monkeypatch.setattr("src.store.db.connect", _boom)
+
+    main._persist_and_launch([], scraped=0, shortlist_min=7, config={})
+```
+
+Delete this whole function from `job_hunt/tests/test_pipeline_store.py`,
+leaving the other three tests in that file untouched.
 
 - [ ] **Step 5: Verify main.py still imports and the suite is green**
 
@@ -1363,12 +1498,12 @@ Run: `python -c "import main; print('ok')"`
 Expected: `ok`
 
 Run: `python -m pytest tests/ -q`
-Expected: `464 passed`
+Expected: `461 passed` (462 from Task 5, minus the one deleted obsolete test)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add main.py tests/test_pipeline_titles.py
+git add main.py tests/test_pipeline_titles.py tests/test_pipeline_store.py
 git commit -m "refactor: the terminal pipeline runs on the shared core"
 ```
 
@@ -1591,10 +1726,15 @@ def work(db_path: Path | str, user_id: int, run_id: int, runner=None) -> None:
         runner(conn, user_id, run_id, on_progress)
     except Exception as exc:
         # A crashed worker must never leave the run RUNNING — that row blocks
-        # every future run until the app restarts.
+        # every future run until the app restarts. But if the runner already
+        # finished the run before raising (e.g. cleanup code that runs after
+        # persist_run and throws), don't overwrite whatever terminal status
+        # it already recorded.
         logger.exception("Run %s failed", run_id)
         try:
-            fail_run(conn, run_id, str(exc))
+            stored = get_run(conn, run_id)
+            if stored and stored["status"] == "RUNNING":
+                fail_run(conn, run_id, str(exc))
         except Exception:
             logger.exception("Could not even record the failure of run %s",
                              run_id)
@@ -1603,6 +1743,7 @@ def work(db_path: Path | str, user_id: int, run_id: int, runner=None) -> None:
         # doing so, fail it rather than leave it hanging.
         stored = get_run(conn, run_id)
         if stored and stored["status"] == "RUNNING":
+            logger.warning("Run %s ended without reporting a result", run_id)
             fail_run(conn, run_id, "the run ended without reporting a result")
     finally:
         conn.close()
@@ -1719,12 +1860,36 @@ def test_the_run_row_exists_before_the_response_returns(client, db):
         conn.close()
 
 
-def test_a_second_run_while_one_is_going_is_refused(client):
-    client.post("/api/runs")
-    response = client.post("/api/runs")
+def test_a_second_run_while_one_is_going_is_refused(db, tmp_path, monkeypatch):
+    """Needs the first run to genuinely still be RUNNING when the second
+    POST fires — a synchronous run_in_thread=False call, driven with the
+    default no-op runner, can never produce that state, because work()
+    always runs its runner to completion before returning. This test (and
+    the two after it that need the same thing) has to use real threading
+    with a runner that blocks until released — the same pattern already
+    used to test run_worker.py's own threading."""
+    import threading
 
+    monkeypatch.setenv("APIFY_TOKEN", "apify_test")
+    released = threading.Event()
+
+    def blocking_runner(conn, user_id, run_id, on_progress):
+        released.wait(timeout=5)
+
+    app = create_app(db_path=db, user_name="default",
+                     data_root=tmp_path / "data",
+                     runner=blocking_runner, run_in_thread=True)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
+    first = client.post("/api/runs")
+    assert first.status_code == 201
+
+    response = client.post("/api/runs")
     assert response.status_code == 409
     assert "already" in response.get_json()["error"].lower()
+
+    released.set()
 
 
 def test_a_run_can_start_once_the_previous_one_finished(client, db):
@@ -1738,8 +1903,30 @@ def test_a_run_can_start_once_the_previous_one_finished(client, db):
     assert client.post("/api/runs").status_code == 201
 
 
-def test_an_abandoned_run_is_superseded_rather_than_blocking(client, db):
-    """A worker killed without marking FAILED must not lock the user out."""
+def test_an_abandoned_run_is_superseded_rather_than_blocking(db, tmp_path,
+                                                              monkeypatch):
+    """A worker killed without marking FAILED must not lock the user out.
+
+    Needs real threading for the same reason as the test above — with the
+    synchronous default, the stale run auto-completes to FAILED via
+    run_worker's own safety net before this test's backdating even runs,
+    so the route's actual supersede branch (`if existing: UPDATE run SET
+    status = 'FAILED', error = 'abandoned...'`) is never exercised and
+    the test passes for the wrong reason."""
+    import threading
+
+    monkeypatch.setenv("APIFY_TOKEN", "apify_test")
+    released = threading.Event()
+
+    def blocking_runner(conn, user_id, run_id, on_progress):
+        released.wait(timeout=5)
+
+    app = create_app(db_path=db, user_name="default",
+                     data_root=tmp_path / "data",
+                     runner=blocking_runner, run_in_thread=True)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
     stale = client.post("/api/runs").get_json()["run_id"]
     conn = connect(db)
     try:
@@ -1756,6 +1943,8 @@ def test_an_abandoned_run_is_superseded_rather_than_blocking(client, db):
         assert get_run(conn, stale)["status"] == "FAILED"
     finally:
         conn.close()
+
+    released.set()
 
 
 def test_starting_a_run_without_a_resume_is_refused(tmp_path, monkeypatch):
@@ -1797,20 +1986,37 @@ def test_starting_a_run_without_an_apify_token_is_refused(db, tmp_path,
     assert "APIFY_TOKEN" in response.get_json()["error"]
 
 
-def test_polling_reports_status_stage_and_progress(client, db):
+def test_polling_reports_status_stage_and_progress(db, tmp_path, monkeypatch):
+    """Same real-threading requirement as the two tests above. This version
+    also exercises the on_progress wiring end-to-end (route -> worker ->
+    set_progress) rather than poking the DB directly — a strictly better
+    test than manually calling set_progress on an already-finished run."""
+    import threading
+
+    monkeypatch.setenv("APIFY_TOKEN", "apify_test")
+    reported = threading.Event()
+    released = threading.Event()
+
+    def blocking_runner(conn, user_id, run_id, on_progress):
+        on_progress({"stage": "scraping", "steps": [], "scraped": 12})
+        reported.set()
+        released.wait(timeout=5)
+
+    app = create_app(db_path=db, user_name="default",
+                     data_root=tmp_path / "data",
+                     runner=blocking_runner, run_in_thread=True)
+    app.config.update(TESTING=True)
+    client = app.test_client()
+
     run_id = client.post("/api/runs").get_json()["run_id"]
-    conn = connect(db)
-    try:
-        from src.store.runs import set_progress
-        set_progress(conn, run_id, "scraping",
-                     {"stage": "scraping", "steps": [], "scraped": 12})
-    finally:
-        conn.close()
+    assert reported.wait(timeout=5), "the runner should have reported progress"
 
     body = client.get(f"/api/runs/{run_id}").get_json()
     assert body["status"] == "RUNNING"
     assert body["stage"] == "scraping"
     assert body["progress"]["scraped"] == 12
+
+    released.set()
 
 
 def test_polling_an_unknown_run_is_a_404(client):
@@ -2128,17 +2334,38 @@ git commit -m "feat: recover runs a dead process left running"
 - Create: `job_hunt/src/searching_page.py`
 - Test: `job_hunt/tests/test_searching_page.py`
 
-Follow the paper language already in `src/map_page.py` — read its `_CSS` and
-copy the tokens rather than inventing new ones. Adds 8 tests.
+Follow the paper language already in `src/map_page.py` and `src/setup_page.py`
+— read their `_CSS` and copy the tokens rather than inventing new ones. Adds
+8 tests.
+
+**Correction found during pre-dispatch verification:** `DESIGN.md` describes a
+dark "Bloomberg Terminal" theme (`#0A0E1A` background, `#00D4FF` cyan, etc.),
+but that is not what shipped. `src/map_page.py` and `src/setup_page.py` both
+use a warm cream/paper palette instead — `#F7F2E6` page background, `#FFFDF8`
+card surface, a Caveat cursive headline, `#D6482B` red-orange for links and
+primary actions, `#2E7D5B` green for success. `DESIGN.md` is stale relative to
+what the product actually looks like; the two live screens are the ground
+truth to match, not the doc. The task originally pointed at `DESIGN.md`'s dark
+tokens — the given code below has already been corrected to the real palette.
+
+**Second correction, caught during implementation:** `render()` returns static
+HTML/JS text — it never executes JavaScript itself. A JS template literal such
+as `` `/api/runs/${RUN}` `` only interpolates `RUN` when a real browser runs
+the script; Python's `.format()` cannot see inside it. The static output would
+therefore contain the literal text `${RUN}`, never the actual run id, which
+`test_it_polls_the_run_endpoint` correctly catches. The fetch call below has
+already been fixed to bake the id in at render time — `fetch('/api/runs/
+{run_id}')` — and the now-unused `const RUN = {run_id};` declaration has been
+removed accordingly.
 
 - [ ] **Step 1: Read the existing design language**
 
-Run: `sed -n '1,120p' src/map_page.py`
+Run: `sed -n '1,60p' src/map_page.py` and `sed -n '1,58p' src/setup_page.py`
 
-Note the colour tokens and fonts. `DESIGN.md` is the authority: background
-`#0A0E1A`, surface `#0D1117`, border `#1E2A3A`, cyan `#00D4FF`, green
-`#00D9A3`, amber `#F59E0B`, red `#E05C5C`, JetBrains Mono for data and labels,
-Inter for prose, dark only.
+Note the colour tokens, the Caveat/Inter/JetBrains Mono font mix, the
+`.page`/`.hatch`/`.head`/`.wrap`/`.col` page-shell structure, and the
+`.note`/`.err`/`.btn-p` conventions — the progress screen should read like a
+sibling of these two, not a different app.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -2190,7 +2417,7 @@ def test_no_score_or_percentage_appears():
 
 
 def test_the_page_uses_the_project_palette():
-    assert "#0A0E1A" in render(42)
+    assert "#F7F2E6" in render(42)
 ```
 
 - [ ] **Step 3: Run them to verify they fail**
@@ -2211,6 +2438,10 @@ shape of the run immediately, rather than a list that grows.
 Counts shown are only ones the run has actually produced. While scraping, the
 total is unknown, so no denominator is displayed — inventing one would be the
 fabricated-precision pattern this project bans.
+
+Same paper palette as the map and the setup screens — see map_page.py's and
+setup_page.py's own _CSS for the source of these tokens. `DESIGN.md`'s dark
+theme was never actually shipped; the live screens are the ground truth.
 """
 
 _POLL_MS = 2000
@@ -2221,46 +2452,59 @@ _POLL_MS = 2000
 _STALL_MS = 180_000
 
 _CSS = """
-:root{--bg:#0A0E1A;--surface:#0D1117;--border:#1E2A3A;--cyan:#00D4FF;
---green:#00D9A3;--amber:#F59E0B;--red:#E05C5C;--dim:#7A8899;--text:#E6EDF3}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);
-font-family:Inter,system-ui,sans-serif;padding:48px 24px}
-.wrap{max-width:640px;margin:0 auto}
-h1{font-size:20px;font-weight:600;margin:0 0 4px}
-.sub{color:var(--dim);font-size:14px;margin:0 0 32px}
-.steps{border:1px solid var(--border);border-radius:8px;
-background:var(--surface);overflow:hidden}
-.step{display:flex;align-items:center;gap:12px;padding:12px 16px;
-border-bottom:1px solid var(--border);
-font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}
+html,body{margin:0;background:#F7F2E6}
+body{font-family:Inter,system-ui,sans-serif;color:#2A3342;-webkit-font-smoothing:antialiased}
+a{color:#D6482B;text-decoration:none}
+a:hover{color:#A83519}
+.page{min-height:100vh;background-image:radial-gradient(rgba(42,51,66,.14) 1px,transparent 1px);background-size:22px 22px;background-position:11px 11px;padding:0 0 80px}
+.hatch{height:26px;background-image:repeating-linear-gradient(112deg,rgba(59,126,168,.28) 0 1px,transparent 1px 7px);mask-image:linear-gradient(to bottom,#000,transparent);-webkit-mask-image:linear-gradient(to bottom,#000,transparent)}
+.head{display:flex;justify-content:center;padding:30px 40px 30px}
+.head-in{flex:1;max-width:640px}
+.title{font:600 46px/1 Caveat,cursive;color:#D6482B}
+.sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:10px;max-width:48ch;text-wrap:pretty}
+.wrap{display:flex;justify-content:center;padding:0 40px}
+.col{flex:1;max-width:640px}
+.steps{background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;overflow:hidden}
+.step{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid #EBE3D2;font:400 13px/1.4 'JetBrains Mono',monospace;color:#3A4557}
 .step:last-child{border-bottom:none}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--border);
-flex:none}
-.step[data-state=running] .dot{background:var(--cyan)}
-.step[data-state=done] .dot{background:var(--green)}
-.step[data-state=failed] .dot{background:var(--red)}
+.dot{width:8px;height:8px;border-radius:50%;background:#D5CDB9;flex:none}
+.step[data-state=running] .dot{background:#2A5F86}
+.step[data-state=done] .dot{background:#2E7D5B}
+.step[data-state=failed] .dot{background:#A83519}
 .name{flex:1}
-.found{color:var(--dim)}
-.step[data-state=failed] .found{color:var(--red)}
-.note{margin-top:24px;font-size:14px;color:var(--dim);min-height:20px}
-.note.bad{color:var(--amber)}
-a.retry{color:var(--cyan);text-decoration:none;border-bottom:1px solid
-var(--cyan)}
+.found{color:#8A93A1}
+.step[data-state=failed] .found{color:#A83519}
+.note{margin-top:20px;font:400 13.5px/1.6 Inter,sans-serif;color:#8A93A1;min-height:20px;text-wrap:pretty}
+.note.bad{color:#A83519}
+a.retry{color:#D6482B;border-bottom:1px solid #D6482B}
+a.retry:hover{color:#A83519;border-bottom-color:#A83519}
 """
 
 _HTML = """<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Searching</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>{css}</style>
-<div class="wrap">
-  <h1>searching</h1>
-  <p class="sub">Reading Indeed and LinkedIn for the roles on your resumes.</p>
-  <div class="steps" id="steps"></div>
-  <p class="note" id="note"></p>
+</head>
+<body>
+<div class="page">
+<div class="hatch"></div>
+<div class="head"><div class="head-in">
+<div class="title">searching</div>
+<div class="sub">Reading Indeed and LinkedIn for the roles on your resumes.</div>
+</div></div>
+<div class="wrap"><div class="col">
+<div class="steps" id="steps"></div>
+<p class="note" id="note"></p>
+</div></div>
 </div>
 <script>
-const RUN = {run_id};
 const POLL = {poll_ms};
 const STALL = {stall_ms};
 const steps = document.getElementById('steps');
@@ -2282,7 +2526,7 @@ function draw(list) {{
 async function tick() {{
   let body;
   try {{
-    const r = await fetch(`/api/runs/${{RUN}}`);
+    const r = await fetch('/api/runs/{run_id}');
     if (!r.ok) throw new Error('gone');
     body = await r.json();
   }} catch (e) {{
@@ -2326,6 +2570,8 @@ async function again() {{
 
 tick();
 </script>
+</body>
+</html>
 """
 
 
@@ -2661,18 +2907,23 @@ with:
 {starter}
 ```
 
-Finally add these rules to the module's `_CSS`:
+Finally add these rules to the module's `_CSS`. **Note:** these use the real
+paper palette (`#D6482B` red-orange, `#8A93A1` muted meta, matching
+`setup_page.py`'s `.btn-p` primary-button convention) — this is the same
+DESIGN.md-vs-shipped-reality correction made in Task 10; do not use
+DESIGN.md's dark tokens here either.
 
 ```css
-.banner{display:block;margin:0 0 24px;padding:10px 16px;border-radius:6px;
-background:rgba(0,212,255,.08);border:1px solid #00D4FF;color:#00D4FF;
-font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;
-text-decoration:none}
-.empty{padding:64px 0;text-align:center;color:#7A8899}
-.go{margin-top:16px;padding:10px 20px;border-radius:6px;cursor:pointer;
-background:#00D4FF;color:#0A0E1A;border:none;font-weight:600;
-font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}
-.go.alt{background:transparent;color:#00D4FF;border:1px solid #00D4FF}
+.banner{display:block;margin:0 0 20px;padding:11px 16px;border-radius:4px;
+background:#FBEFE9;border:1px solid #E8B9A6;color:#A83519;
+font:500 12.5px/1.3 'JetBrains Mono',monospace;letter-spacing:.02em}
+.empty{padding:64px 0;text-align:center;color:#8A93A1}
+.go{margin-top:16px;display:inline-block;padding:9px 18px;border-radius:3px;
+cursor:pointer;background:#D6482B;color:#FFFDF8;border:1px solid #D6482B;
+font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
+.go:hover{background:#A83519;border-color:#A83519}
+.go.alt{background:transparent;color:#D6482B}
+.go.alt:hover{background:transparent;color:#A83519}
 ```
 
 - [ ] **Step 4: Rewrite the map route**
@@ -2877,12 +3128,15 @@ with:
 and change its `return _shell(...)` body argument from `body` to
 `body + _STARTER`.
 
-Then add this rule to `setup_page.py`'s `_CSS`:
+Then add this rule to `setup_page.py`'s `_CSS`. Same real-palette correction
+as Task 12's `.go` — matches `.btn-p`'s existing filled red-orange style
+rather than DESIGN.md's unshipped dark tokens:
 
 ```css
-.go{margin-left:12px;padding:10px 20px;border-radius:6px;cursor:pointer;
-background:#00D4FF;color:#0A0E1A;border:none;font-weight:600;
-font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}
+.go{margin-left:12px;display:inline-block;padding:9px 16px;border-radius:3px;
+cursor:pointer;background:#D6482B;color:#FFFDF8;border:1px solid #D6482B;
+font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
+.go:hover{background:#A83519;border-color:#A83519}
 ```
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -2914,7 +3168,8 @@ Adds 3 tests.
 
 - [ ] **Step 1: Write the guard tests**
 
-Append to `job_hunt/tests/test_run_routes.py`:
+Append to `job_hunt/tests/test_run_routes.py`. Add `import re` to the file's
+top-level imports if it isn't already there — the first test needs it:
 
 ```python
 def test_no_new_route_exposes_a_score_or_a_percentage(client, db):
@@ -2925,26 +3180,53 @@ def test_no_new_route_exposes_a_score_or_a_percentage(client, db):
         body = client.get(path).get_data(as_text=True)
         assert "match_score" not in body, path
         assert "interview_chance" not in body.lower(), path
+        # /searching/<id> is HTML and legitimately has "%" in its CSS
+        # (border-radius:50%), so check the visible text only, not the
+        # markup and stylesheet. /api/runs/<id> is plain JSON with no such
+        # false positive, so the raw body is fine there.
+        visible = re.sub(r"<style.*?</style>", "", body, flags=re.S)
+        visible = re.sub(r"<script.*?</script>", "", visible, flags=re.S)
+        visible = re.sub(r"<[^>]+>", " ", visible)
+        assert "%" not in visible, path
 
 
 def test_the_worker_never_writes_excel():
     """The browser run stops after scoring. Excel belongs to the terminal."""
+    import re
     from pathlib import Path
 
     source = (Path(__file__).parent.parent / "src" / "run_core.py").read_text(
         encoding="utf-8")
-    assert "excel" not in source.lower()
+    import_lines = [line for line in source.splitlines()
+                    if re.match(r"^\s*(import|from)\s", line)]
+    assert not any("excel" in line.lower() for line in import_lines)
 
 
 def test_the_core_knows_nothing_about_flask_or_threads():
     """run_core is shared by a request handler and a CLI. It stays pure."""
+    import re
     from pathlib import Path
 
     source = (Path(__file__).parent.parent / "src" / "run_core.py").read_text(
         encoding="utf-8")
-    assert "flask" not in source.lower()
-    assert "threading" not in source.lower()
+    import_lines = [line for line in source.splitlines()
+                    if re.match(r"^\s*(import|from)\s", line)]
+    assert not any("flask" in line.lower() for line in import_lines)
+    assert not any("threading" in line.lower() for line in import_lines)
 ```
+
+**Two corrections found during implementation and review.** First: the
+original two `test_the_worker_never_writes_excel`/`test_the_core_knows_...`
+tests did a naive substring search across the whole file, which trips on
+`run_core.py`'s own docstring — its prose literally states "Nothing here
+imports Flask or threading," which contains the word "threading." The given
+code above already checks only actual `import`/`from` lines, not the whole
+file, so it can't be fooled by the module correctly documenting its own
+constraint. Second: the original `test_no_new_route_exposes_a_score_or_a_
+percentage` had a name and docstring promising a percentage check its body
+never performed — the given code above already includes it, stripping
+`<style>`/`<script>` first (matching `test_searching_page.py`'s own pattern)
+since `/searching/<id>`'s CSS legitimately contains `border-radius:50%`.
 
 - [ ] **Step 2: Run them**
 
@@ -2954,7 +3236,7 @@ Expected: all pass
 - [ ] **Step 3: Run the whole suite**
 
 Run: `python -m pytest tests/ -q`
-Expected: `514 passed`
+Expected: `518 passed` (515 baseline + 3 new)
 
 - [ ] **Step 4: Update the project instructions**
 
@@ -2985,8 +3267,10 @@ Check, in order:
    reads **nothing searched yet** with a START SEARCHING button.
 3. Click it. The URL becomes `/searching/<id>` and every planned step is
    listed immediately — one row per source per target role, all `waiting`.
-4. Steps turn cyan then green as they complete, with real found counts. **No
-   percentage and no "N of M" appears anywhere.**
+4. Steps turn blue then green as they complete (the real paper palette's
+   running/done dot colors — `#2A5F86` and `#2E7D5B` — not the dark theme's
+   cyan/green tokens that were corrected out of this ship earlier), with real
+   found counts. **No percentage and no "N of M" appears anywhere.**
 5. Open `/` in a second tab while the run is going. The map renders with the
    **searching now** banner, and the run does not vanish from the new section
    when it lands — this is the `mark_seen` trap, and it is the single most
@@ -3040,8 +3324,13 @@ Leave these alone.
 - `Apply_Now`, `LLM_Reason` and `Risk_Flags` live only in the workbook and the
   browser run does not produce them. Retiring Excel without deciding where
   they go silently deletes the feature.
-- The terminal dedupes against the workbook; the browser run dedupes against
-  the store. The two disagree about what is new until Excel goes.
+- ~~The terminal dedupes against the workbook; the browser run dedupes
+  against the store.~~ **Resolved during this ship, not left for Ship 4.**
+  Task 6 moved the terminal onto the same `run_core.execute()` path the
+  browser run uses, so both now dedupe against the store exclusively — the
+  terminal's old `excel.read_existing()`-for-dedupe call was removed. Excel
+  still gets every run's rows appended for the record; it just no longer
+  decides what counts as new.
 - `tracker/excel.py` still carries an `Interview Chance` column, a `CAT_ORDER`
   naming the four categories Ship 2 deleted, and a stale comment on
   `Recommended Resume`. All three disappear when the module does.
