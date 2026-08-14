@@ -1,7 +1,7 @@
 """The searches a run performs come from the resumes, not from config.yaml."""
 import pytest
 
-from main import _search_titles
+from src.run_core import search_titles as _search_titles
 
 
 def _resume(*titles):

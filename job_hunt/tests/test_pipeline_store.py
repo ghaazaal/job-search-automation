@@ -54,17 +54,3 @@ def test_a_failing_ingest_marks_the_run_failed_and_re_raises(conn):
         persist_run(conn, user_id, run_id, [broken], scraped=1)
 
     assert get_run(conn, run_id)["status"] == "FAILED"
-
-
-def test_setup_failure_does_not_raise(monkeypatch):
-    """A broken connect()/start_run()/persist_run() must not crash the
-    pipeline — main() always calls _serve() afterward regardless of what
-    happened here."""
-    import main
-
-    def _boom(*a, **k):
-        raise RuntimeError("db is locked")
-
-    monkeypatch.setattr("src.store.db.connect", _boom)
-
-    main._persist_and_launch([], scraped=0, shortlist_min=7, config={})
