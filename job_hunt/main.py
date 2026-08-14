@@ -84,22 +84,24 @@ def _open_store():
     return conn, ensure_user(conn, DEFAULT_USER)
 
 
-def _search_titles(resumes: list[dict]) -> list[str]:
-    """Every target role across the active resumes, deduplicated.
+def _announce_step(step: dict, printed_steps: set[tuple[str, str]]) -> None:
+    """Print one scrape step's result the first time it's seen done/failed.
 
-    Two resumes that both target 'Data Engineer' must not scrape it twice.
-    Order follows the resumes so a run is reproducible.
+    `printed_steps` is owned by the caller and must persist across calls —
+    `event["steps"]` handed to `_announce` is a fresh copy every progress
+    event (run_core.execute's report() snapshots it so retained events can't
+    be mutated later), so de-duplication can't be tracked by mutating the
+    step dict itself; it has to live in a set the caller keeps alive for the
+    whole run.
     """
-    seen: set[str] = set()
-    titles: list[str] = []
-    for resume in resumes:
-        for role in resume.get("target_roles") or []:
-            title = str(role.get("title") or "").strip()
-            key = title.lower()
-            if title and key not in seen:
-                seen.add(key)
-                titles.append(title)
-    return titles
+    key = (step["source"], step["role"])
+    if step.get("state") == "done" and key not in printed_steps:
+        printed_steps.add(key)
+        print(f"  {step['source']} / {step['role']}...")
+        print(f"    -> {step['found']} fetched")
+    elif step.get("state") == "failed" and key not in printed_steps:
+        printed_steps.add(key)
+        print(f"  {step['source']} / {step['role']}... FAILED")
 
 
 logging.basicConfig(level=logging.INFO,
@@ -126,6 +128,8 @@ def run_pipeline(config: dict) -> None:
     from src.store.profile import get_profile, list_resumes
     from src.tracker import excel
     from src.llm.factory import get_client
+    from src.run_core import execute as run_core_execute, search_titles
+    from src.store.runs import fail_run, start_run
 
     llm = get_client(config)
     print(f"  LLM: {llm.provider} / {llm.model}")
@@ -150,7 +154,7 @@ def run_pipeline(config: dict) -> None:
     print("=" * 62)
 
     # ── 1. Read the profile ────────────────────────────────────────────────
-    print("\n[1/8] Reading your profile...")
+    print("\n[1/7] Reading your profile...")
     conn, user_id = _open_store()
     try:
         resumes = list_resumes(conn, user_id, active_only=True)
@@ -165,7 +169,7 @@ def run_pipeline(config: dict) -> None:
         print("  Then open http://127.0.0.1:5000/setup and upload one.")
         sys.exit(1)
 
-    titles = _search_titles(resumes)
+    titles = search_titles(resumes)
     if not titles:
         print("  ERROR: your resumes have no target roles between them.")
         print("  Open http://127.0.0.1:5000/profile and add at least one.")
@@ -178,121 +182,106 @@ def run_pipeline(config: dict) -> None:
     print(f"  Where: {profile['location'] or 'remote'} "
           f"({', '.join(work_modes)})")
 
-    # ── 2. Read existing tracker ───────────────────────────────────────────
-    print("\n[2/8] Reading existing tracker...")
-    existing = excel.read_existing(tracker_path)
-    existing_urls = set(existing.keys())
-    print(f"  Loaded {len(existing)} existing jobs.")
-
-    # ── 3. Scrape ──────────────────────────────────────────────────────────
+    # ── 2. Scrape (steps 2-5 happen inside run_core.execute) ────────────────
     if not os.environ.get("APIFY_TOKEN"):
         print("\n  ERROR: APIFY_TOKEN not set.")
         print("  PowerShell:  $env:APIFY_TOKEN = 'apify_api_xxx'")
         sys.exit(1)
 
-    print(f"\n[3/8] Scraping Indeed + LinkedIn (last {days_posted} days)...")
-    all_scraped: list[dict] = []
-    for title in titles:
-        print(f"\n  Indeed / {title}...")
-        jobs = indeed_scraper.scrape(
-            title, title, apify_cfg.get("indeed_actor", "valig~indeed-jobs-scraper"),
-            days_posted, jobs_per_cat, run_timeout,
-            location=profile["location"], country=profile["country"] or "us",
-            work_modes=work_modes)
-        print(f"    -> {len(jobs)} fetched")
-        all_scraped.extend(jobs)
-        time.sleep(1)
+    print(f"\n[2/7] Scraping Indeed + LinkedIn (last {days_posted} days)...")
 
-        print(f"  LinkedIn / {title}...")
-        jobs = li_scraper.scrape(
-            title, title, apify_cfg.get("linkedin_actor", "valig~linkedin-jobs-scraper"),
-            days_posted, jobs_per_cat, run_timeout,
-            location=profile["location"], country=profile["country"] or "us",
-            work_modes=work_modes)
-        print(f"    -> {len(jobs)} fetched")
-        all_scraped.extend(jobs)
-        time.sleep(1)
-
-    print(f"\n  Total scraped: {len(all_scraped)}")
-
-    # ── 4. Deduplicate ─────────────────────────────────────────────────────
-    print("\n[4/8] Deduplicating...")
-    from src.tracker.dedup import dedupe
-
-    new_jobs = dedupe(all_scraped,
-                      existing_urls=list(existing_urls),
-                      existing_rows=list(existing.values()))
-    print(f"  {len(new_jobs)} new jobs "
-          f"({len(all_scraped) - len(new_jobs)} duplicates collapsed)")
-
-    filtered_out_count = 0  # updated inside enrichment block if enabled
-
-    # ── 5. Company enrichment (optional) ──────────────────────────────────
-    # Disabled by default. To enable: set company_enrichment.enabled: true
-    # in config.yaml. The enrichment code (company_agent, company_filter,
-    # CompanyCache) is unchanged and ready to plug back in.
+    # Company enrichment is disabled by default; the block below — unchanged
+    # from before this refactor — only runs when config turns it on. It sits
+    # inside run_core's enrich hook because that is the one point between
+    # dedupe and scoring that both callers of execute() share.
     enrichment_enabled = config.get("company_enrichment", {}).get("enabled", False)
-    if enrichment_enabled:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from src.agents.company_agent import lookup as company_lookup
-        from src.filters.company_filter import CompanyFilter
-        from src.tracker.cache import CompanyCache
 
-        unique_companies = list({j["company"] for j in new_jobs if j["company"]})
-        print(f"\n[5/8] Company enrichment ({len(unique_companies)} companies)...")
-        cache = CompanyCache(
-            ttl_days=config.get("company_filter", {}).get("cache_ttl_days", 7))
-        company_intel: dict[str, dict] = {}
+    def _enrich(new_jobs: list[dict]) -> list[dict]:
+        print("\n[3/7] Deduplicating...")
+        print(f"  {len(new_jobs)} new jobs")
 
-        def _fetch_intel(company: str) -> tuple[str, dict]:
-            return company, company_lookup(company, config, llm, cache)
+        if enrichment_enabled:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from src.agents.company_agent import lookup as company_lookup
+            from src.filters.company_filter import CompanyFilter
+            from src.tracker.cache import CompanyCache
 
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
-            for done_idx, fut in enumerate(as_completed(futures), start=1):
-                c, intel = fut.result()
-                company_intel[c] = intel
-                if done_idx % 10 == 0:
-                    print(f"  {done_idx}/{len(unique_companies)} resolved")
-        print(f"  Done — {len(company_intel)} companies enriched")
+            unique_companies = list({j["company"] for j in new_jobs if j["company"]})
+            print(f"\n[4/7] Company enrichment ({len(unique_companies)} companies)...")
+            cache = CompanyCache(
+                ttl_days=config.get("company_filter", {}).get("cache_ttl_days", 7))
+            company_intel: dict[str, dict] = {}
 
-        filt = CompanyFilter(config)
-        filtered_out_count = 0
-        for job in new_jobs:
-            intel  = company_intel.get(job["company"],
-                                       {"stage": "unknown", "growth_score": 5})
-            result = filt.evaluate(job["company"], intel)
-            job["_intel"]  = intel
-            job["_filter"] = result
-            if result["verdict"] == "REJECT":
-                filtered_out_count += 1
-        print(f"  {len(new_jobs) - filtered_out_count} pass | {filtered_out_count} filtered")
-    else:
-        print("\n[5/8] Company enrichment: disabled "
-              "(set company_enrichment.enabled: true in config.yaml to activate)")
-        _passthrough = {"stage": "", "growth_score": "", "headcount_range": "",
-                        "source": "", "verdict": "PASS"}
-        for job in new_jobs:
-            job["_intel"]  = _passthrough
-            job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
+            def _fetch_intel(company: str) -> tuple[str, dict]:
+                return company, company_lookup(company, config, llm, cache)
 
-    # ── 6. Score ───────────────────────────────────────────────────────────
-    print(f"\n[6/8] Scoring {len(new_jobs)} jobs against "
-          f"{len(resumes)} resume(s)...")
-    scorer = Scorer(config, VOCABULARY_PATH)
-    cat_order = {title: i for i, title in enumerate(titles)}
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                futures = {pool.submit(_fetch_intel, c): c for c in unique_companies}
+                for done_idx, fut in enumerate(as_completed(futures), start=1):
+                    c, intel = fut.result()
+                    company_intel[c] = intel
+                    if done_idx % 10 == 0:
+                        print(f"  {done_idx}/{len(unique_companies)} resolved")
+            print(f"  Done — {len(company_intel)} companies enriched")
+
+            filt = CompanyFilter(config)
+            filtered = 0
+            for job in new_jobs:
+                intel  = company_intel.get(job["company"],
+                                           {"stage": "unknown", "growth_score": 5})
+                result = filt.evaluate(job["company"], intel)
+                job["_intel"]  = intel
+                job["_filter"] = result
+                if result["verdict"] == "REJECT":
+                    filtered += 1
+            print(f"  {len(new_jobs) - filtered} pass | {filtered} filtered")
+        else:
+            print("\n[4/7] Company enrichment: disabled "
+                  "(set company_enrichment.enabled: true in config.yaml "
+                  "to activate)")
+            _passthrough = {"stage": "", "growth_score": "", "headcount_range": "",
+                            "source": "", "verdict": "PASS"}
+            for job in new_jobs:
+                job["_intel"]  = _passthrough
+                job["_filter"] = {"verdict": "PASS", "reason": "", "warn": None}
+
+        print(f"\n[5/7] Scoring {len(new_jobs)} jobs against "
+              f"{len(resumes)} resume(s)...")
+        return new_jobs
+
+    printed_steps: set[tuple[str, str]] = set()
+
+    def _announce(event: dict) -> None:
+        """Print each scrape step as it finishes, as this always has."""
+        for step in event["steps"]:
+            _announce_step(step, printed_steps)
+
+    conn, user_id = _open_store()
+    try:
+        run_id = start_run(conn, user_id)
+        try:
+            result = run_core_execute(
+                conn, user_id, run_id, config, resumes, profile,
+                on_progress=_announce, enrich=_enrich)
+        except Exception as exc:
+            fail_run(conn, run_id, str(exc))
+            raise
+    finally:
+        conn.close()
+
+    print(f"\n  Total scraped: {result.scraped}")
+
+    # ── Build the tracker rows from what the core scored ───────────────────
+    cat_order = {title: i for i, title in enumerate(result.titles)}
     by_resume = {r["id"]: r for r in resumes}
     rows: list[dict] = []
-    scored_jobs: list[dict] = []   # jobs + evidence, for the opportunity map
-
     run_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    for job in new_jobs:
-        intel  = job["_intel"]
-        filt_r = job["_filter"]
+    for job in result.scored_jobs:
+        intel  = job.get("_intel", {})
+        filt_r = job.get("_filter", {"verdict": "PASS", "reason": "",
+                                     "warn": None})
         is_filtered = filt_r["verdict"] == "REJECT"
-        s = scorer.best_match(job["title"], job.get("description", ""), resumes)
-        scored_jobs.append({**job, **s})
 
         row: dict = {
             # Columns 1-15 — same positions as original job_tracker_updater.py
@@ -303,12 +292,12 @@ def run_pipeline(config: dict) -> None:
             "Platform":           job["platform"],
             "Posting Date":       job["date"],
             "Apply Link":         job["url"],
-            "Match Score":        s["match_score"],
+            "Match Score":        job["match_score"],
             # Removed — was a hardcoded lookup table shown as a percentage.
             # Column kept blank so existing tracker files stay aligned.
             "Interview Chance":   "",
-            "Recommended Resume": s["resume_label"],
-            "Tailoring Needed":   s["tailoring"],
+            "Recommended Resume": job["resume_label"],
+            "Tailoring Needed":   job["tailoring"],
             "Application Status": "Filtered Out" if is_filtered else "New",
             "Date Applied":       "",
             "Follow-up Date":     "",
@@ -324,18 +313,20 @@ def run_pipeline(config: dict) -> None:
             "Intel Source":       intel.get("source", ""),
             "Loaded At":          run_ts,
             # Internal — not written to Excel
-            "_score":             s["match_score"],
+            "_score":             job["match_score"],
             "_description":       job.get("description", ""),
             "_cat_order":         cat_order.get(job["cat"], 9),
-            "_resume_id":         s["resume_id"],
+            "_resume_id":         job["resume_id"],
             "Low Growth Signal":  bool(filt_r.get("warn")),
         }
         rows.append(row)
 
     rows.sort(key=lambda r: (r["_cat_order"], -r["_score"]))
+    filtered_out_count = sum(1 for r in rows
+                             if r["Application Status"] == "Filtered Out")
 
     # ── 7. LLM shortlist decisions ─────────────────────────────────────────
-    print(f"\n[7/8] LLM shortlist decisions (score >= {shortlist_min})...")
+    print(f"\n[6/7] LLM shortlist decisions (score >= {shortlist_min})...")
     shortlist = [r for r in rows
                  if r["_score"] >= shortlist_min
                  and r["Application Status"] != "Filtered Out"]
@@ -381,7 +372,7 @@ def run_pipeline(config: dict) -> None:
                 logger.warning("Role variant failed for %s: %s", role, e)
 
     # ── Save ───────────────────────────────────────────────────────────────
-    print(f"\n[8/8] Saving tracker...")
+    print(f"\n[7/7] Saving tracker...")
     if tracker_path.exists() and tracker_path.stat().st_size == 0:
         tracker_path.unlink()
     try:
@@ -417,26 +408,7 @@ def run_pipeline(config: dict) -> None:
     print(f"\n  Tracker: {tracker_path}")
     print("=" * 62)
 
-    # ── Persist and render ─────────────────────────────────────────────────
-    _persist_and_launch(scored_jobs, len(all_scraped), shortlist_min, config)
-
-
-# ── Opportunity map helper ────────────────────────────────────────────────────
-def _persist_and_launch(scored_jobs: list[dict], scraped: int,
-                        shortlist_min: int, config: dict) -> None:
-    """Write the run to the store. Rendering happens separately via _serve()."""
-    from src.pipeline_store import persist_run
-
-    conn = None
-    try:
-        conn, user_id = _open_store()
-        persist_run(conn, user_id, scored_jobs, scraped)
-        print(f"  Stored {len(scored_jobs)} roles.")
-    except Exception as e:
-        logger.warning("Persisting the run failed: %s", e)
-    finally:
-        if conn is not None:
-            conn.close()
+    print(f"  Stored {result.kept} roles.")
 
 
 def _serve(config: dict, port: int) -> None:

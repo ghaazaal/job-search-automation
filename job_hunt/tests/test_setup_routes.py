@@ -414,3 +414,41 @@ def test_the_scoring_modules_name_no_individual():
     offenders = [path.name for path in src.rglob("*.py")
                  if "ghazal" in path.read_text(encoding="utf-8").lower()]
     assert offenders == []
+
+
+def test_the_confirm_screen_offers_to_start_searching(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    body = client.get(f"/setup/confirm/{resume_id}").get_data(as_text=True)
+
+    assert "start searching" in body.lower()
+
+
+def test_the_confirm_screen_can_post_a_run(client):
+    resume_id = _upload(client).get_json()["resume_id"]
+    body = client.get(f"/setup/confirm/{resume_id}").get_data(as_text=True)
+
+    assert "/api/runs" in body
+
+
+def test_the_profile_screen_offers_to_search(client):
+    _upload(client)
+    body = client.get("/profile").get_data(as_text=True)
+
+    assert "/api/runs" in body
+
+
+def test_the_profile_screen_sends_you_to_the_progress_screen(client):
+    _upload(client)
+    body = client.get("/profile").get_data(as_text=True)
+
+    assert "/searching/" in body
+
+
+def test_the_profile_screen_hides_search_when_setup_is_incomplete(client):
+    """Skipping location must not leave a search button that's guaranteed to
+    fail with no way to fix the problem."""
+    _upload(client)  # setup_complete stays False — never calls /api/profile
+
+    body = client.get("/profile").get_data(as_text=True)
+    assert "search now" not in body.lower()
+    assert "/setup/confirm/" in body

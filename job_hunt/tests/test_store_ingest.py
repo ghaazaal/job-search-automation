@@ -3,7 +3,8 @@ import pytest
 
 from src.store.db import connect
 from src.store.schema import init_db
-from src.store.ingest import ensure_user, start_run, finish_run, upsert_jobs
+from src.store.ingest import ensure_user, upsert_jobs
+from src.store.runs import start_run, finish_run
 
 
 @pytest.fixture

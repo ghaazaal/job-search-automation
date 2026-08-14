@@ -1,62 +1,56 @@
-"""The pipeline persists what it scrapes."""
+"""Tests for src/pipeline_store.py — the bridge from a scrape to the store."""
 import pytest
 
-from src.store.db import connect
-from src.store.schema import init_db
-from src.store.ingest import ensure_user
 from src.pipeline_store import persist_run
+from src.store.db import connect
+from src.store.ingest import ensure_user
+from src.store.runs import get_run, start_run
+from src.store.schema import init_db
 
 
 @pytest.fixture
 def conn(tmp_path):
-    c = connect(tmp_path / "test.db")
+    c = connect(tmp_path / "persist.db")
     init_db(c)
-    return c
+    yield c
+    c.close()
 
 
-def _job(url):
-    return {"company": "Acme", "title": "Analytics Engineer", "url": url,
-            "location": "Remote", "salary": "", "platform": "LinkedIn",
-            "date": "2026-08-08", "description": "dbt",
-            "description_captured": True, "match_score": 9,
-            "band": "STRONG FIT", "reason": "matches dbt",
-            "matched": ["dbt"], "gaps": []}
+_JOB = {"cat": "BI Developer", "title": "BI Developer", "company": "Acme",
+        "location": "Toronto, ON", "platform": "Indeed", "date": "2026-08-14",
+        "url": "https://example.com/j1", "salary": "", "description": "Power BI",
+        "match_score": 8, "band": "STRONG FIT", "reason": "matches Power BI",
+        "matched": ["Power BI"], "gaps": [], "resume_id": None,
+        "description_captured": True}
 
 
-def test_persist_run_records_a_completed_run(conn):
-    user_id = ensure_user(conn, "G")
-    run_id = persist_run(conn, user_id, [_job("https://x/1")], scraped=5)
-    row = conn.execute("SELECT * FROM run WHERE id = ?", (run_id,)).fetchone()
-    assert row["status"] == "OK"
-    assert row["scraped"] == 5
-    assert row["kept"] == 1
+def test_persist_writes_into_the_run_it_was_given(conn):
+    user_id = ensure_user(conn, "default")
+    run_id = start_run(conn, user_id)
+
+    persist_run(conn, user_id, run_id, [_JOB], scraped=1)
+
+    stored = get_run(conn, run_id)
+    assert stored["status"] == "OK"
+    assert (stored["scraped"], stored["kept"]) == (1, 1)
 
 
-def test_persist_run_stores_the_roles(conn):
-    user_id = ensure_user(conn, "G")
-    persist_run(conn, user_id, [_job("https://x/1"), _job("https://x/2")],
-                scraped=2)
-    assert conn.execute("SELECT COUNT(*) c FROM role").fetchone()["c"] == 2
+def test_persist_does_not_create_a_second_run(conn):
+    user_id = ensure_user(conn, "default")
+    run_id = start_run(conn, user_id)
+
+    persist_run(conn, user_id, run_id, [_JOB], scraped=1)
+
+    total = conn.execute("SELECT COUNT(*) AS n FROM run").fetchone()["n"]
+    assert total == 1
 
 
-def test_a_failed_run_is_marked_failed(conn):
-    user_id = ensure_user(conn, "G")
-    bad = _job("https://x/1")
-    del bad["title"]
-    with pytest.raises(KeyError):
-        persist_run(conn, user_id, [bad], scraped=1)
-    row = conn.execute("SELECT * FROM run ORDER BY id DESC LIMIT 1").fetchone()
-    assert row["status"] == "FAILED"
+def test_a_failing_ingest_marks_the_run_failed_and_re_raises(conn):
+    user_id = ensure_user(conn, "default")
+    run_id = start_run(conn, user_id)
+    broken = {**_JOB, "url": None}      # NOT NULL on role.url
 
+    with pytest.raises(Exception):
+        persist_run(conn, user_id, run_id, [broken], scraped=1)
 
-def test_setup_failure_does_not_raise(monkeypatch):
-    """A broken connect()/init_db()/ensure_user() must not crash the pipeline —
-    main() always calls _serve() afterward regardless of what happened here."""
-    import main
-
-    def _boom(*a, **k):
-        raise RuntimeError("db is locked")
-
-    monkeypatch.setattr("src.store.db.connect", _boom)
-
-    main._persist_and_launch([], scraped=0, shortlist_min=7, config={})
+    assert get_run(conn, run_id)["status"] == "FAILED"

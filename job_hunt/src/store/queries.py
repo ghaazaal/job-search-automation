@@ -144,3 +144,22 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
                 (row["id"],))],
         })
     return board
+
+
+def known_listings(conn: sqlite3.Connection,
+                   user_id: int) -> tuple[list[str], list[dict]]:
+    """Every role this user has already stored, shaped for `dedupe`.
+
+    The terminal run reads this from the Excel workbook. A browser run has no
+    workbook, so the store answers instead: the URLs it has seen, and the
+    company/title pairs `dedupe` fingerprints to catch a repost that came back
+    under a new URL.
+    """
+    rows = conn.execute(
+        """SELECT r.url, r.title, c.name AS company
+             FROM role r
+             JOIN company c ON c.id = r.company_id
+            WHERE r.user_id = ?""", (user_id,)).fetchall()
+    urls = [row["url"] for row in rows]
+    pairs = [{"company": row["company"], "title": row["title"]} for row in rows]
+    return urls, pairs

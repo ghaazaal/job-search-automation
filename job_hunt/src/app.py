@@ -4,23 +4,30 @@ No SQL lives here. Routes call the store and hand read models to renderers.
 Binds to localhost only — this is a local application, not a service.
 """
 import logging
+import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, request
 
 from . import resume_intake as intake
 from .activity_page import render as render_activity
 from .agents.profile_parser import parse_profile
 from .llm.base import LLMClient
 from .map_page import render as render_map
+from .run_core import search_titles
+from .run_worker import run_in_background, work
+from .searching_page import render as render_searching
 from .setup_page import render_confirm, render_profile, render_upload
-from .store.db import DEFAULT_PATH, connect
+from .store.db import DEFAULT_PATH, connect, transaction
 from .store.ingest import ensure_user
 from .store.profile import (create_resume, delete_resume, get_profile,
                             get_resume, list_resumes, resume_by_sha,
                             set_profile, unique_label, update_resume)
 from .store.queries import activity_board, map_sections, mark_seen
+from .store.runs import (active_run, clear_running, fail_run, get_run,
+                         is_stale, latest_ok_run)
 from .store.schema import init_db
 from .store.tracking import COMPANY_STATES, STATUSES, set_company_state, set_role_status
 from .utils.pdf import extract_text
@@ -29,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 # Uploaded resumes live next to the database, not in the source tree.
 DEFAULT_DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _default_llm() -> LLMClient:
@@ -46,7 +57,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                user_name: str = "default",
                shortlist_min: int = 7,
                data_root: Path | str = DEFAULT_DATA_ROOT,
-               llm_factory=None) -> Flask:
+               llm_factory=None,
+               runner=None,
+               run_in_thread: bool = True) -> Flask:
     app = Flask(__name__)
 
     # Defense in depth: reject a request body far larger than any legitimate
@@ -62,6 +75,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
     data_root = Path(data_root)
     build_llm = llm_factory or _default_llm
 
+    # Injected so tests drive a run synchronously instead of chasing a thread.
+    run_runner = runner
+
     def _conn():
         conn = connect(db_path)
         init_db(conn)
@@ -75,20 +91,31 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         conn = _conn()
         try:
             user_id = _user(conn)
+
+            # Nothing to show and nothing to search for — send them to setup
+            # rather than to an empty map they cannot act on.
+            profile = get_profile(conn, user_id)
+            resumes = list_resumes(conn, user_id, active_only=True)
+            if not resumes or not profile.get("setup_complete"):
+                return redirect("/setup")
+
             sections = map_sections(conn, user_id, shortlist_min)
-            latest = conn.execute(
-                "SELECT MAX(id) AS i FROM run WHERE user_id = ?",
-                (user_id,)).fetchone()["i"]
             tagged = (
                 [{**m, "section": "new"} for m in sections["new"]]
                 + [{**m, "section": "earlier"} for m in sections["earlier"]]
                 + [{**m, "section": "watching"} for m in sections["watching"]]
             )
+            in_flight = active_run(conn, user_id)
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
-                                   sections["new"] + sections["earlier"])})
+                                   sections["new"] + sections["earlier"])},
+                running_run_id=in_flight["id"] if in_flight else None)
+
+            # Only a finished run may be marked seen. Marking the in-flight
+            # run would file every role it is about to store as already seen.
+            latest = latest_ok_run(conn, user_id)
             if latest:
                 mark_seen(conn, user_id, latest)
             return html
@@ -260,6 +287,87 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.post("/api/runs")
+    def start_scrape():
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+
+            # Refuse before creating a row. A run that exists only to fail two
+            # seconds later is worse than a clear message now.
+            resumes = list_resumes(conn, user_id, active_only=True)
+            if not resumes:
+                return jsonify({"error": "Upload a resume before searching."}), 400
+            if not search_titles(resumes):
+                return jsonify({"error": "Your resumes name no target roles. "
+                                         "Add one on the profile screen."}), 400
+            if not os.environ.get("APIFY_TOKEN"):
+                return jsonify({"error": "APIFY_TOKEN is not set, so no "
+                                         "search can run."}), 400
+            if not get_profile(conn, user_id).get("setup_complete"):
+                return jsonify({"error": "Finish setup — add your location "
+                                         "and work mode — before searching."}), 400
+
+            # Check and insert together: transaction() uses BEGIN IMMEDIATE,
+            # so two rapid posts cannot both find no RUNNING run.
+            with transaction(conn):
+                existing = active_run(conn, user_id)
+                if existing and not is_stale(existing["started_at"]):
+                    return jsonify(
+                        {"error": "A search is already running.",
+                         "run_id": existing["id"]}), 409
+                if existing:
+                    conn.execute(
+                        "UPDATE run SET status = 'FAILED', error = ?"
+                        " WHERE id = ?",
+                        ("abandoned — superseded by a new search",
+                         existing["id"]))
+                conn.execute(
+                    "INSERT INTO run (user_id, started_at, status)"
+                    " VALUES (?, ?, 'RUNNING')", (user_id, _utc_now()))
+            run_id = conn.execute(
+                "SELECT last_insert_rowid() AS i").fetchone()["i"]
+        finally:
+            conn.close()
+
+        try:
+            if run_in_thread:
+                run_in_background(db_path, user_id, run_id, run_runner)
+            else:
+                work(db_path, user_id, run_id, run_runner)
+        except Exception as exc:
+            fail_conn = connect(db_path)
+            try:
+                fail_run(fail_conn, run_id, str(exc))
+            finally:
+                fail_conn.close()
+            return jsonify({"error": "Could not start the search."}), 500
+        return jsonify({"run_id": run_id}), 201
+
+    @app.get("/api/runs/<int:run_id>")
+    def poll_scrape(run_id: int):
+        conn = _conn()
+        try:
+            stored = get_run(conn, run_id)
+            if stored is None:
+                return jsonify({"error": "not found"}), 404
+            return jsonify({"status": stored["status"],
+                            "stage": stored["stage"],
+                            "progress": stored["progress"],
+                            "error": stored["error"]})
+        finally:
+            conn.close()
+
+    @app.get("/searching/<int:run_id>")
+    def searching_screen(run_id: int):
+        conn = _conn()
+        try:
+            if get_run(conn, run_id) is None:
+                return jsonify({"error": "not found"}), 404
+            return render_searching(run_id)
+        finally:
+            conn.close()
+
     @app.get("/profile")
     def profile_screen():
         conn = _conn()
@@ -269,5 +377,24 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                                   get_profile(conn, user_id))
         finally:
             conn.close()
+
+    # Any RUNNING run belongs to a process that is no longer here — at boot
+    # none of ours are alive yet. Without this one hard kill locks the user
+    # out of ever starting another run, because POST /api/runs sees a RUNNING
+    # row and refuses.
+    #
+    # This must stay in create_app, which runs once. init_db() is called by
+    # _conn() on every single request; recovering there would mark the run
+    # currently in flight as failed.
+    _boot_conn = connect(db_path)
+    try:
+        init_db(_boot_conn)
+        cleared = clear_running(_boot_conn,
+                                "interrupted — the app restarted mid-run")
+        if cleared:
+            logger.info("Cleared %s run(s) left running by a previous process",
+                        cleared)
+    finally:
+        _boot_conn.close()
 
     return app
