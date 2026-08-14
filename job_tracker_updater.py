@@ -4,7 +4,7 @@ job_tracker_updater.py — Ghazal Izadi's Job Search ATS Updater
 Run this script whenever you want to refresh your job tracker with new listings.
 
 HOW IT WORKS:
-  1. Reads the existing tracker (job_tracker_ghazal.xlsx) — preserves all
+  1. Reads the existing tracker (job_tracker.xlsx) — preserves all
      your statuses, notes, dates exactly as you left them.
   2. Runs Apify scrapers for all 4 role categories on BOTH Indeed AND LinkedIn.
   3. Compares incoming jobs against existing URLs — skips duplicates.
@@ -43,7 +43,7 @@ from datetime import datetime, date
 # =============================================================================
 APIFY_TOKEN   = os.environ.get("APIFY_TOKEN", "")   # or paste token string here
 TRACKER_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "job_tracker_ghazal.xlsx")
+                              "job_tracker.xlsx")
 DAYS_POSTED   = 7     # fetch jobs from last N days (1, 3, 7, or 14)
 JOBS_PER_CAT  = 50    # max jobs per category per platform per run
 RUN_TIMEOUT   = 120   # seconds to wait for each Apify actor run

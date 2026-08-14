@@ -1,6 +1,6 @@
 """Tests for src/tracker/dedup.py.
 
-URL shapes here are taken from real rows in job_tracker_ghazal.xlsx.
+URL shapes here are taken from real rows in job_tracker.xlsx.
 """
 import pytest
 
