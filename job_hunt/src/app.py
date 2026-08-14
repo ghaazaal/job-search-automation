@@ -18,6 +18,7 @@ from .llm.base import LLMClient
 from .map_page import render as render_map
 from .run_core import search_titles
 from .run_worker import run_in_background, work
+from .searching_page import render as render_searching
 from .setup_page import render_confirm, render_profile, render_upload
 from .store.db import DEFAULT_PATH, connect, transaction
 from .store.ingest import ensure_user
@@ -340,6 +341,16 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                             "stage": stored["stage"],
                             "progress": stored["progress"],
                             "error": stored["error"]})
+        finally:
+            conn.close()
+
+    @app.get("/searching/<int:run_id>")
+    def searching_screen(run_id: int):
+        conn = _conn()
+        try:
+            if get_run(conn, run_id) is None:
+                return jsonify({"error": "not found"}), 404
+            return render_searching(run_id)
         finally:
             conn.close()
 

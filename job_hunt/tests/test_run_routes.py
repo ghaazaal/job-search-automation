@@ -267,3 +267,22 @@ def test_no_score_or_percentage_leaks_from_the_poll_endpoint(client, db):
 
     assert "match_score" not in body
     assert "%" not in body
+
+
+def test_the_progress_screen_renders_for_a_real_run(client):
+    run_id = client.post("/api/runs").get_json()["run_id"]
+    response = client.get(f"/searching/{run_id}")
+
+    assert response.status_code == 200
+    assert b"searching" in response.data.lower()
+
+
+def test_the_progress_screen_polls_its_own_run(client):
+    run_id = client.post("/api/runs").get_json()["run_id"]
+    body = client.get(f"/searching/{run_id}").get_data(as_text=True)
+
+    assert f"/api/runs/{run_id}" in body
+
+
+def test_the_progress_screen_404s_for_an_unknown_run(client):
+    assert client.get("/searching/9999").status_code == 404
