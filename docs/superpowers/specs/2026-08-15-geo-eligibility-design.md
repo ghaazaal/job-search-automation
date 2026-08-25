@@ -161,6 +161,15 @@ Mechanics:
   because the enumeration may continue with countries we did not name.
   Exclusion names render in text order, earliest position winning for a
   repeated country.
+- **Accepted residual (reviewed, kept)**: the unlimited user scan checks
+  only that the user's country is named *somewhere after* a list phrase,
+  not that the mention is still inside the enumeration — so "open to
+  candidates in germany and poland only. … our partner office in armenia
+  handles regional support." reads eligible for an Armenian user. This is
+  the deliberate trade for never fabricating an exclusion: a false
+  eligible is silence in the UI and costs at most one wasted application,
+  while the false exclusions it replaced hid real opportunities. Do not
+  re-raise as a bug; revisit only with evidence it fires often.
 - **Ambiguous names take the article**: names colliding with ordinary
   English words (`eligibility.ambiguous_names`, currently `us` — the
   pronoun in "join us"/"about us") count in list windows only as
