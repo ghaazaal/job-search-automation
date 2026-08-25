@@ -154,11 +154,13 @@ Mechanics:
   sliced to "uk"). No sentence-splitting — "u.s." breaks naive period
   logic. All windows are scanned for eligible evidence before anything
   else, so a list that names the user's country anywhere wins.
-- **Truncation never fabricates**: "excluded" is only claimed when a
-  list-terminating boundary (`.`, `;`, newline, or end of body) follows
-  the last country hit within the window — a list that may continue past
-  the scan could still name the user, so the verdict downgrades to
-  unknown. Exclusion names render in text order.
+- **Truncation never fabricates**: the user's own country is scanned with
+  no window limit at all — from each list phrase to end of body — so a
+  list that names the user anywhere can never read as exclusion. When a
+  hit-bearing window ran full, the exclusion display appends "and others",
+  because the enumeration may continue with countries we did not name.
+  Exclusion names render in text order, earliest position winning for a
+  repeated country.
 - **Performance**: the restriction scan is prefiltered by template stems
   (plain substring checks) before any per-name regex work; the common
   no-geo-statement body must stay well under 1 ms.

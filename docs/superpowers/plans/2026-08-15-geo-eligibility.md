@@ -626,11 +626,14 @@ correction, listed in the note below Step 5).
 >   a slice's edge let "ukraine" half-match as "uk" against end-of-string,
 >   and absolute offsets give true text-ordering of exclusion names.
 > - **`_LIST_WINDOW` is 400** (160 truncated real 15–30-country lists), and
->   **a possibly-continuing list never claims "excluded"**: without a list
->   terminator (`.`/`;`/newline) between the last country hit and the
->   window limit, the verdict downgrades to unknown — a truncated list that
->   still names the user later must not become a fabricated "open only
->   to …".
+>   **the user's own country is scanned with no window limit at all** —
+>   from each list phrase to end of body — so a list that names the user
+>   anywhere can never read as exclusion. (A first attempt gated "excluded"
+>   on a list-terminator heuristic; independent re-review proved newlines
+>   in bullet lists and abbreviation dots defeat it both ways, so it was
+>   removed in favor of the unlimited user scan.) When a hit-bearing
+>   window ran full, the exclusion display appends "and others" — the
+>   enumeration may continue with countries we did not name.
 > - **The restriction scan is prefiltered by template stems** (plain
 >   substring checks) before any per-name regex work: the unfiltered loop
 >   compiled ~693 patterns per call at ~208 ms — ~2 minutes per 300-job
