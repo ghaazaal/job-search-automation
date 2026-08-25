@@ -112,6 +112,35 @@ def test_indeed_does_not_retry_when_it_already_used_the_legacy_values(monkeypatc
     assert len(seen) == 1
 
 
+def test_indeed_tags_fallback_results_with_the_board_they_came_from(monkeypatch):
+    """When the actor rejects the user's country and the retry lands on the
+    us board, every job must say so — the scorer turns the tag into a
+    reduced-confidence flag."""
+    _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Yerevan, Armenia", country="am",
+                         work_modes=["remote"])
+    assert jobs[0]["_scraped_under"] == "us"
+
+
+def test_indeed_does_not_tag_when_the_country_already_matched(monkeypatch):
+    """A retry that only changed the location searched the same country —
+    nothing to warn about."""
+    _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Austin, TX", country="us",
+                         work_modes=["onsite"])
+    assert "_scraped_under" not in jobs[0]
+
+
+def test_indeed_does_not_tag_without_a_fallback(monkeypatch):
+    _capture(monkeypatch, indeed, [[_MINIMAL]])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Yerevan, Armenia", country="am",
+                         work_modes=["remote"])
+    assert "_scraped_under" not in jobs[0]
+
+
 # ── LinkedIn ──────────────────────────────────────────────────────────────────
 
 def test_linkedin_maps_work_modes_to_remote_codes(monkeypatch):
