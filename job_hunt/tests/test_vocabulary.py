@@ -72,7 +72,8 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["eligible_phrases"]
     assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "eligible_phrases", "regions"} == set(eligibility)
+            "eligible_phrases", "ambiguous_names",
+            "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
@@ -82,6 +83,9 @@ def test_the_eligibility_section_holds_market_facts():
     assert all(isinstance(code, str) for code in eligibility["countries"])
     assert all(isinstance(names, list) and names
                for names in eligibility["countries"].values())
+    # An exception list, not a market fact list — empty would be a valid
+    # config (no ambiguous names at all), so no non-emptiness assert here.
+    assert all(isinstance(n, str) for n in eligibility["ambiguous_names"])
     for region in eligibility["regions"]:
         assert {"names", "codes"} == set(region)
         assert region["names"] and region["codes"]

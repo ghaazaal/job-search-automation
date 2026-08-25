@@ -240,7 +240,7 @@ def _bounded(term: str) -> str:
     return r"(?<!\w)" + re.escape(term) + r"(?!\w)"
 
 
-def _find_bounded(term: str, body: str, start: int):
+def _find_bounded(term: str, body: str, start: int, ambiguous: bool = False):
     """A bounded match for `term` at or after `start`, or None.
 
     Searches the real, unbounded `body` rather than a slice — slicing at
@@ -249,11 +249,18 @@ def _find_bounded(term: str, body: str, start: int):
     nothing past the cut to check against. `start` only constrains where
     a match may *begin*; the caller is responsible for rejecting a match
     that starts at or past its own window's limit.
+
+    `ambiguous=True` is for a name that collides with an ordinary English
+    word ("us" the pronoun) — it only counts preceded by its article
+    ("the us"), since without one there is no way to tell the country
+    from the word.
     """
     term = (term or "").strip()
     if not term:
         return None
-    return re.compile(_bounded(term)).search(body, start)
+    pattern = (r"(?<!\w)the\s+" + re.escape(term) + r"(?!\w)"
+               if ambiguous else _bounded(term))
+    return re.compile(pattern).search(body, start)
 
 
 def _in_window(term: str, body: str, start: int, limit: int) -> bool:
@@ -262,7 +269,8 @@ def _in_window(term: str, body: str, start: int, limit: int) -> bool:
     return bool(match and match.start() < limit)
 
 
-def _named_anywhere_after(term: str, body: str, start: int) -> bool:
+def _named_anywhere_after(term: str, body: str, start: int,
+                          ambiguous: bool = False) -> bool:
     """Whether `term` is bounded-matched anywhere at or after `start` —
     no `limit`, unlike `_in_window`.
 
@@ -271,26 +279,61 @@ def _named_anywhere_after(term: str, body: str, start: int) -> bool:
     well past any display window — the safe and correct verdict is
     eligible. A limit here is exactly what let a real, later mention of
     the user's own country get discarded as exclusion evidence instead of
-    read as what it is.
+    read as what it is. For an ambiguous name this must still be the
+    articled form — an unrelated "come join us!" hundreds of characters
+    later is the pronoun, not a claim about the country, and must not
+    manufacture eligibility for a US user.
     """
-    return bool(_find_bounded(term, body, start))
+    return bool(_find_bounded(term, body, start, ambiguous=ambiguous))
 
 
-def _window_hits(body: str, start: int, limit: int,
-                 countries: dict, user_country: str) -> dict:
+_ARTICLE_TAIL_RE = re.compile(r"the\s+$")
+
+
+def _preceded_by_article(body: str, pos: int) -> bool:
+    """Whether the text immediately before `pos` ends with "the" plus
+    whitespace — the disambiguating article an ambiguous name needs."""
+    return bool(_ARTICLE_TAIL_RE.search(body, max(0, pos - 20), pos))
+
+
+def _window_has_bare_ambiguous_name(body: str, start: int, limit: int,
+                                    ambiguous_names: set) -> bool:
+    """Whether an ambiguous name occurs without its article anywhere
+    inside [start, limit).
+
+    A bare "us" in a list window could be the country or the pronoun —
+    "come join us!" is far more common in postings than an unmarked
+    country reference — and there is no way to tell them apart. No
+    exclusion claim may rest on a window this uncertain, so its hits are
+    discarded entirely by the caller, not just the ambiguous name's.
+    """
+    for name in ambiguous_names:
+        for match in re.compile(_bounded(name)).finditer(body, start):
+            if match.start() >= limit:
+                break
+            if not _preceded_by_article(body, match.start()):
+                return True
+    return False
+
+
+def _window_hits(body: str, start: int, limit: int, countries: dict,
+                 user_country: str, ambiguous_names: set) -> dict:
     """Foreign country codes named within one list window.
 
     Maps code -> (match.start(), match.end()) of its first occurrence at
     or after `start` that begins before `limit`. Never includes the
     user's own country — by the time this runs, phase 1 has already
     returned "eligible" if any window named it, checked to end of body.
+    An alias that collides with an ordinary word only counts here with
+    its article, same as the unlimited user-country scan.
     """
     hits: dict[str, tuple[int, int]] = {}
     for code, names in countries.items():
         if code == user_country:
             continue
         for name in names:
-            match = _find_bounded(name, body, start)
+            match = _find_bounded(name, body, start,
+                                  ambiguous=name in ambiguous_names)
             if match and match.start() < limit:
                 hits[code] = (match.start(), match.end())
                 break
@@ -339,7 +382,14 @@ def geo_verdict(body: str, user_country: str,
     in the list, just unrecognised. Matching uses the same lookaround
     boundaries as has_term ('us' must not fire inside 'campus');
     restriction templates allow an optional `the ` before the country
-    name.
+    name. A name that collides with an ordinary English word ("us" the
+    pronoun) is listed in `ambiguous_names`: in list windows it only
+    counts written with its article ("the us"), and a bare, unarticled
+    occurrence anywhere in a window ("come join us!") poisons that
+    window's exclusion claim entirely, since a country reference cannot
+    be told apart from the word it collides with. Restriction templates
+    are untouched by this — their surrounding text disambiguates on
+    its own.
     """
     user_country = (user_country or "").strip().lower()
     if not user_country:
@@ -351,6 +401,9 @@ def geo_verdict(body: str, user_country: str,
             [str(n).strip().lower() for n in (names or []) if str(n).strip()]
         for code, names in (cfg.get("countries") or {}).items()
     }
+    ambiguous_names = {str(n).strip().lower()
+                       for n in cfg.get("ambiguous_names") or []
+                       if str(n).strip()}
 
     windows: list[tuple[int, int]] = []
     for phrase in cfg.get("list_phrases") or []:
@@ -380,8 +433,11 @@ def geo_verdict(body: str, user_country: str,
             return ("eligible", None)
 
     for start, limit in windows:
-        # Unlimited on purpose — see the docstring.
-        if any(_named_anywhere_after(name, body, start) for name in user_names):
+        # Unlimited on purpose — see the docstring. Ambiguous names still
+        # need their article, even when searched to end of body.
+        if any(_named_anywhere_after(name, body, start,
+                                     ambiguous=name in ambiguous_names)
+               for name in user_names):
             return ("eligible", None)
         if any(_in_window(word, body, start, limit)
                for word in anywhere if word):
@@ -434,8 +490,14 @@ def geo_verdict(body: str, user_country: str,
         hits: dict[str, int] = {}
         maybe_more = False
         for start, limit in windows:
-            window_hits = _window_hits(body, start, limit,
-                                       countries, user_country)
+            if ambiguous_names and _window_has_bare_ambiguous_name(
+                    body, start, limit, ambiguous_names):
+                # A bare "us" here could be the country or the pronoun —
+                # nothing this window found, not even its other country
+                # hits, is trustworthy enough to claim exclusion from.
+                continue
+            window_hits = _window_hits(body, start, limit, countries,
+                                       user_country, ambiguous_names)
             if window_hits:
                 if limit < len(body):
                     maybe_more = True

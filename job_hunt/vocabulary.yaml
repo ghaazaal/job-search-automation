@@ -202,6 +202,12 @@ eligibility:
     br: [brazil]
     ar: [argentina]
     co: [colombia]
+  # Names that collide with ordinary English words. In list windows they
+  # only count when written with the article ("the us"), and a bare
+  # occurrence poisons that window's exclusion claim — we cannot tell the
+  # country from the pronoun. Restriction templates are exempt: their
+  # surrounding text ("us citizens only") disambiguates on its own.
+  ambiguous_names: [us]
   templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"

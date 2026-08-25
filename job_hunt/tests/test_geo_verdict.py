@@ -34,6 +34,7 @@ _CFG = {
     ],
     "anywhere_words": ["worldwide", "anywhere", "globally"],
     "eligible_phrases": ["open to candidates worldwide", "anywhere in the world"],
+    "ambiguous_names": ["us"],
     "regions": [
         {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
         {"names": ["europe"], "codes": ["gb", "de", "pl"]},
@@ -251,3 +252,35 @@ def test_company_location_prose_is_not_a_restriction():
     candidate — with the anchored template it must stay silent."""
     assert geo_verdict("our office is located in germany but this role "
                        "is fully remote.", "am", _CFG) == ("unknown", None)
+
+
+# ── ambiguous names ("us" the pronoun vs. the country) ──────────────────────
+
+def test_a_pronoun_far_away_does_not_make_a_us_user_eligible():
+    """'join us' is the pronoun, not the country — the regression the
+    unlimited user scan introduced for us-based users."""
+    body = ("open to candidates in poland and germany only. "
+            + "we build tools people rely on. " * 60
+            + "come join us!")
+    verdict, detail = geo_verdict(body, "us", _CFG)
+    assert verdict == "excluded"
+    assert "US" not in detail
+
+
+def test_a_pronoun_inside_the_window_poisons_the_exclusion():
+    """Bare 'us' in the window could be either country or pronoun — no
+    exclusion claim may rest on it. Silence, not 'Germany and US'."""
+    body = ("open to candidates in germany. come join us and help "
+            "build something people love.")
+    assert geo_verdict(body, "us", _CFG) == ("unknown", None)
+    assert geo_verdict(body, "am", _CFG) == ("unknown", None)
+
+
+def test_the_article_form_still_reads_as_the_country():
+    assert geo_verdict("open to candidates in the us and canada.",
+                       "us", _CFG) == ("eligible", None)
+
+
+def test_the_article_form_can_still_exclude():
+    assert geo_verdict("open to candidates in the us and canada.",
+                       "am", _CFG) == ("excluded", "US and Canada")
