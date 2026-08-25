@@ -86,12 +86,14 @@ eligibility:
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
-    - "located in {country}"
     - "authorized to work in {country}"
     - "eligible to work in {country}"
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
+    - "be located in {country}"   # anchored: bare "located in" fires on
+                                  # company prose ("our office is located
+                                  # in Germany but this role is remote")
   list_phrases:         # introduce a list of eligible countries/regions
     - "open to candidates in"
     - "open to applicants in"
@@ -104,8 +106,10 @@ eligibility:
                         # the phrase itself is the evidence
     - "open to candidates worldwide"
     - "anywhere in the world"
-    # ... only worldwide-anchored phrasings; bare "work from anywhere" is
-    # excluded on purpose ("work from anywhere in the US" narrows it)
+    # ... candidate-scoped, worldwide-anchored phrasings ONLY. Company-
+    # scoped ones ("worldwide remote team", "we hire globally") mask
+    # stated restrictions; bare "work from anywhere" is excluded because
+    # "work from anywhere in the US" narrows it.
   regions:              # eligible-only: membership marks the user eligible;
                         # absence stays silent, never flags exclusion
     - names: [emea]
@@ -144,10 +148,20 @@ Returns one of four verdicts, checked in this order:
 
 Mechanics:
 
-- **Windows**: each list-phrase occurrence opens a fixed 160-character
-  window after it (no sentence-splitting — "u.s." breaks naive period
-  logic). All windows are scanned for eligible evidence before anything
+- **Windows**: each list-phrase occurrence opens a 400-character window
+  after it, held as a (start, limit) range over the full body — never a
+  string slice, so a country name at the edge cannot half-match ("ukraine"
+  sliced to "uk"). No sentence-splitting — "u.s." breaks naive period
+  logic. All windows are scanned for eligible evidence before anything
   else, so a list that names the user's country anywhere wins.
+- **Truncation never fabricates**: "excluded" is only claimed when a
+  list-terminating boundary (`.`, `;`, newline, or end of body) follows
+  the last country hit within the window — a list that may continue past
+  the scan could still name the user, so the verdict downgrades to
+  unknown. Exclusion names render in text order.
+- **Performance**: the restriction scan is prefiltered by template stems
+  (plain substring checks) before any per-name regex work; the common
+  no-geo-statement body must stay well under 1 ms.
 - **Matching** uses the same lookaround word boundaries as `has_term` —
   'us' must not fire inside 'campus'. Restriction templates allow an
   optional `the ` before the country name.

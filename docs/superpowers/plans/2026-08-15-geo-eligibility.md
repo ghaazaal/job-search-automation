@@ -188,12 +188,12 @@ eligibility:
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
-    - "located in {country}"
     - "authorized to work in {country}"
     - "eligible to work in {country}"
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
+    - "be located in {country}"
   list_phrases:         # introduce a list of eligible countries/regions
     - "open to candidates in"
     - "open to applicants in"
@@ -203,21 +203,17 @@ eligibility:
     - "available to candidates in"
   anywhere_words: [worldwide, anywhere, globally]
   # Standalone statements of worldwide hiring. These open no list window —
-  # the phrase itself is the evidence. Only worldwide-anchored phrasings
-  # belong here: bare "work from anywhere" is excluded on purpose, because
-  # "work from anywhere in the US" narrows it and would read wrong.
+  # the phrase itself is the evidence. Candidate-scoped phrasings only:
+  # phrases describing the company ("worldwide remote team", "we hire
+  # globally") must not settle eligibility — they mask stated restrictions.
+  # Bare "work from anywhere" is excluded too: "work from anywhere in the
+  # US" narrows it and would read wrong.
   eligible_phrases:
     - "open to candidates worldwide"
     - "open to applicants worldwide"
     - "candidates from anywhere in the world"
     - "work from anywhere in the world"
     - "anywhere in the world"
-    - "hire worldwide"
-    - "hiring worldwide"
-    - "hire globally"
-    - "hiring globally"
-    - "remote worldwide"
-    - "worldwide remote"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.
@@ -609,7 +605,8 @@ def geo_verdict(body: str, user_country: str,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_geo_verdict.py -v`
-Expected: all 22 PASS.
+Expected: all 28 PASS (22 given above + 6 added by the code-review
+correction, listed in the note below Step 5).
 
 > **Correction found during Task 2 implementation:** the originally-given
 > code nested the anywhere-word check inside list windows, making
@@ -621,6 +618,36 @@ Expected: all 22 PASS.
 > window-scoped, and a new `eligibility.eligible_phrases` vocabulary key
 > holds standalone worldwide-anchored statements matched against the whole
 > body. Both failure modes are pinned by tests above.
+
+> **Correction found during Task 2 code review** (measured, adversarially
+> probed — the shipped `src/scoring/matching.py` is the authority over this
+> plan's inline Step 3 code, which predates it):
+> - **Windows are (start, limit) ranges over the full body, not slices** —
+>   a slice's edge let "ukraine" half-match as "uk" against end-of-string,
+>   and absolute offsets give true text-ordering of exclusion names.
+> - **`_LIST_WINDOW` is 400** (160 truncated real 15–30-country lists), and
+>   **a possibly-continuing list never claims "excluded"**: without a list
+>   terminator (`.`/`;`/newline) between the last country hit and the
+>   window limit, the verdict downgrades to unknown — a truncated list that
+>   still names the user later must not become a fabricated "open only
+>   to …".
+> - **The restriction scan is prefiltered by template stems** (plain
+>   substring checks) before any per-name regex work: the unfiltered loop
+>   compiled ~693 patterns per call at ~208 ms — ~2 minutes per 300-job
+>   scrape, ~15× the cost of the whole existing scorer.
+> - **Six company-scoped `eligible_phrases` were dropped** ("hire/hiring
+>   worldwide/globally", "remote worldwide", "worldwide remote") — each
+>   proven to mask a stated restriction ("we are a worldwide remote
+>   company. us citizens only." read as eligible). Five candidate-scoped
+>   phrases remain.
+> - **`located in {country}` became `be located in {country}`** — bare
+>   "located in" fired on company prose ("our office is located in
+>   germany but this role is fully remote" → false restricted-Germany).
+> - `has_term` now delegates to `_bounded`; `_join_names` guards empty
+>   input. Six regression tests added (28 total in test_geo_verdict.py):
+>   single-name exclusion, cross-window text order, long-list-naming-user,
+>   truncated-list downgrade, boilerplate-does-not-mask, company-location
+>   prose.
 
 - [ ] **Step 5: Commit**
 
