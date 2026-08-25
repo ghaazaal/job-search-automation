@@ -198,3 +198,127 @@ def mismatch_penalty(description: str, market_tools, mine: set[str],
     if ratio < cfg.get("soft_ratio", 0.5):
         return cfg.get("soft_value", 10)
     return 0
+
+
+# How far past a list phrase ("open to candidates in ...") country names
+# are looked for. A fixed window rather than sentence-splitting, because
+# "u.s." breaks naive period logic.
+_LIST_WINDOW = 160
+
+
+def _display_name(name: str) -> str:
+    """`uk` -> "UK", `united kingdom` -> "United Kingdom"."""
+    name = (name or "").strip().lower()
+    return name.upper() if len(name) <= 3 else name.title()
+
+
+def _join_names(names: list[str]) -> str:
+    """`[a, b, c]` -> "a, b and c"; four or more cap at three + others."""
+    if len(names) == 1:
+        return names[0]
+    if len(names) <= 3:
+        return f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{', '.join(names[:3])} and others"
+
+
+def _bounded(term: str) -> str:
+    """The has_term lookaround pattern, reusable inside larger regexes."""
+    return r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+
+
+def geo_verdict(body: str, user_country: str,
+                cfg: dict) -> tuple[str, str | None]:
+    """What a posting says about where it hires, judged for one user.
+
+    Returns one of:
+      ("eligible", None)      — a list phrase's window names the user's
+                                country, an anywhere-word, or a region the
+                                user's country belongs to
+      ("restricted", "UK")    — a restriction template fired with a foreign
+                                country in the slot
+      ("excluded", "UK, ...") — list windows name known countries, none of
+                                them the user's
+      ("unknown", None)       — nothing matched, or `user_country` is unset:
+                                the check cannot run, so nothing is claimed
+
+    Checked in that order — positive evidence anywhere in the body settles
+    it before any flag is considered. Regions are eligible-only evidence:
+    a region that does not include the user yields silence, never
+    exclusion, because membership is fuzzy at the edges. An "excluded"
+    verdict is only claimed when the user's country is one this config
+    knows the names of — otherwise it might be in the list, just
+    unrecognised. Matching uses the same lookaround boundaries as
+    has_term ('us' must not fire inside 'campus'); restriction templates
+    allow an optional `the ` before the country name.
+    """
+    user_country = (user_country or "").strip().lower()
+    if not user_country:
+        return ("unknown", None)
+    body = (body or "").lower()
+    cfg = cfg or {}
+    countries = {
+        str(code).strip().lower():
+            [str(n).strip().lower() for n in (names or []) if str(n).strip()]
+        for code, names in (cfg.get("countries") or {}).items()
+    }
+
+    windows: list[str] = []
+    for phrase in cfg.get("list_phrases") or []:
+        phrase = str(phrase).strip().lower()
+        if not phrase:
+            continue
+        for match in re.finditer(_bounded(phrase), body):
+            windows.append(body[match.end():match.end() + _LIST_WINDOW])
+
+    # 1. Eligible — every window is scanned before anything may flag.
+    user_names = countries.get(user_country) or []
+    anywhere = [str(w).strip().lower()
+                for w in cfg.get("anywhere_words") or []]
+    # Checked against the whole body, not just list-phrase windows: an
+    # anywhere-word ("we hire worldwide") is a standalone signal and need
+    # not follow one of the list_phrases to count.
+    if any(has_term(word, body) for word in anywhere if word):
+        return ("eligible", None)
+    for window in windows:
+        if any(has_term(name, window) for name in user_names):
+            return ("eligible", None)
+        for region in cfg.get("regions") or []:
+            codes = {str(c).strip().lower()
+                     for c in (region.get("codes") or [])}
+            names = [str(n).strip().lower()
+                     for n in (region.get("names") or [])]
+            if user_country in codes and any(has_term(n, window)
+                                             for n in names if n):
+                return ("eligible", None)
+
+    # 2. Restricted — a template stating where hiring is locked to.
+    templates = cfg.get("templates") or []
+    for code, names in countries.items():
+        if code == user_country:
+            continue
+        for name in names:
+            for template in templates:
+                before, _, after = str(template).lower().partition("{country}")
+                pattern = (r"(?<!\w)" + re.escape(before) + r"(?:the\s+)?"
+                           + re.escape(name) + re.escape(after) + r"(?!\w)")
+                if re.search(pattern, body):
+                    return ("restricted", _display_name(names[0]))
+
+    # 3. Excluded — lists that name countries, none of them the user's.
+    if windows and user_names:
+        hits: dict[str, int] = {}
+        for index, window in enumerate(windows):
+            for code, names in countries.items():
+                if code == user_country or code in hits:
+                    continue
+                for name in names:
+                    match = re.search(_bounded(name), window)
+                    if match:
+                        hits[code] = index * (_LIST_WINDOW + 1) + match.start()
+                        break
+        if hits:
+            ordered = sorted(hits, key=hits.get)
+            return ("excluded", _join_names(
+                [_display_name(countries[code][0]) for code in ordered]))
+
+    return ("unknown", None)
