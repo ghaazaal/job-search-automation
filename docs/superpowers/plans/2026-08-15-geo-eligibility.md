@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Flag (never hide) postings restricted to a country the user isn't in, and stop Indeed's silent us-board fallback from passing unmarked.
+**Goal:** Flag (never hide) postings restricted to a country the user isn't in — reading eligible-country lists as lists — and stop Indeed's silent us-board fallback from passing unmarked.
 
-**Architecture:** A new pure rule `matching.geo_restriction` reads phrase templates and country aliases from `vocabulary.yaml`; `Scorer._constraints` turns a hit into a penalty and a fired clause exactly like `clearance` today, so the reason sentence carries it with zero `reason.py` changes. The Indeed scraper tags fallback results with a transient `_scraped_under` key; `run_core.execute` pops it (so it can never be stored) and hands it to the scorer as an explicit argument, where it becomes a softer reduced-confidence flag.
+**Architecture:** A new pure rule `matching.geo_verdict` reads restriction templates, eligibility-list phrases, country aliases and region membership from `vocabulary.yaml` and returns one of four verdicts: `eligible` (user's country, an anywhere-word, or a member region named in a list window — nothing fires), `restricted` (a template hit), `excluded` (a list that omits the user), `unknown` (no claim). `Scorer._constraints` turns `restricted`/`excluded` into a penalty and a fired clause exactly like `clearance` today, so the reason sentence carries it with zero `reason.py` changes. The Indeed scraper tags fallback results with a transient `_scraped_under` key; `run_core.execute` pops it (so it can never be stored) and hands it to the scorer as an explicit argument, where it becomes a softer reduced-confidence flag — fired only on `unknown`, since positive eligibility evidence beats board uncertainty.
 
 **Tech Stack:** Python 3, pytest, PyYAML, regex via the existing `has_term` lookaround style. No new dependencies, no schema change, no UI change.
 
@@ -17,7 +17,7 @@
 - Working directory for all commands: `job_hunt/` (tests import `src.*` from there). Run pytest as `python -m pytest`.
 - The full suite must stay green after every task. `Scorer.__init__`, `score_job`, and `best_match` gain **keyword arguments with defaults** precisely so the ~40 existing scorer/vocabulary/run_core tests keep passing untouched.
 - House test style: plain functions, docstrings state the rule being defended, fixtures over setup methods, `monkeypatch` for network. Follow `tests/test_scorer.py` and `tests/test_scrapers.py`.
-- The scorer lowercases `body` before `_constraints` runs; `geo_restriction` still lowercases defensively (same choice `matching.gaps` makes).
+- The scorer lowercases `body` before `_constraints` runs; `geo_verdict` still lowercases defensively (same choice `matching.gaps` makes).
 - **Never render a score.** All flags surface only through `penalties`/`reason`.
 
 ### File map
@@ -26,8 +26,8 @@
 |---|---|
 | `job_hunt/vocabulary.yaml` | Modify — `eligibility` section, two penalties |
 | `job_hunt/tests/test_vocabulary.py` | Modify — guard the new section |
-| `job_hunt/src/scoring/matching.py` | Modify — add `geo_restriction` + `_display_name` |
-| `job_hunt/tests/test_geo_restriction.py` | Create |
+| `job_hunt/src/scoring/matching.py` | Modify — add `geo_verdict` + helpers |
+| `job_hunt/tests/test_geo_verdict.py` | Create |
 | `job_hunt/src/scoring/scorer.py` | Modify — `user_country`, `scraped_under`, `_constraints` |
 | `job_hunt/tests/test_scorer_geo.py` | Create |
 | `job_hunt/src/scrapers/indeed.py` | Modify — tag fallback results |
@@ -49,16 +49,24 @@ Append to `job_hunt/tests/test_vocabulary.py`:
 
 ```python
 def test_the_eligibility_section_holds_market_facts():
-    """Country names and restriction phrasing are language facts, so they
-    live here — but nothing in them may describe a particular person."""
+    """Country names, region membership and restriction phrasing are
+    language facts, so they live here — but nothing in them may describe a
+    particular person."""
     eligibility = _vocabulary()["eligibility"]
-    assert {"countries", "templates"} == set(eligibility)
+    assert {"countries", "templates", "list_phrases", "anywhere_words",
+            "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
-    # YAML 1.1 parses a bare `no:` (Norway) as boolean False. Every code
-    # must arrive as a string — quote any future code YAML would eat.
+    # A list phrase introduces a list — it must not carry the slot itself.
+    assert all("{country}" not in p for p in eligibility["list_phrases"])
+    # YAML 1.1 parses a bare `no:` (Norway) or `on:` as a boolean. Every
+    # code must arrive as a string — quote any future code YAML would eat.
     assert all(isinstance(code, str) for code in eligibility["countries"])
     assert all(isinstance(names, list) and names
                for names in eligibility["countries"].values())
+    for region in eligibility["regions"]:
+        assert {"names", "codes"} == set(region)
+        assert region["names"] and region["codes"]
+        assert all(isinstance(code, str) for code in region["codes"])
 
 
 def test_the_geo_penalties_are_configured():
@@ -92,12 +100,13 @@ penalties:
 Then append at the end of the file:
 
 ```yaml
-# Geography. How postings phrase a country restriction, and the names each
-# country goes by in them. Market/language facts only — the user's own
-# country lives in their profile, never here.
+# Geography. How postings phrase who they can hire — restriction templates,
+# phrases that introduce a list of eligible countries, and region
+# membership. Market/language facts only — the user's own country lives in
+# their profile, never here.
 #
-# YAML 1.1 gotcha: a bare `no:` (Norway) parses as boolean False. Quote any
-# country code YAML would eat: `"no":`, `"on":`.
+# YAML 1.1 gotcha: a bare `no:` (Norway) or `on:` parses as a boolean.
+# Quote any country code YAML would eat: `"no":`, `"on":`.
 eligibility:
   countries:            # code -> names as postings write them
     am: [armenia]
@@ -108,7 +117,7 @@ eligibility:
     de: [germany]
     in: [india]
     sg: [singapore]
-  templates:            # {country} is the substitution point
+  templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
@@ -118,7 +127,32 @@ eligibility:
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
-    - "open to candidates in {country}"
+  list_phrases:         # introduce a list of eligible countries/regions
+    - "open to candidates in"
+    - "open to applicants in"
+    - "eligible countries"
+    - "we can hire in"
+    - "able to hire in"
+    - "available to candidates in"
+    - "hiring in"
+  anywhere_words: [worldwide, anywhere, globally]
+  # Regions are eligible-only evidence: membership marks the user eligible;
+  # absence stays silent, never flags exclusion — membership is fuzzy at
+  # the edges and a wrong exclusion would be fabricated precision.
+  regions:
+    - names: [emea]
+      # Corporate EMEA reliably includes the Caucasus.
+      codes: [am, ge, gb, de, fr, nl, pl, ua]
+    - names: [europe]
+      # Deliberately no `am` — whether Armenia is "Europe" depends on the
+      # writer. Silence beats a wrong eligibility claim.
+      codes: [gb, de, fr, nl, pl]
+    - names: [european union, eu]
+      codes: [de, fr, nl, pl]
+    - names: [apac, asia pacific, asia-pacific]
+      codes: [au, in, sg]
+    - names: [americas, north america]
+      codes: [us, ca]
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -135,24 +169,25 @@ git commit -m "feat: vocabulary learns how postings phrase a country restriction
 
 ---
 
-### Task 2: `matching.geo_restriction` — the pure rule
+### Task 2: `matching.geo_verdict` — the pure rule
 
 **Files:**
 - Modify: `job_hunt/src/scoring/matching.py`
-- Create: `job_hunt/tests/test_geo_restriction.py`
+- Create: `job_hunt/tests/test_geo_verdict.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `job_hunt/tests/test_geo_restriction.py`:
+Create `job_hunt/tests/test_geo_verdict.py`:
 
 ```python
-"""Tests for matching.geo_restriction — the country a posting locks hiring to.
+"""Tests for matching.geo_verdict — what a posting says about where it hires.
 
-The rule is pure: body text in, display name (or None) out. The config is
+The rule is pure: body text in, (verdict, detail) out. The config is
 inlined here rather than loaded from vocabulary.yaml so each test states
-exactly which templates it exercises; test_vocabulary.py guards the real file.
+exactly which phrasings it exercises; test_vocabulary.py guards the real
+file, and test_scorer_geo.py proves the shipped file works end to end.
 """
-from src.scoring.matching import geo_restriction
+from src.scoring.matching import geo_verdict
 
 _CFG = {
     "countries": {
@@ -160,6 +195,8 @@ _CFG = {
         "us": ["us", "usa", "u.s.", "united states", "america"],
         "gb": ["uk", "united kingdom", "britain", "england"],
         "ca": ["canada"],
+        "de": ["germany"],
+        "pl": ["poland"],
     },
     "templates": [
         "must be based in {country}",
@@ -171,19 +208,30 @@ _CFG = {
         "work authorization in {country}",
         "{country} citizens only",
         "{country} residents only",
-        "open to candidates in {country}",
+    ],
+    "list_phrases": [
+        "open to candidates in",
+        "we can hire in",
+        "eligible countries",
+    ],
+    "anywhere_words": ["worldwide", "anywhere", "globally"],
+    "regions": [
+        {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
+        {"names": ["europe"], "codes": ["gb", "de", "pl"]},
     ],
 }
 
 
+# ── restrictions ─────────────────────────────────────────────────────────────
+
 def test_a_stated_restriction_names_the_country():
     body = "this role is remote but you must be based in the uk."
-    assert geo_restriction(body, "am", _CFG) == "UK"
+    assert geo_verdict(body, "am", _CFG) == ("restricted", "UK")
 
 
 def test_citizens_only_phrasing_fires():
-    assert geo_restriction("us citizens only, no sponsorship.",
-                           "am", _CFG) == "US"
+    assert geo_verdict("us citizens only, no sponsorship.",
+                       "am", _CFG) == ("restricted", "US")
 
 
 def test_the_article_is_optional_and_long_names_resolve_to_the_short_one():
@@ -191,120 +239,239 @@ def test_the_article_is_optional_and_long_names_resolve_to_the_short_one():
     display name is the country's first listed name — 'US', not the
     phrasing that happened to match."""
     body = "applicants must be based in the united states."
-    assert geo_restriction(body, "am", _CFG) == "US"
-
-
-def test_display_casing():
-    """`uk` -> UK (short codes upper-cased), `canada` -> Canada (title-cased)."""
-    assert geo_restriction("must be based in the united kingdom.",
-                           "am", _CFG) == "UK"
-    assert geo_restriction("open to candidates in canada.",
-                           "am", _CFG) == "Canada"
+    assert geo_verdict(body, "am", _CFG) == ("restricted", "US")
 
 
 def test_your_own_country_is_not_a_restriction():
-    assert geo_restriction("must be based in armenia.", "am", _CFG) is None
+    assert geo_verdict("must be based in armenia.",
+                       "am", _CFG) == ("unknown", None)
 
 
 def test_no_user_country_claims_nothing():
     """With no country on file the check cannot run, so it must not fire —
     a claim we cannot ground is worse than silence."""
-    assert geo_restriction("must be based in the uk.", "", _CFG) is None
-    assert geo_restriction("must be based in the uk.", None, _CFG) is None
+    assert geo_verdict("must be based in the uk.", "", _CFG) == ("unknown", None)
+    assert geo_verdict("must be based in the uk.", None, _CFG) == ("unknown", None)
 
 
 def test_a_plain_mention_is_not_a_restriction():
-    assert geo_restriction("we serve clients across the us and europe.",
-                           "am", _CFG) is None
+    assert geo_verdict("we serve clients across the us and europe.",
+                       "am", _CFG) == ("unknown", None)
 
 
 def test_word_boundaries_hold_on_short_names():
     """'us' inside another word must not fire — same discipline has_term
     applies to 'opt' inside 'optimize'."""
-    assert geo_restriction("the campus residents only lounge is closed.",
-                           "am", _CFG) is None
+    assert geo_verdict("the campus residents only lounge is closed.",
+                       "am", _CFG) == ("unknown", None)
 
 
 def test_a_nearby_country_is_not_the_named_one():
     """'south america' must not satisfy an 'america' template — the name
     must sit exactly where the template puts it."""
-    assert geo_restriction("must be based in south america.",
-                           "am", _CFG) is None
+    assert geo_verdict("must be based in south america.",
+                       "am", _CFG) == ("unknown", None)
 
 
-def test_multiple_restrictions_yield_one_name():
-    body = "must be based in the uk. us citizens only."
-    assert geo_restriction(body, "am", _CFG) in {"UK", "US"}
+# ── eligibility lists ────────────────────────────────────────────────────────
+
+def test_a_list_naming_your_country_is_eligible():
+    """The v3 case: a country list must be read as a list, never as a
+    restriction on whichever foreign name happens to sit first."""
+    body = "open to candidates in the uk, armenia and poland."
+    assert geo_verdict(body, "am", _CFG) == ("eligible", None)
+
+
+def test_a_list_without_your_country_is_excluded_in_text_order():
+    body = "open to candidates in poland, the uk and germany."
+    assert geo_verdict(body, "am", _CFG) == (
+        "excluded", "Poland, UK and Germany")
+
+
+def test_a_long_exclusion_list_is_capped():
+    body = "open to candidates in poland, the uk, germany and canada."
+    assert geo_verdict(body, "am", _CFG) == (
+        "excluded", "Poland, UK, Germany and others")
+
+
+def test_eligible_anywhere_in_the_body_beats_an_earlier_foreign_list():
+    body = "we can hire in the uk. open to candidates in armenia."
+    assert geo_verdict(body, "am", _CFG) == ("eligible", None)
+
+
+def test_an_anywhere_word_is_eligible():
+    assert geo_verdict("open to candidates worldwide.",
+                       "am", _CFG) == ("eligible", None)
+
+
+def test_a_region_that_includes_you_is_eligible():
+    assert geo_verdict("open to candidates in emea.",
+                       "am", _CFG) == ("eligible", None)
+
+
+def test_a_region_without_you_stays_silent_never_excluded():
+    """Region membership is fuzzy at the edges — eligible-only evidence.
+    `europe` omits `am` in this config, and the answer is silence, not a
+    flag."""
+    assert geo_verdict("open to candidates in europe.",
+                       "am", _CFG) == ("unknown", None)
+
+
+def test_a_list_of_unrecognised_countries_stays_silent():
+    assert geo_verdict("open to candidates in narnia.",
+                       "am", _CFG) == ("unknown", None)
+
+
+def test_a_stated_restriction_beats_an_excluding_list():
+    body = "us citizens only. open to candidates in the uk."
+    assert geo_verdict(body, "am", _CFG) == ("restricted", "US")
 
 
 def test_empty_config_is_silent():
-    assert geo_restriction("must be based in the uk.", "am", {}) is None
+    assert geo_verdict("must be based in the uk.", "am", {}) == ("unknown", None)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/test_geo_restriction.py -v`
-Expected: FAIL at import — `cannot import name 'geo_restriction'`.
+Run: `python -m pytest tests/test_geo_verdict.py -v`
+Expected: FAIL at import — `cannot import name 'geo_verdict'`.
 
 - [ ] **Step 3: Implement**
 
 Append to `job_hunt/src/scoring/matching.py`:
 
 ```python
+# How far past a list phrase ("open to candidates in ...") country names
+# are looked for. A fixed window rather than sentence-splitting, because
+# "u.s." breaks naive period logic.
+_LIST_WINDOW = 160
+
+
 def _display_name(name: str) -> str:
     """`uk` -> "UK", `united kingdom` -> "United Kingdom"."""
     name = (name or "").strip().lower()
     return name.upper() if len(name) <= 3 else name.title()
 
 
-def geo_restriction(body: str, user_country: str, cfg: dict) -> str | None:
-    """The country a posting restricts hiring to, when it is not yours.
+def _join_names(names: list[str]) -> str:
+    """`[a, b, c]` -> "a, b and c"; four or more cap at three + others."""
+    if len(names) == 1:
+        return names[0]
+    if len(names) <= 3:
+        return f"{', '.join(names[:-1])} and {names[-1]}"
+    return f"{', '.join(names[:3])} and others"
 
-    Templates come from vocabulary.yaml with `{country}` as the substitution
-    point. An optional `the ` may precede the country name, so "must be
-    based in the united states" matches the `united states` entry. Matching
-    uses the same lookaround boundaries as has_term, for the same reason:
-    'us' must not fire inside 'campus'.
 
-    Returns the display name of the restricting country — the first name in
-    its list, however the posting happened to phrase it — or None when
-    nothing matches, when `user_country` is unset (the check cannot run, so
-    nothing may be claimed), or when the restriction names the user's own
-    country. First hit wins; multiple restrictions do not stack.
+def _bounded(term: str) -> str:
+    """The has_term lookaround pattern, reusable inside larger regexes."""
+    return r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+
+
+def geo_verdict(body: str, user_country: str,
+                cfg: dict) -> tuple[str, str | None]:
+    """What a posting says about where it hires, judged for one user.
+
+    Returns one of:
+      ("eligible", None)      — a list phrase's window names the user's
+                                country, an anywhere-word, or a region the
+                                user's country belongs to
+      ("restricted", "UK")    — a restriction template fired with a foreign
+                                country in the slot
+      ("excluded", "UK, ...") — list windows name known countries, none of
+                                them the user's
+      ("unknown", None)       — nothing matched, or `user_country` is unset:
+                                the check cannot run, so nothing is claimed
+
+    Checked in that order — positive evidence anywhere in the body settles
+    it before any flag is considered. Regions are eligible-only evidence:
+    a region that does not include the user yields silence, never
+    exclusion, because membership is fuzzy at the edges. An "excluded"
+    verdict is only claimed when the user's country is one this config
+    knows the names of — otherwise it might be in the list, just
+    unrecognised. Matching uses the same lookaround boundaries as
+    has_term ('us' must not fire inside 'campus'); restriction templates
+    allow an optional `the ` before the country name.
     """
     user_country = (user_country or "").strip().lower()
     if not user_country:
-        return None
+        return ("unknown", None)
     body = (body or "").lower()
-    countries = (cfg or {}).get("countries") or {}
-    templates = (cfg or {}).get("templates") or []
-    for code, names in countries.items():
-        if str(code).strip().lower() == user_country:
+    cfg = cfg or {}
+    countries = {
+        str(code).strip().lower():
+            [str(n).strip().lower() for n in (names or []) if str(n).strip()]
+        for code, names in (cfg.get("countries") or {}).items()
+    }
+
+    windows: list[str] = []
+    for phrase in cfg.get("list_phrases") or []:
+        phrase = str(phrase).strip().lower()
+        if not phrase:
             continue
-        for name in names or []:
-            name = str(name).strip().lower()
-            if not name:
-                continue
+        for match in re.finditer(_bounded(phrase), body):
+            windows.append(body[match.end():match.end() + _LIST_WINDOW])
+
+    # 1. Eligible — every window is scanned before anything may flag.
+    user_names = countries.get(user_country) or []
+    anywhere = [str(w).strip().lower()
+                for w in cfg.get("anywhere_words") or []]
+    for window in windows:
+        if any(has_term(name, window) for name in user_names):
+            return ("eligible", None)
+        if any(has_term(word, window) for word in anywhere if word):
+            return ("eligible", None)
+        for region in cfg.get("regions") or []:
+            codes = {str(c).strip().lower()
+                     for c in (region.get("codes") or [])}
+            names = [str(n).strip().lower()
+                     for n in (region.get("names") or [])]
+            if user_country in codes and any(has_term(n, window)
+                                             for n in names if n):
+                return ("eligible", None)
+
+    # 2. Restricted — a template stating where hiring is locked to.
+    templates = cfg.get("templates") or []
+    for code, names in countries.items():
+        if code == user_country:
+            continue
+        for name in names:
             for template in templates:
                 before, _, after = str(template).lower().partition("{country}")
-                pattern = (r"(?<!\w)" + re.escape(before)
-                           + r"(?:the\s+)?" + re.escape(name)
-                           + re.escape(after) + r"(?!\w)")
+                pattern = (r"(?<!\w)" + re.escape(before) + r"(?:the\s+)?"
+                           + re.escape(name) + re.escape(after) + r"(?!\w)")
                 if re.search(pattern, body):
-                    return _display_name(str(names[0]))
-    return None
+                    return ("restricted", _display_name(names[0]))
+
+    # 3. Excluded — lists that name countries, none of them the user's.
+    if windows and user_names:
+        hits: dict[str, int] = {}
+        for index, window in enumerate(windows):
+            for code, names in countries.items():
+                if code == user_country or code in hits:
+                    continue
+                for name in names:
+                    match = re.search(_bounded(name), window)
+                    if match:
+                        hits[code] = index * (_LIST_WINDOW + 1) + match.start()
+                        break
+        if hits:
+            ordered = sorted(hits, key=hits.get)
+            return ("excluded", _join_names(
+                [_display_name(countries[code][0]) for code in ordered]))
+
+    return ("unknown", None)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest tests/test_geo_restriction.py -v`
-Expected: all 11 PASS.
+Run: `python -m pytest tests/test_geo_verdict.py -v`
+Expected: all 18 PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/scoring/matching.py tests/test_geo_restriction.py
-git commit -m "feat: a pure rule reads a posting's country restriction"
+git add src/scoring/matching.py tests/test_geo_verdict.py
+git commit -m "feat: a pure rule reads where a posting can hire"
 ```
 
 ---
@@ -360,6 +527,32 @@ def test_a_foreign_restriction_costs_points_and_is_named():
     assert "restricted to UK" in restricted["reason"]
 
 
+def test_an_excluding_list_costs_points_and_is_named():
+    evidence = _scorer().score_job(
+        "BI Developer", _JD + " Open to candidates in the UK and Germany.",
+        _RESUME)
+    assert "remote, but open only to UK and Germany" in evidence["penalties"]
+    assert "open only to UK and Germany" in evidence["reason"]
+
+
+def test_a_list_that_includes_you_is_not_flagged():
+    """The v3 case, end to end through the shipped vocabulary: your country
+    in the list means no flag of any kind."""
+    evidence = _scorer().score_job(
+        "BI Developer",
+        _JD + " Open to candidates in the UK, Armenia and Poland.", _RESUME)
+    assert not any("restricted" in p or "open only" in p
+                   for p in evidence["penalties"])
+
+
+def test_a_region_that_includes_you_is_not_flagged():
+    """EMEA includes Armenia in the shipped vocabulary — eligible, silent."""
+    evidence = _scorer().score_job(
+        "BI Developer", _JD + " Open to candidates in EMEA.", _RESUME)
+    assert not any("restricted" in p or "open only" in p
+                   for p in evidence["penalties"])
+
+
 def test_your_own_country_is_not_flagged():
     evidence = _scorer().score_job(
         "BI Developer", _JD + " Must be based in Armenia.", _RESUME)
@@ -389,6 +582,15 @@ def test_a_text_restriction_silences_the_board_flag():
         "BI Developer", _JD + " US citizens only.", _RESUME,
         scraped_under="us")
     assert "remote, but restricted to US" in evidence["penalties"]
+    assert _BOARD_CLAUSE not in evidence["penalties"]
+
+
+def test_eligible_evidence_silences_the_board_flag():
+    """Positive text evidence beats board uncertainty: a worldwide posting
+    fetched via the us fallback needs no warning."""
+    evidence = _scorer().score_job(
+        "BI Developer", _JD + " Open to candidates worldwide.", _RESUME,
+        scraped_under="us")
     assert _BOARD_CLAUSE not in evidence["penalties"]
 
 
@@ -461,17 +663,22 @@ In `job_hunt/src/scoring/scorer.py`, make four edits.
 ```
 
 ```python
-        place = matching.geo_restriction(
+        verdict, detail = matching.geo_verdict(
             body, self._user_country, self._vocab.get("eligibility") or {})
-        if place:
+        if verdict == "restricted":
             penalty += cfg.get("geo_restricted", 30)
-            fired.append(f"remote, but restricted to {place}")
-        elif (scraped_under and self._user_country
+            fired.append(f"remote, but restricted to {detail}")
+        elif verdict == "excluded":
+            penalty += cfg.get("geo_restricted", 30)
+            fired.append(f"remote, but open only to {detail}")
+        elif (verdict == "unknown" and scraped_under and self._user_country
               and scraped_under.strip().lower() != self._user_country):
             # The Indeed fallback searched the us board because the actor
             # rejected the user's country. That is uncertainty, not a stated
             # restriction — softer penalty, wording that claims no more than
-            # we know, and never on top of a restriction the text did state.
+            # we know, and never on top of anything the text did state.
+            # "eligible" lands here too: positive evidence beats board
+            # uncertainty, so nothing fires at all.
             penalty += cfg.get("wrong_board", 10)
             fired.append("found via Indeed's US board, "
                          "not verified for your country")
@@ -482,13 +689,13 @@ In `job_hunt/src/scoring/scorer.py`, make four edits.
 Run: `python -m pytest tests/test_scorer_geo.py tests/test_scorer.py tests/test_scorer_evidence.py tests/test_reason.py -v`
 Expected: all PASS — the new file green, the three existing files untouched and green (defaults preserve old behaviour).
 
-- [ ] **Step 5: Mutation-check the double-penalty guard**
+- [ ] **Step 5: Mutation-check the verdict guard**
 
-Prove the guard test bites, without git-reverting (Step 3 is still uncommitted):
+The board flag's protection is the `verdict == "unknown"` condition — prove the tests bite it, without git-reverting (Step 3 is still uncommitted):
 
-1. In the new `_constraints` block, change `elif` to `if` (one word).
-2. Run: `python -m pytest tests/test_scorer_geo.py::test_a_text_restriction_silences_the_board_flag -v` — expected: FAIL (both clauses fired).
-3. Change `if` back to `elif` by hand.
+1. In the board-flag `elif`, temporarily delete `verdict == "unknown" and ` from the condition.
+2. Run: `python -m pytest tests/test_scorer_geo.py::test_eligible_evidence_silences_the_board_flag -v` — expected: FAIL (the board clause fired on an eligible posting).
+3. Restore the deleted text by hand.
 4. Re-run Step 4's command — expected: all PASS again.
 5. `git diff src/scoring/scorer.py` — confirm only Step 3's intended edits remain.
 
@@ -695,6 +902,9 @@ for jd, tag in [
     ('We need Power BI and SQL. US citizens only.', None),
     ('We need Power BI and SQL.', 'us'),
     ('We need Power BI and SQL. Must be based in Armenia.', None),
+    ('We need Power BI and SQL. Open to candidates in the UK and Germany.', None),
+    ('We need Power BI and SQL. Open to candidates in EMEA.', 'us'),
+    ('We need Power BI and SQL. Open to candidates worldwide.', None),
 ]:
     e = s.score_job('BI Developer', jd, resume, scraped_under=tag)
     print(e['band'], '|', e['reason'])
@@ -706,6 +916,9 @@ Expected output shape (bands may vary with penalties; the reasons must):
 - line 2 contains `remote, but restricted to US`
 - line 3 contains `found via Indeed's US board, not verified for your country`
 - line 4 contains **no** restriction clause
+- line 5 contains `remote, but open only to UK and Germany`
+- line 6 contains **no** flag of any kind — EMEA includes `am`, and that eligibility also silences the board flag despite `scraped_under='us'`
+- line 7 contains **no** flag of any kind
 
 - [ ] **Step 3: Confirm nothing is uncommitted**
 
@@ -716,6 +929,7 @@ Expected: clean (only the plan doc itself, if it lives in this tree).
 
 ## Self-review notes (done at planning time)
 
-- **Spec coverage:** vocabulary section → Task 1; `geo_restriction` incl. display casing, self-exemption, unset-country silence → Task 2; scorer penalties, wording, no-double-penalty, absence-phrase untouched → Task 3 (no `reason.py` task exists because the spec requires zero changes there — Task 3's reason assertions prove the clause flows through); Indeed tagging on divergence only → Task 4; pop-not-read + single wiring point → Task 5; live smoke → Task 6. LinkedIn `Worldwide` is deliberately untouched (spec: keep it).
-- **Type consistency:** `geo_restriction(body, user_country, cfg) -> str | None` used identically in Tasks 2, 3. `scraped_under: str | None = None` threaded `best_match -> score_job -> _constraints`. `_scraped_under` string key identical in Tasks 4, 5.
+- **Spec coverage:** vocabulary section incl. `list_phrases`/`anywhere_words`/`regions` → Task 1; `geo_verdict` incl. all four verdicts, window mechanics, display casing/order/cap, self-exemption, unset-country silence, eligible-only regions → Task 2; scorer wording for restricted/excluded, board flag only on `unknown`, eligible-suppresses-board, absence-phrase untouched → Task 3 (no `reason.py` task exists because the spec requires zero changes there — Task 3's reason assertions prove the clauses flow through); Indeed tagging on divergence only → Task 4; pop-not-read + single wiring point → Task 5; live smoke incl. list/region/worldwide cases → Task 6. LinkedIn `Worldwide` is deliberately untouched (spec: keep it).
+- **Type consistency:** `geo_verdict(body, user_country, cfg) -> tuple[str, str | None]` used identically in Tasks 2, 3. `scraped_under: str | None = None` threaded `best_match -> score_job -> _constraints`. `_scraped_under` string key identical in Tasks 4, 5. Verdict strings `eligible`/`restricted`/`excluded`/`unknown` identical across Tasks 2, 3.
 - **Existing-suite safety:** every signature change is keyword-with-default; Task 3 Step 4 and Task 6 Step 1 verify.
+- **v3 note:** Task 2's config inlines regions where `europe` omits `am` on purpose — that test (`test_a_region_that_includes_you_stays_silent...`) defends the eligible-only decision, not an accident of the fixture.

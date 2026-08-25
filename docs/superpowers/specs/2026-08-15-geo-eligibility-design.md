@@ -1,7 +1,8 @@
 # Geo-Eligibility Flagging — Ship 4 Design
 
 Date: 2026-08-15
-Status: approved
+Status: approved (v3 — list-aware, after field testing showed postings
+mostly phrase geography as eligible-country lists)
 
 ## Problem
 
@@ -23,16 +24,34 @@ two geography failures:
    came off the US board while the user believed the search covered their
    own market.
 
+A further field observation (the reason for v3): remote postings mostly
+phrase geography **positively**, as a list of eligible countries — "open to
+candidates in the UK, Armenia and Poland" — or a region — "open to
+candidates in EMEA". A restriction-template rule alone reads such a list
+wrong: it would flag "restricted to UK" without noticing the user's country
+sitting right there in the list. A country list needs list logic: *is my
+country in it?*
+
 ## Decisions (made with the user)
 
 - **Flag, don't hide.** A geo-restricted role stays on the map with a lower
   score and a stated reason, exactly like `clearance` and `w2 only` today.
   Hiding risks silently dropping real fits on a false positive.
 - **One eligible country: the profile's `country` field.** No multi-country
-  list, no region buckets. Extend later if it matters.
+  list. Extend later if it matters.
 - **Keyword/phrase detection, not LLM.** Deterministic, free, testable, and
   consistent with the project's no-fabricated-facts rule. An LLM call per
   scraped job (hundreds per run) is not worth the cost or hallucination risk.
+- **Eligibility lists are first-class** (v3). "Open to candidates in …" is
+  handled as a list to scan for the user's country, never as a restriction
+  template.
+- **Regions are eligible-only evidence** (v3). "Open to candidates in EMEA"
+  with the user's country in the region's member list marks the posting
+  eligible. A region that does *not* include the user stays silent
+  ("unknown") — region membership is fuzzy at the edges (whether "Europe"
+  includes Armenia depends on the writer), and flagging exclusion on a
+  fuzzy map would be fabricated precision. Wrong-side errors are impossible
+  by construction: a miss never produces a wrong flag.
 - **The Indeed fallback fix ships here too** — it is the same user complaint
   ("jobs aren't actually worldwide/for me") wearing a different hat.
 - **LinkedIn's `Worldwide` cast is deliberately kept.** Under flagging it is
@@ -43,12 +62,13 @@ two geography failures:
 
 ### vocabulary.yaml — new `eligibility` section, two new penalties
 
-Country names and restriction phrasing are market/language facts, so they
-belong in `vocabulary.yaml` (which must never describe a particular person).
+Country names, region membership and restriction phrasing are
+market/language facts, so they belong in `vocabulary.yaml` (which must
+never describe a particular person).
 
 ```yaml
 eligibility:
-  countries:            # code → names as postings write them
+  countries:            # code -> names as postings write them
     am: [armenia]
     us: [us, usa, u.s., united states, america]
     gb: [uk, united kingdom, britain, england]
@@ -57,7 +77,7 @@ eligibility:
     de: [germany]
     in: [india]
     sg: [singapore]
-  templates:            # {country} is the substitution point
+  templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
@@ -67,46 +87,87 @@ eligibility:
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
-    - "open to candidates in {country}"
+  list_phrases:         # introduce a list of eligible countries/regions
+    - "open to candidates in"
+    - "open to applicants in"
+    - "eligible countries"
+    - "we can hire in"
+    - "able to hire in"
+    - "available to candidates in"
+    - "hiring in"
+  anywhere_words: [worldwide, anywhere, globally]
+  regions:              # eligible-only: membership marks the user eligible;
+                        # absence stays silent, never flags exclusion
+    - names: [emea]
+      codes: [am, ge, gb, de, fr, nl, pl, ua]   # corporate EMEA reliably includes the Caucasus
+    - names: [europe]
+      codes: [gb, de, fr, nl, pl]   # deliberately no `am` — writer-dependent; silence beats a guess
+    - names: [european union, eu]
+      codes: [de, fr, nl, pl]
+    - names: [apac, asia pacific, asia-pacific]
+      codes: [au, in, sg]
+    - names: [americas, north america]
+      codes: [us, ca]
 
 penalties:
-  geo_restricted: 30    # same class of blocker as clearance
-  wrong_board:    10    # softer: uncertainty, not a stated restriction
+  geo_restricted: 30    # a stated country restriction is the same class of blocker as clearance
+  wrong_board:    10    # softer: results from Indeed's us fallback carry uncertainty, not a stated restriction
 ```
 
-### matching.py — `geo_restriction`
+YAML 1.1 gotcha, noted in the file: a bare `no:` (Norway) or `on:` parses
+as a boolean. Quote any such future code.
+
+### matching.py — `geo_verdict`
 
 ```python
-def geo_restriction(body: str, user_country: str, cfg: dict) -> str | None
+def geo_verdict(body: str, user_country: str, cfg: dict) -> tuple[str, str | None]
 ```
 
-- Expands each template × each country name; an optional `the ` is allowed
-  before the country name ("must be based in the United States").
-- Word-boundary matching via the existing `has_term` machinery — no
-  substring false positives.
-- Returns the offending country's **display name** — the first name in its
-  list, upper-cased when it is 3 characters or fewer (`uk` → "UK",
-  `us` → "US"), title-cased otherwise (`armenia` → "Armenia") — or `None`
-  when:
-  - no template matches,
-  - `user_country` is unset — the check cannot run, so nothing is claimed,
-  - the restriction names the user's own country (an Armenia-restricted
-    posting is fine for an Armenia-based user).
-- First hit wins; multiple restrictions do not stack.
+Returns one of four verdicts, checked in this order:
+
+| Verdict | When |
+|---|---|
+| `("eligible", None)` | a list phrase's window names the user's country, an anywhere-word, or a region whose member codes include the user's country |
+| `("restricted", "UK")` | a restriction template matches with a foreign country in the slot |
+| `("excluded", "UK, Germany and Poland")` | list-phrase windows name known countries, none of them the user's |
+| `("unknown", None)` | nothing matched, or `user_country` is unset — the check cannot run, so nothing is claimed |
+
+Mechanics:
+
+- **Windows**: each list-phrase occurrence opens a fixed 160-character
+  window after it (no sentence-splitting — "u.s." breaks naive period
+  logic). All windows are scanned for eligible evidence before anything
+  else, so a list that names the user's country anywhere wins.
+- **Matching** uses the same lookaround word boundaries as `has_term` —
+  'us' must not fire inside 'campus'. Restriction templates allow an
+  optional `the ` before the country name.
+- **Display names**: a country renders as the first name in its list —
+  upper-cased at ≤ 3 characters (`uk` → "UK"), title-cased otherwise
+  (`armenia` → "Armenia") — however the posting happened to phrase it.
+- **Excluded lists**: countries deduped by code, ordered by position in
+  the text, capped at three names + " and others". Only claimed when the
+  user's country is one the map knows the names of — otherwise their
+  country might be in the list, just unrecognised.
+- **Self-exemption**: a restriction naming the user's own country is not a
+  restriction.
+- First hit wins per tier; nothing stacks.
 
 ### scorer.py — geography joins `_constraints`
 
 - `Scorer.__init__` gains `user_country: str = ""`.
 - `score_job`/`best_match` gain `scraped_under: str | None = None`.
-- `_constraints` additions, in order:
-  1. `geo_restriction(...)` hit → penalty `geo_restricted`, fired clause
-     `"remote, but restricted to {place}"`.
-  2. Else, `scraped_under` set and ≠ `user_country` → penalty
-     `wrong_board`, fired clause
-     `"found via Indeed's US board, not verified for your country"`.
-     The wording is deliberately soft — it states uncertainty, not a
-     restriction the posting never made. Never fires when a text
-     restriction already fired (no double penalty).
+- `_constraints` acts on the verdict:
+  - `restricted` → penalty `geo_restricted`, fired clause
+    `"remote, but restricted to {place}"`.
+  - `excluded` → penalty `geo_restricted`, fired clause
+    `"remote, but open only to {places}"`.
+  - `unknown` **and** `scraped_under` set and ≠ `user_country` → penalty
+    `wrong_board`, fired clause
+    `"found via Indeed's US board, not verified for your country"`.
+    Deliberately soft wording — it states uncertainty, not a restriction
+    the posting never made.
+  - `eligible` → nothing fires, **including** `wrong_board`: positive
+    text evidence beats board uncertainty.
 - Fired clauses flow into the reason sentence through the existing
   penalties path — **zero `reason.py` changes**.
 - The absence phrase ("no visa or clearance limits found") is deliberately
@@ -141,28 +202,38 @@ renders whatever the reason sentence says.
 
 ## Testing
 
-- `geo_restriction` units: one per template shape; optional-`the` handling;
-  false-positive guards ("clients across the US" must not fire
-  "must be based in the US"); self-country exemption; unset `user_country`
-  returns `None`; word-boundary safety on short names ("us").
-- `Scorer._constraints`: geo penalty fires and lands in `fired`;
-  `wrong_board` fires only when `scraped_under` differs and no text
-  restriction fired; both-present → only `geo_restricted`, no double
-  penalty. Mutation-tested (revert the fix, watch the test fail, restore).
+- `geo_verdict` units: one per restriction-template shape; optional-`the`
+  handling; display casing; self-country exemption; unset `user_country`
+  → unknown; word-boundary safety on short names ("us"); "south america"
+  must not satisfy an "america" template; list including the user →
+  eligible; list excluding the user → excluded with position-ordered,
+  capped display; eligible beats excluded across windows; anywhere-word →
+  eligible; region including the user → eligible; region without the user
+  → unknown (never excluded); unrecognised-country list → unknown;
+  restriction beats an excluding list; empty config → unknown.
+- `Scorer._constraints`: restricted and excluded penalties fire and land in
+  `fired`; `wrong_board` fires only on `unknown`; eligible suppresses
+  `wrong_board`; a text restriction silences the board flag (no double
+  penalty). Mutation-tested.
 - `indeed.py`: with `call_actor` mocked (empty first call, items on legacy
-  retry), jobs carry `_scraped_under = "us"`; no tag when the original
-  payload already was `remote`/`us`.
-- `run_core`: the popped key never appears in what `persist_run` receives;
-  `Scorer` receives the profile country (wiring guard).
-- Live smoke test against the real profile and stored run after merge.
+  retry), jobs carry `_scraped_under = "us"`; no tag when the country
+  already matched or no fallback happened.
+- `run_core`: the popped key never appears in `RunResult.scored_jobs`;
+  the profile country demonstrably reaches the scorer (a restriction lands
+  in a stored reason).
+- Live smoke test against the real `vocabulary.yaml`, including an EMEA
+  list (eligible for `am`) and a foreign-country list (excluded).
 
 ## Out of scope
 
 - **Indeed zero-descriptions bug**: all 98 Indeed jobs in the test run have
   no description captured, which blocks *any* text-based scoring on them,
   geography included. Separate follow-up.
-- Multi-country eligibility lists, region buckets (EMEA/APAC), LLM-based
-  extraction.
+- Multi-country eligibility lists in the profile; LLM-based extraction.
+- Region *exclusion* ("Europe-only" flagging a non-European user) — regions
+  are eligible-only evidence by decision, see above.
+- Standalone "work-from-anywhere" phrasing with no list phrase — falls
+  through to "unknown", which carries no penalty and no claim.
 - Detecting time-zone requirements ("must overlap 4h with PST").
 - The map-cap fix (4 → expandable) already shipped separately before this
   spec.
