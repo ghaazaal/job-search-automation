@@ -3,6 +3,11 @@
 Uses the real vocabulary.yaml — these are also the integration proof that
 the shipped templates survive the scorer's lowercasing and land in the
 reason sentence.
+
+Display names in assertions ("UK", "Germany") are pinned on purpose: the
+first alias in a country's vocabulary.yaml list IS the display name shown
+to the user, so a reordered alias list is a product change and should
+fail here.
 """
 from pathlib import Path
 

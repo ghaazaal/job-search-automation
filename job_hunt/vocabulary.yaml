@@ -135,7 +135,7 @@ skill_scores:
 # YAML 1.1 gotcha: a bare `no:` (Norway) or `on:` parses as a boolean.
 # Quote any country code YAML would eat: `"no":`, `"on":`.
 eligibility:
-  countries:            # code -> names as postings write them
+  countries:            # code -> names as postings write them; the FIRST name is the display name rendered in reason sentences
     am: [armenia]
     us: [us, usa, u.s., united states]
     gb: [uk, united kingdom, britain, england]
