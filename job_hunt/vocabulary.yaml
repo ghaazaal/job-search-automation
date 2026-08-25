@@ -137,7 +137,7 @@ skill_scores:
 eligibility:
   countries:            # code -> names as postings write them
     am: [armenia]
-    us: [us, usa, u.s., united states, america]
+    us: [us, usa, u.s., united states]
     gb: [uk, united kingdom, britain, england]
     ca: [canada]
     au: [australia]
@@ -174,7 +174,7 @@ eligibility:
     mt: [malta]
     ua: [ukraine]
     by: [belarus]
-    ge: [georgia]       # also a US state; a restriction reads the same either way
+    ge: [georgia]       # also a US state: a flag fired on the state still reads right, but a user whose own country is ge gets US-state mentions wrongly self-exempted — accepted, documented risk
     az: [azerbaijan]
     kz: [kazakhstan]
     tr: [turkey]
@@ -219,7 +219,6 @@ eligibility:
     - "we can hire in"
     - "able to hire in"
     - "available to candidates in"
-    - "hiring in"
   anywhere_words: [worldwide, anywhere, globally]
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
@@ -243,6 +242,7 @@ eligibility:
       codes: [ie, de, fr, nl, be, lu, es, it, pt, pl, cz, sk, ro, bg, gr,
               hu, hr, si, ee, lv, lt, se, dk, fi, at, cy, mt]
     - names: [apac, asia pacific, asia-pacific]
+      # Includes South Asia (in, pk, bd, lk) — corporate APAC usually does.
       codes: [au, nz, in, sg, jp, kr, cn, ph, id, vn, th, my, pk, bd, lk]
     - names: [north america]
       codes: [us, ca, mx]

@@ -63,6 +63,13 @@ def test_the_eligibility_section_holds_market_facts():
     language facts, so they live here — but nothing in them may describe a
     particular person."""
     eligibility = _vocabulary()["eligibility"]
+    # all()/for over an empty collection passes vacuously — a bad merge
+    # that emptied a list would sail through without these.
+    assert eligibility["countries"]
+    assert eligibility["templates"]
+    assert eligibility["list_phrases"]
+    assert eligibility["anywhere_words"]
+    assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
             "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
