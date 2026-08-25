@@ -114,9 +114,67 @@ eligibility:
     gb: [uk, united kingdom, britain, england]
     ca: [canada]
     au: [australia]
+    nz: [new zealand]
     de: [germany]
+    fr: [france]
+    nl: [netherlands, holland]
+    be: [belgium]
+    lu: [luxembourg]
+    ie: [ireland]
+    es: [spain]
+    it: [italy]
+    pt: [portugal]
+    pl: [poland]
+    cz: [czech republic, czechia]
+    sk: [slovakia]
+    ro: [romania]
+    bg: [bulgaria]
+    gr: [greece]
+    hu: [hungary]
+    hr: [croatia]
+    si: [slovenia]
+    rs: [serbia]
+    ee: [estonia]
+    lv: [latvia]
+    lt: [lithuania]
+    se: [sweden]
+    dk: [denmark]
+    fi: [finland]
+    "no": [norway]      # quoted — a bare `no:` is YAML for False
+    ch: [switzerland]
+    at: [austria]
+    cy: [cyprus]
+    mt: [malta]
+    ua: [ukraine]
+    by: [belarus]
+    ge: [georgia]       # also a US state; a restriction reads the same either way
+    az: [azerbaijan]
+    kz: [kazakhstan]
+    tr: [turkey]
+    il: [israel]
+    ae: [uae, united arab emirates, dubai]
+    sa: [saudi arabia]
+    eg: [egypt]
+    ng: [nigeria]
+    ke: [kenya]
+    za: [south africa]
     in: [india]
+    pk: [pakistan]
+    bd: [bangladesh]
+    lk: [sri lanka]
     sg: [singapore]
+    my: [malaysia]
+    id: [indonesia]
+    ph: [philippines]
+    vn: [vietnam]
+    th: [thailand]
+    jp: [japan]
+    kr: [south korea, korea]
+    cn: [china]
+    mx: [mexico]
+    br: [brazil]
+    ar: [argentina]
+    co: [colombia]
   templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
@@ -142,17 +200,29 @@ eligibility:
   regions:
     - names: [emea]
       # Corporate EMEA reliably includes the Caucasus.
-      codes: [am, ge, gb, de, fr, nl, pl, ua]
+      codes: [am, ge, az, gb, ie, de, fr, nl, be, lu, es, it, pt, pl, cz,
+              sk, ro, bg, gr, hu, hr, si, rs, ee, lv, lt, se, dk, fi,
+              "no", ch, at, cy, mt, ua, by, kz, tr, il, ae, sa, eg, ng,
+              ke, za]
     - names: [europe]
-      # Deliberately no `am` — whether Armenia is "Europe" depends on the
-      # writer. Silence beats a wrong eligibility claim.
-      codes: [gb, de, fr, nl, pl]
+      # Deliberately no `am`, `ge`, `az`, `tr` — whether the Caucasus or
+      # Turkey is "Europe" depends on the writer. Silence beats a wrong
+      # eligibility claim.
+      codes: [gb, ie, de, fr, nl, be, lu, es, it, pt, pl, cz, sk, ro, bg,
+              gr, hu, hr, si, rs, ee, lv, lt, se, dk, fi, "no", ch, at,
+              cy, mt, ua, by]
     - names: [european union, eu]
-      codes: [de, fr, nl, pl]
+      # The EU-27 exactly — no gb, no ch, no "no".
+      codes: [ie, de, fr, nl, be, lu, es, it, pt, pl, cz, sk, ro, bg, gr,
+              hu, hr, si, ee, lv, lt, se, dk, fi, at, cy, mt]
     - names: [apac, asia pacific, asia-pacific]
-      codes: [au, in, sg]
-    - names: [americas, north america]
-      codes: [us, ca]
+      codes: [au, nz, in, sg, jp, kr, cn, ph, id, vn, th, my, pk, bd, lk]
+    - names: [north america]
+      codes: [us, ca, mx]
+    - names: [americas]
+      codes: [us, ca, mx, br, ar, co]
+    - names: [latam, latin america]
+      codes: [mx, br, ar, co]
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**

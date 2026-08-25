@@ -66,9 +66,13 @@ Country names, region membership and restriction phrasing are
 market/language facts, so they belong in `vocabulary.yaml` (which must
 never describe a particular person).
 
+The shipped file names ~60 countries and full region membership — the
+snippet below is abbreviated to show the shape. Coverage for a new user's
+country is a one-line facts edit here, never a code change.
+
 ```yaml
 eligibility:
-  countries:            # code -> names as postings write them
+  countries:            # code -> names as postings write them (abbreviated)
     am: [armenia]
     us: [us, usa, u.s., united states, america]
     gb: [uk, united kingdom, britain, england]
@@ -77,6 +81,7 @@ eligibility:
     de: [germany]
     in: [india]
     sg: [singapore]
+    # ... ~50 more; quote any code YAML 1.1 would eat ("no" — Norway)
   templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
