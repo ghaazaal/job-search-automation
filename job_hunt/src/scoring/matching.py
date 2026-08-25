@@ -209,10 +209,6 @@ def mismatch_penalty(description: str, market_tools, mine: set[str],
 # that unrelated prose starts counting as candidates.
 _LIST_WINDOW = 400
 
-# A list enumeration is trusted as complete only when one of these closes
-# it off within the window that was actually scanned.
-_TERMINATOR_RE = re.compile(r"[.;\n]")
-
 
 def _display_name(name: str) -> str:
     """`uk` -> "UK", `united kingdom` -> "United Kingdom"."""
@@ -220,15 +216,23 @@ def _display_name(name: str) -> str:
     return name.upper() if len(name) <= 3 else name.title()
 
 
-def _join_names(names: list[str]) -> str:
-    """`[a, b, c]` -> "a, b and c"; four or more cap at three + others."""
+def _join_names(names: list[str], maybe_more: bool = False) -> str:
+    """`[a, b, c]` -> "a, b and c"; four or more cap at three + others.
+
+    `maybe_more` forces the "and others" suffix even under four names —
+    set when a window that produced a hit ran out before the body did,
+    so the enumeration may have continued with countries we never read
+    that far to see.
+    """
     if not names:
         return ""
+    if len(names) > 3:
+        return f"{', '.join(names[:3])} and others"
+    if maybe_more:
+        return f"{', '.join(names)} and others"
     if len(names) == 1:
         return names[0]
-    if len(names) <= 3:
-        return f"{', '.join(names[:-1])} and {names[-1]}"
-    return f"{', '.join(names[:3])} and others"
+    return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _bounded(term: str) -> str:
@@ -258,6 +262,20 @@ def _in_window(term: str, body: str, start: int, limit: int) -> bool:
     return bool(match and match.start() < limit)
 
 
+def _named_anywhere_after(term: str, body: str, start: int) -> bool:
+    """Whether `term` is bounded-matched anywhere at or after `start` —
+    no `limit`, unlike `_in_window`.
+
+    Used only for the user's own country. If a posting names it anywhere
+    after a list phrase — even hundreds of characters into a bullet list,
+    well past any display window — the safe and correct verdict is
+    eligible. A limit here is exactly what let a real, later mention of
+    the user's own country get discarded as exclusion evidence instead of
+    read as what it is.
+    """
+    return bool(_find_bounded(term, body, start))
+
+
 def _window_hits(body: str, start: int, limit: int,
                  countries: dict, user_country: str) -> dict:
     """Foreign country codes named within one list window.
@@ -265,7 +283,7 @@ def _window_hits(body: str, start: int, limit: int,
     Maps code -> (match.start(), match.end()) of its first occurrence at
     or after `start` that begins before `limit`. Never includes the
     user's own country — by the time this runs, phase 1 has already
-    returned "eligible" if any window named it.
+    returned "eligible" if any window named it, checked to end of body.
     """
     hits: dict[str, tuple[int, int]] = {}
     for code, names in countries.items():
@@ -279,51 +297,46 @@ def _window_hits(body: str, start: int, limit: int,
     return hits
 
 
-def _window_is_closed(body: str, hits: dict, limit: int) -> bool:
-    """Whether a window's enumeration looks finished, not merely scanned
-    up to where reading stopped.
-
-    Claiming "excluded" from a list that may still be running is a
-    fabricated claim — the untranscribed tail could yet name the user's
-    own country, and silence is the safer direction. The enumeration
-    counts as closed only when a terminator (., ; or a newline) appears
-    between the last recognised name and the window's limit, or the body
-    itself ends before the limit does — nothing left to have missed.
-    """
-    if not hits:
-        return False
-    last_end = max(end for _, end in hits.values())
-    if len(body) <= limit:
-        return True
-    return bool(_TERMINATOR_RE.search(body, last_end, limit))
-
-
 def geo_verdict(body: str, user_country: str,
                 cfg: dict) -> tuple[str, str | None]:
     """What a posting says about where it hires, judged for one user.
 
     Returns one of:
       ("eligible", None)      — a standalone worldwide phrase, a list
-                                phrase's window naming the user's country,
-                                an anywhere-word in such a window, or a
-                                region the user's country belongs to
+                                phrase naming the user's country anywhere
+                                after it (no window limit — see below), an
+                                anywhere-word in a window, or a region the
+                                user's country belongs to
       ("restricted", "UK")    — a restriction template fired with a foreign
                                 country in the slot
-      ("excluded", "UK, ...") — a closed list window names known
-                                countries, none of them the user's
-      ("unknown", None)       — nothing matched, `user_country` is unset,
-                                or the only list evidence came from a
-                                window that may not have finished: the
-                                check cannot run, so nothing is claimed
+      ("excluded", "UK, ...") — a list window names known countries, none
+                                of them the user's; the display gains "and
+                                others" if a hit-bearing window may have
+                                continued past what was scanned
+      ("unknown", None)       — nothing matched, or `user_country` is
+                                unset: the check cannot run, so nothing is
+                                claimed
 
     Checked in that order — positive evidence anywhere in the body settles
-    it before any flag is considered. Regions are eligible-only evidence:
-    a region that does not include the user yields silence, never
-    exclusion, because membership is fuzzy at the edges. An "excluded"
-    verdict is only claimed when the user's country is one this config
-    knows the names of — otherwise it might be in the list, just
-    unrecognised — and only from a window whose enumeration reads as
-    complete (see `_window_is_closed`). Matching uses the same lookaround
+    it before any flag is considered. The user's own country is searched
+    from each list phrase to the end of the body, not capped at the
+    display window: a country list can run for hundreds of characters
+    (bullet points, numbered lists), and if the user's own country
+    appears anywhere in it the correct verdict is eligible regardless of
+    how far in. Anywhere-words and regions keep the window cap — their
+    misses stay silent rather than search-everywhere, since a stray
+    "globally" elsewhere in the body is not list evidence. Because the
+    user's own country is never missed this way, an "excluded" verdict
+    needs no separate check that the enumeration "finished" — the eligible
+    pass already ruled out the user's own country appearing anywhere
+    past the window; what an unfinished window leaves genuinely unknown
+    is only whether *other*, unrecognised countries follow, which is why
+    such a window still contributes but earns the "and others" hedge.
+    Regions are eligible-only evidence: a region that does not include the
+    user yields silence, never exclusion, because membership is fuzzy at
+    the edges. An "excluded" verdict is only claimed when the user's
+    country is one this config knows the names of — otherwise it might be
+    in the list, just unrecognised. Matching uses the same lookaround
     boundaries as has_term ('us' must not fire inside 'campus');
     restriction templates allow an optional `the ` before the country
     name.
@@ -346,6 +359,12 @@ def geo_verdict(body: str, user_country: str,
             continue
         for match in re.finditer(_bounded(phrase), body):
             windows.append((match.end(), match.end() + _LIST_WINDOW))
+    # Text order, not config order — a list phrase configured first can
+    # still occur later in the body than another one. Processing windows
+    # out of text order would let a later-occurring window's match for a
+    # repeated country be recorded (via setdefault, below) ahead of an
+    # earlier one, reporting the wrong position for it.
+    windows.sort(key=lambda w: w[0])
 
     # 1. Eligible — every window is scanned before anything may flag.
     user_names = countries.get(user_country) or []
@@ -361,7 +380,8 @@ def geo_verdict(body: str, user_country: str,
             return ("eligible", None)
 
     for start, limit in windows:
-        if any(_in_window(name, body, start, limit) for name in user_names):
+        # Unlimited on purpose — see the docstring.
+        if any(_named_anywhere_after(name, body, start) for name in user_names):
             return ("eligible", None)
         if any(_in_window(word, body, start, limit)
                for word in anywhere if word):
@@ -402,21 +422,29 @@ def geo_verdict(body: str, user_country: str,
                 if re.search(pattern, body):
                     return ("restricted", _display_name(names[0]))
 
-    # 3. Excluded — closed list windows that name countries, none of them
-    # the user's. A window whose enumeration may still be running is
-    # dropped rather than trusted (see `_window_is_closed`); other, closed
-    # windows in the same body can still support the verdict.
+    # 3. Excluded — list windows that name countries, none of them the
+    # user's. The user's absence was verified through end of body by the
+    # eligible pass above; what remains unknown is only whether MORE
+    # countries follow past wherever a given window stopped reading. A
+    # window is "full" when its limit falls short of the body — the
+    # enumeration may have continued beyond it — and any hit-bearing full
+    # window forces the "and others" hedge on the whole result, even when
+    # three or fewer countries were actually recognised.
     if windows and user_names:
         hits: dict[str, int] = {}
+        maybe_more = False
         for start, limit in windows:
             window_hits = _window_hits(body, start, limit,
                                        countries, user_country)
-            if window_hits and _window_is_closed(body, window_hits, limit):
+            if window_hits:
+                if limit < len(body):
+                    maybe_more = True
                 for code, (match_start, _) in window_hits.items():
                     hits.setdefault(code, match_start)
         if hits:
             ordered = sorted(hits, key=hits.get)
             return ("excluded", _join_names(
-                [_display_name(countries[code][0]) for code in ordered]))
+                [_display_name(countries[code][0]) for code in ordered],
+                maybe_more=maybe_more))
 
     return ("unknown", None)

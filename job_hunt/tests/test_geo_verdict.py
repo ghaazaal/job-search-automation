@@ -180,7 +180,7 @@ def test_empty_config_is_silent():
     assert geo_verdict("must be based in the uk.", "am", {}) == ("unknown", None)
 
 
-# ── exclusion windows (range-based, terminator-gated) ───────────────────────
+# ── exclusion windows (range-based, unlimited user-country scan) ───────────
 
 def test_a_single_country_exclusion_list():
     assert geo_verdict("open to candidates in germany.",
@@ -188,9 +188,14 @@ def test_a_single_country_exclusion_list():
 
 
 def test_exclusion_names_follow_text_order_across_windows():
+    """The first window ('eligible countries: germany.') runs out at 400
+    chars, well short of the body's end (500 padding chars plus the
+    second phrase) — a full window, so the display hedges with "and
+    others" even though only two countries were recognised."""
     body = ("eligible countries: germany. " + "x" * 500
             + " open to candidates in poland.")
-    assert geo_verdict(body, "am", _CFG) == ("excluded", "Germany and Poland")
+    assert geo_verdict(body, "am", _CFG) == (
+        "excluded", "Germany, Poland and others")
 
 
 def test_a_long_list_naming_you_late_is_still_eligible():
@@ -201,13 +206,39 @@ def test_a_long_list_naming_you_late_is_still_eligible():
     assert geo_verdict(body, "am", _CFG) == ("eligible", None)
 
 
-def test_a_truncated_list_never_claims_exclusion():
-    """A list that runs past the window may continue with the user's own
-    country — the verdict must fall to unknown, not a fabricated
-    'open only to ...'."""
+def test_a_truncated_list_naming_you_later_is_eligible():
+    """The user's own country is scanned to end of body — a long list that
+    names them past any window limit must never read as exclusion."""
     tail = ", ".join(f"country{i}" for i in range(80))
     body = f"open to candidates in poland, germany, {tail}, armenia."
-    assert geo_verdict(body, "am", _CFG) == ("unknown", None)
+    assert geo_verdict(body, "am", _CFG) == ("eligible", None)
+
+
+def test_a_truncated_list_without_you_hedges_its_exclusion():
+    """When the window ran full, the enumeration may continue — the claim
+    must say 'and others' even though only two countries were recognised."""
+    tail = ", ".join(f"country{i}" for i in range(80))
+    body = f"open to candidates in poland, germany, {tail}, narnia."
+    assert geo_verdict(body, "am", _CFG) == (
+        "excluded", "Poland, Germany and others")
+
+
+def test_a_newline_bulleted_list_naming_you_is_eligible():
+    """Bullet lists separated by newlines were the terminator heuristic's
+    failure mode — the unlimited user scan must handle them."""
+    others = "\n".join(f"- country{i}" for i in range(30))
+    body = f"eligible countries:\n- poland\n- germany\n{others}\n- armenia\n"
+    assert geo_verdict(body, "am", _CFG) == ("eligible", None)
+
+
+def test_a_repeated_country_keeps_its_earliest_position():
+    """Padded short enough that the first window still reaches the body's
+    end (no 'and others' hedge) — this isolates the ordering bug from the
+    'and others' hedge tested separately above."""
+    body = ("we can hire in poland and germany. " + "x " * 150
+            + "open to candidates in poland.")
+    assert geo_verdict(body, "am", _CFG) == (
+        "excluded", "Poland and Germany")
 
 
 def test_company_boilerplate_does_not_mask_a_restriction():
@@ -218,6 +249,5 @@ def test_company_boilerplate_does_not_mask_a_restriction():
 def test_company_location_prose_is_not_a_restriction():
     """'our office is located in germany' describes the company, not the
     candidate — with the anchored template it must stay silent."""
-    cfg = {**_CFG, "templates": _CFG["templates"] + ["be located in {country}"]}
     assert geo_verdict("our office is located in germany but this role "
-                       "is fully remote.", "am", cfg) == ("unknown", None)
+                       "is fully remote.", "am", _CFG) == ("unknown", None)
