@@ -651,6 +651,15 @@ correction, listed in the note below Step 5).
 >   single-name exclusion, cross-window text order, long-list-naming-user,
 >   truncated-list downgrade, boilerplate-does-not-mask, company-location
 >   prose.
+> - **Ambiguous-name (article) discipline**, added after the unlimited
+>   user scan was found to hand the bare `us` alias unbounded reach:
+>   "come join us!" anywhere after a list phrase made every list-restricted
+>   posting read eligible for a US user, and a pronoun inside a window
+>   fabricated "US" into exclusion displays. New
+>   `eligibility.ambiguous_names: [us]` key: in list windows such names
+>   count only as "the us"; a bare occurrence poisons that window's
+>   exclusion claim; restriction templates are exempt ("us citizens only"
+>   disambiguates itself). Final test count: 35.
 
 - [ ] **Step 5: Commit**
 

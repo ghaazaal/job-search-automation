@@ -161,6 +161,14 @@ Mechanics:
   because the enumeration may continue with countries we did not name.
   Exclusion names render in text order, earliest position winning for a
   repeated country.
+- **Ambiguous names take the article**: names colliding with ordinary
+  English words (`eligibility.ambiguous_names`, currently `us` — the
+  pronoun in "join us"/"about us") count in list windows only as
+  "the us"; a bare occurrence poisons that window's exclusion claim,
+  since country and pronoun cannot be told apart. Restriction templates
+  are exempt — "us citizens only" disambiguates itself. Without this, the
+  unlimited user scan made every list-restricted posting read eligible
+  for a US user.
 - **Performance**: the restriction scan is prefiltered by template stems
   (plain substring checks) before any per-name regex work; the common
   no-geo-statement body must stay well under 1 ms.
