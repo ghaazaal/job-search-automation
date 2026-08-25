@@ -994,6 +994,12 @@ git commit -m "feat: Indeed's us-board fallback marks the jobs it fetched"
 
 ---
 
+> **Note from Task 3 quality review:** `geo_verdict` is resume-invariant
+> but runs once per active resume via `best_match` (~1.7 ms × resumes ×
+> jobs ≈ 0.5–0.9 s per 300-job run with 2 resumes). Accepted for this
+> ship — scraping I/O dominates by minutes. Hoist to once-per-job only if
+> resume counts grow.
+
 ### Task 5: run_core — the explicit hand-off
 
 **Files:**
