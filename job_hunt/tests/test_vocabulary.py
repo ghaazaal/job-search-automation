@@ -56,3 +56,30 @@ def test_the_mismatch_thresholds_are_configurable():
     assert {"min_tools", "hard_ratio", "hard_value",
             "soft_ratio", "soft_value"} == set(mismatch)
     assert mismatch["hard_ratio"] < mismatch["soft_ratio"]
+
+
+def test_the_eligibility_section_holds_market_facts():
+    """Country names, region membership and restriction phrasing are
+    language facts, so they live here — but nothing in them may describe a
+    particular person."""
+    eligibility = _vocabulary()["eligibility"]
+    assert {"countries", "templates", "list_phrases", "anywhere_words",
+            "regions"} == set(eligibility)
+    assert all("{country}" in t for t in eligibility["templates"])
+    # A list phrase introduces a list — it must not carry the slot itself.
+    assert all("{country}" not in p for p in eligibility["list_phrases"])
+    # YAML 1.1 parses a bare `no:` (Norway) or `on:` as a boolean. Every
+    # code must arrive as a string — quote any future code YAML would eat.
+    assert all(isinstance(code, str) for code in eligibility["countries"])
+    assert all(isinstance(names, list) and names
+               for names in eligibility["countries"].values())
+    for region in eligibility["regions"]:
+        assert {"names", "codes"} == set(region)
+        assert region["names"] and region["codes"]
+        assert all(isinstance(code, str) for code in region["codes"])
+
+
+def test_the_geo_penalties_are_configured():
+    penalties = _vocabulary()["penalties"]
+    assert penalties["geo_restricted"] == penalties["clearance"]
+    assert penalties["wrong_board"] < penalties["geo_restricted"]
