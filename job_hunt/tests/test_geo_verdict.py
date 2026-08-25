@@ -20,7 +20,7 @@ _CFG = {
         "must be based in {country}",
         "must reside in {country}",
         "based in {country} only",
-        "located in {country}",
+        "be located in {country}",
         "authorized to work in {country}",
         "eligible to work in {country}",
         "work authorization in {country}",
@@ -178,3 +178,46 @@ def test_a_stated_restriction_beats_an_excluding_list():
 
 def test_empty_config_is_silent():
     assert geo_verdict("must be based in the uk.", "am", {}) == ("unknown", None)
+
+
+# ── exclusion windows (range-based, terminator-gated) ───────────────────────
+
+def test_a_single_country_exclusion_list():
+    assert geo_verdict("open to candidates in germany.",
+                       "am", _CFG) == ("excluded", "Germany")
+
+
+def test_exclusion_names_follow_text_order_across_windows():
+    body = ("eligible countries: germany. " + "x" * 500
+            + " open to candidates in poland.")
+    assert geo_verdict(body, "am", _CFG) == ("excluded", "Germany and Poland")
+
+
+def test_a_long_list_naming_you_late_is_still_eligible():
+    """The window must be big enough that a real-world list cannot flip
+    to 'excluded' while explicitly naming the user."""
+    others = ["poland", "germany", "canada", "the uk"] * 5
+    body = "open to candidates in " + ", ".join(others) + ", armenia."
+    assert geo_verdict(body, "am", _CFG) == ("eligible", None)
+
+
+def test_a_truncated_list_never_claims_exclusion():
+    """A list that runs past the window may continue with the user's own
+    country — the verdict must fall to unknown, not a fabricated
+    'open only to ...'."""
+    tail = ", ".join(f"country{i}" for i in range(80))
+    body = f"open to candidates in poland, germany, {tail}, armenia."
+    assert geo_verdict(body, "am", _CFG) == ("unknown", None)
+
+
+def test_company_boilerplate_does_not_mask_a_restriction():
+    assert geo_verdict("we are a worldwide remote company. us citizens only.",
+                       "am", _CFG) == ("restricted", "US")
+
+
+def test_company_location_prose_is_not_a_restriction():
+    """'our office is located in germany' describes the company, not the
+    candidate — with the anchored template it must stay silent."""
+    cfg = {**_CFG, "templates": _CFG["templates"] + ["be located in {country}"]}
+    assert geo_verdict("our office is located in germany but this role "
+                       "is fully remote.", "am", cfg) == ("unknown", None)

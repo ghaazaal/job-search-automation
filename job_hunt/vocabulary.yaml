@@ -206,7 +206,7 @@ eligibility:
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
-    - "located in {country}"
+    - "be located in {country}"
     - "authorized to work in {country}"
     - "eligible to work in {country}"
     - "work authorization in {country}"
@@ -224,18 +224,17 @@ eligibility:
   # the phrase itself is the evidence. Only worldwide-anchored phrasings
   # belong here: bare "work from anywhere" is excluded on purpose, because
   # "work from anywhere in the US" narrows it and would read wrong.
+  # Candidate-scoped phrasings only — phrases describing the company
+  # ("we are a worldwide remote company", "we hire globally") must not
+  # settle eligibility: they say where the company operates, not who it
+  # will hire, and each has been seen sitting right next to a stated
+  # restriction ("... worldwide remote company. US citizens only.").
   eligible_phrases:
     - "open to candidates worldwide"
     - "open to applicants worldwide"
     - "candidates from anywhere in the world"
     - "work from anywhere in the world"
     - "anywhere in the world"
-    - "hire worldwide"
-    - "hiring worldwide"
-    - "hire globally"
-    - "hiring globally"
-    - "remote worldwide"
-    - "worldwide remote"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.

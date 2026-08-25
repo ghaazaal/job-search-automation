@@ -29,8 +29,7 @@ def has_term(term: str, haystack: str) -> bool:
     term = (term or "").strip()
     if not term:
         return False
-    pattern = r"(?<!\w)" + re.escape(term) + r"(?!\w)"
-    return bool(re.search(pattern, haystack))
+    return bool(re.search(_bounded(term), haystack))
 
 
 def tokens(text: str) -> list[str]:
@@ -202,8 +201,17 @@ def mismatch_penalty(description: str, market_tools, mine: set[str],
 
 # How far past a list phrase ("open to candidates in ...") country names
 # are looked for. A fixed window rather than sentence-splitting, because
-# "u.s." breaks naive period logic.
-_LIST_WINDOW = 160
+# "u.s." breaks naive period logic. Real eligibility lists commonly run
+# 15-30 countries written out in full ("united kingdom", "united arab
+# emirates") — a window too narrow truncates the list before it reaches
+# the reader's own country and reads a false exclusion into silence. 400
+# chars comfortably covers such a list without reading so far past it
+# that unrelated prose starts counting as candidates.
+_LIST_WINDOW = 400
+
+# A list enumeration is trusted as complete only when one of these closes
+# it off within the window that was actually scanned.
+_TERMINATOR_RE = re.compile(r"[.;\n]")
 
 
 def _display_name(name: str) -> str:
@@ -214,6 +222,8 @@ def _display_name(name: str) -> str:
 
 def _join_names(names: list[str]) -> str:
     """`[a, b, c]` -> "a, b and c"; four or more cap at three + others."""
+    if not names:
+        return ""
     if len(names) == 1:
         return names[0]
     if len(names) <= 3:
@@ -224,6 +234,68 @@ def _join_names(names: list[str]) -> str:
 def _bounded(term: str) -> str:
     """The has_term lookaround pattern, reusable inside larger regexes."""
     return r"(?<!\w)" + re.escape(term) + r"(?!\w)"
+
+
+def _find_bounded(term: str, body: str, start: int):
+    """A bounded match for `term` at or after `start`, or None.
+
+    Searches the real, unbounded `body` rather than a slice — slicing at
+    a window edge can cut a name mid-word ("ukraine" clipped to "uk") and
+    the boundary lookahead would then pass, because the engine has
+    nothing past the cut to check against. `start` only constrains where
+    a match may *begin*; the caller is responsible for rejecting a match
+    that starts at or past its own window's limit.
+    """
+    term = (term or "").strip()
+    if not term:
+        return None
+    return re.compile(_bounded(term)).search(body, start)
+
+
+def _in_window(term: str, body: str, start: int, limit: int) -> bool:
+    """Whether `term` is bounded-matched somewhere inside [start, limit)."""
+    match = _find_bounded(term, body, start)
+    return bool(match and match.start() < limit)
+
+
+def _window_hits(body: str, start: int, limit: int,
+                 countries: dict, user_country: str) -> dict:
+    """Foreign country codes named within one list window.
+
+    Maps code -> (match.start(), match.end()) of its first occurrence at
+    or after `start` that begins before `limit`. Never includes the
+    user's own country — by the time this runs, phase 1 has already
+    returned "eligible" if any window named it.
+    """
+    hits: dict[str, tuple[int, int]] = {}
+    for code, names in countries.items():
+        if code == user_country:
+            continue
+        for name in names:
+            match = _find_bounded(name, body, start)
+            if match and match.start() < limit:
+                hits[code] = (match.start(), match.end())
+                break
+    return hits
+
+
+def _window_is_closed(body: str, hits: dict, limit: int) -> bool:
+    """Whether a window's enumeration looks finished, not merely scanned
+    up to where reading stopped.
+
+    Claiming "excluded" from a list that may still be running is a
+    fabricated claim — the untranscribed tail could yet name the user's
+    own country, and silence is the safer direction. The enumeration
+    counts as closed only when a terminator (., ; or a newline) appears
+    between the last recognised name and the window's limit, or the body
+    itself ends before the limit does — nothing left to have missed.
+    """
+    if not hits:
+        return False
+    last_end = max(end for _, end in hits.values())
+    if len(body) <= limit:
+        return True
+    return bool(_TERMINATOR_RE.search(body, last_end, limit))
 
 
 def geo_verdict(body: str, user_country: str,
@@ -237,10 +309,12 @@ def geo_verdict(body: str, user_country: str,
                                 region the user's country belongs to
       ("restricted", "UK")    — a restriction template fired with a foreign
                                 country in the slot
-      ("excluded", "UK, ...") — list windows name known countries, none of
-                                them the user's
-      ("unknown", None)       — nothing matched, or `user_country` is unset:
-                                the check cannot run, so nothing is claimed
+      ("excluded", "UK, ...") — a closed list window names known
+                                countries, none of them the user's
+      ("unknown", None)       — nothing matched, `user_country` is unset,
+                                or the only list evidence came from a
+                                window that may not have finished: the
+                                check cannot run, so nothing is claimed
 
     Checked in that order — positive evidence anywhere in the body settles
     it before any flag is considered. Regions are eligible-only evidence:
@@ -248,9 +322,11 @@ def geo_verdict(body: str, user_country: str,
     exclusion, because membership is fuzzy at the edges. An "excluded"
     verdict is only claimed when the user's country is one this config
     knows the names of — otherwise it might be in the list, just
-    unrecognised. Matching uses the same lookaround boundaries as
-    has_term ('us' must not fire inside 'campus'); restriction templates
-    allow an optional `the ` before the country name.
+    unrecognised — and only from a window whose enumeration reads as
+    complete (see `_window_is_closed`). Matching uses the same lookaround
+    boundaries as has_term ('us' must not fire inside 'campus');
+    restriction templates allow an optional `the ` before the country
+    name.
     """
     user_country = (user_country or "").strip().lower()
     if not user_country:
@@ -263,13 +339,13 @@ def geo_verdict(body: str, user_country: str,
         for code, names in (cfg.get("countries") or {}).items()
     }
 
-    windows: list[str] = []
+    windows: list[tuple[int, int]] = []
     for phrase in cfg.get("list_phrases") or []:
         phrase = str(phrase).strip().lower()
         if not phrase:
             continue
         for match in re.finditer(_bounded(phrase), body):
-            windows.append(body[match.end():match.end() + _LIST_WINDOW])
+            windows.append((match.end(), match.end() + _LIST_WINDOW))
 
     # 1. Eligible — every window is scanned before anything may flag.
     user_names = countries.get(user_country) or []
@@ -284,45 +360,60 @@ def geo_verdict(body: str, user_country: str,
         if phrase and has_term(phrase, body):
             return ("eligible", None)
 
-    for window in windows:
-        if any(has_term(name, window) for name in user_names):
+    for start, limit in windows:
+        if any(_in_window(name, body, start, limit) for name in user_names):
             return ("eligible", None)
-        if any(has_term(word, window) for word in anywhere if word):
+        if any(_in_window(word, body, start, limit)
+               for word in anywhere if word):
             return ("eligible", None)
         for region in cfg.get("regions") or []:
             codes = {str(c).strip().lower()
                      for c in (region.get("codes") or [])}
             names = [str(n).strip().lower()
                      for n in (region.get("names") or [])]
-            if user_country in codes and any(has_term(n, window)
-                                             for n in names if n):
+            if user_country in codes and any(
+                    _in_window(n, body, start, limit) for n in names if n):
                 return ("eligible", None)
 
     # 2. Restricted — a template stating where hiring is locked to.
+    # Most bodies carry no restriction language at all, so a template
+    # whose literal text around {country} never appears in the body is
+    # filtered out with a plain substring check before it ever reaches
+    # the per-country-name regex loop — cheap insurance against building
+    # and running (country names) x (templates) patterns for nothing.
     templates = cfg.get("templates") or []
+    candidates: list[tuple[str, str]] = []
+    for template in templates:
+        before, _, after = str(template).lower().partition("{country}")
+        before_stem, after_stem = before.strip(), after.strip()
+        if before_stem and before_stem not in body:
+            continue
+        if after_stem and after_stem not in body:
+            continue
+        candidates.append((before, after))
+
     for code, names in countries.items():
         if code == user_country:
             continue
         for name in names:
-            for template in templates:
-                before, _, after = str(template).lower().partition("{country}")
+            for before, after in candidates:
                 pattern = (r"(?<!\w)" + re.escape(before) + r"(?:the\s+)?"
                            + re.escape(name) + re.escape(after) + r"(?!\w)")
                 if re.search(pattern, body):
                     return ("restricted", _display_name(names[0]))
 
-    # 3. Excluded — lists that name countries, none of them the user's.
+    # 3. Excluded — closed list windows that name countries, none of them
+    # the user's. A window whose enumeration may still be running is
+    # dropped rather than trusted (see `_window_is_closed`); other, closed
+    # windows in the same body can still support the verdict.
     if windows and user_names:
         hits: dict[str, int] = {}
-        for index, window in enumerate(windows):
-            for code, names in countries.items():
-                if code == user_country or code in hits:
-                    continue
-                for name in names:
-                    match = re.search(_bounded(name), window)
-                    if match:
-                        hits[code] = index * (_LIST_WINDOW + 1) + match.start()
-                        break
+        for start, limit in windows:
+            window_hits = _window_hits(body, start, limit,
+                                       countries, user_country)
+            if window_hits and _window_is_closed(body, window_hits, limit):
+                for code, (match_start, _) in window_hits.items():
+                    hits.setdefault(code, match_start)
         if hits:
             ordered = sorted(hits, key=hits.get)
             return ("excluded", _join_names(
