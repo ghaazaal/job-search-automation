@@ -53,6 +53,13 @@ def test_the_eligibility_section_holds_market_facts():
     language facts, so they live here — but nothing in them may describe a
     particular person."""
     eligibility = _vocabulary()["eligibility"]
+    # all()/for over an empty collection passes vacuously — a bad merge
+    # that emptied a list would sail through without these.
+    assert eligibility["countries"]
+    assert eligibility["templates"]
+    assert eligibility["list_phrases"]
+    assert eligibility["anywhere_words"]
+    assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
             "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
@@ -110,7 +117,7 @@ Then append at the end of the file:
 eligibility:
   countries:            # code -> names as postings write them
     am: [armenia]
-    us: [us, usa, u.s., united states, america]
+    us: [us, usa, u.s., united states]   # no bare `america` — it fires inside "latin america"/"north america"
     gb: [uk, united kingdom, britain, england]
     ca: [canada]
     au: [australia]
@@ -147,7 +154,7 @@ eligibility:
     mt: [malta]
     ua: [ukraine]
     by: [belarus]
-    ge: [georgia]       # also a US state; a restriction reads the same either way
+    ge: [georgia]       # also a US state: a flag fired on the state still reads right, but a user whose own country is ge gets US-state mentions wrongly self-exempted — accepted, documented risk
     az: [azerbaijan]
     kz: [kazakhstan]
     tr: [turkey]
@@ -192,7 +199,6 @@ eligibility:
     - "we can hire in"
     - "able to hire in"
     - "available to candidates in"
-    - "hiring in"
   anywhere_words: [worldwide, anywhere, globally]
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
@@ -216,6 +222,7 @@ eligibility:
       codes: [ie, de, fr, nl, be, lu, es, it, pt, pl, cz, sk, ro, bg, gr,
               hu, hr, si, ee, lv, lt, se, dk, fi, at, cy, mt]
     - names: [apac, asia pacific, asia-pacific]
+      # Includes South Asia (in, pk, bd, lk) — corporate APAC usually does.
       codes: [au, nz, in, sg, jp, kr, cn, ph, id, vn, th, my, pk, bd, lk]
     - names: [north america]
       codes: [us, ca, mx]
@@ -224,6 +231,14 @@ eligibility:
     - names: [latam, latin america]
       codes: [mx, br, ar, co]
 ```
+
+> **Correction found during Task 1 code review:** the original data had three
+> defects, fixed above and in the shipped file: a bare `america` alias for
+> `us` (word-bounded matching would fire it inside "latin america"/"north
+> america" list windows — a false "eligible" for US users); `hiring in` as a
+> list phrase (generic boilerplate opening false eligibility windows); and a
+> `ge` comment that overstated its own safety. The guard test also gained
+> non-emptiness assertions — `all()` over an empty list passes vacuously.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -262,7 +277,7 @@ from src.scoring.matching import geo_verdict
 _CFG = {
     "countries": {
         "am": ["armenia"],
-        "us": ["us", "usa", "u.s.", "united states", "america"],
+        "us": ["us", "usa", "u.s.", "united states"],
         "gb": ["uk", "united kingdom", "britain", "england"],
         "ca": ["canada"],
         "de": ["germany"],
@@ -288,6 +303,8 @@ _CFG = {
     "regions": [
         {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
         {"names": ["europe"], "codes": ["gb", "de", "pl"]},
+        {"names": ["north america"], "codes": ["us", "ca"]},
+        {"names": ["latam", "latin america"], "codes": ["mx", "br"]},
     ],
 }
 
@@ -336,10 +353,10 @@ def test_word_boundaries_hold_on_short_names():
                        "am", _CFG) == ("unknown", None)
 
 
-def test_a_nearby_country_is_not_the_named_one():
-    """'south america' must not satisfy an 'america' template — the name
+def test_a_nearby_place_is_not_the_named_country():
+    """'new england' must not satisfy an 'england' template — the name
     must sit exactly where the template puts it."""
-    assert geo_verdict("must be based in south america.",
+    assert geo_verdict("must be based in new england.",
                        "am", _CFG) == ("unknown", None)
 
 
@@ -385,6 +402,20 @@ def test_a_region_without_you_stays_silent_never_excluded():
     flag."""
     assert geo_verdict("open to candidates in europe.",
                        "am", _CFG) == ("unknown", None)
+
+
+def test_north_america_is_a_region_not_the_us_name():
+    """A US user is eligible for a 'north america' list via the region
+    entry — `america` is deliberately not a us alias."""
+    assert geo_verdict("open to candidates in north america.",
+                       "us", _CFG) == ("eligible", None)
+
+
+def test_a_continent_phrase_is_not_the_us():
+    """'latin america' must not read as the US: the latam region omits
+    `us`, no country name matches, and the verdict is silence."""
+    assert geo_verdict("open to candidates in latin america.",
+                       "us", _CFG) == ("unknown", None)
 
 
 def test_a_list_of_unrecognised_countries_stays_silent():
@@ -535,7 +566,7 @@ def geo_verdict(body: str, user_country: str,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_geo_verdict.py -v`
-Expected: all 18 PASS.
+Expected: all 20 PASS.
 
 - [ ] **Step 5: Commit**
 
