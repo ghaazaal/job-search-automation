@@ -69,12 +69,14 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["templates"]
     assert eligibility["list_phrases"]
     assert eligibility["anywhere_words"]
+    assert eligibility["eligible_phrases"]
     assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "regions"} == set(eligibility)
+            "eligible_phrases", "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
+    assert all("{country}" not in p for p in eligibility["eligible_phrases"])
     # YAML 1.1 parses a bare `no:` (Norway) or `on:` as a boolean. Every
     # code must arrive as a string — quote any future code YAML would eat.
     assert all(isinstance(code, str) for code in eligibility["countries"])

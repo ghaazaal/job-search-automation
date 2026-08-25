@@ -220,6 +220,22 @@ eligibility:
     - "able to hire in"
     - "available to candidates in"
   anywhere_words: [worldwide, anywhere, globally]
+  # Standalone statements of worldwide hiring. These open no list window —
+  # the phrase itself is the evidence. Only worldwide-anchored phrasings
+  # belong here: bare "work from anywhere" is excluded on purpose, because
+  # "work from anywhere in the US" narrows it and would read wrong.
+  eligible_phrases:
+    - "open to candidates worldwide"
+    - "open to applicants worldwide"
+    - "candidates from anywhere in the world"
+    - "work from anywhere in the world"
+    - "anywhere in the world"
+    - "hire worldwide"
+    - "hiring worldwide"
+    - "hire globally"
+    - "hiring globally"
+    - "remote worldwide"
+    - "worldwide remote"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.

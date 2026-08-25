@@ -33,6 +33,7 @@ _CFG = {
         "eligible countries",
     ],
     "anywhere_words": ["worldwide", "anywhere", "globally"],
+    "eligible_phrases": ["open to candidates worldwide", "anywhere in the world"],
     "regions": [
         {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
         {"names": ["europe"], "codes": ["gb", "de", "pl"]},
@@ -119,9 +120,23 @@ def test_eligible_anywhere_in_the_body_beats_an_earlier_foreign_list():
     assert geo_verdict(body, "am", _CFG) == ("eligible", None)
 
 
-def test_an_anywhere_word_is_eligible():
+def test_an_anywhere_word_inside_a_list_window_is_eligible():
+    assert geo_verdict("open to candidates in any country, worldwide.",
+                       "am", _CFG) == ("eligible", None)
+
+
+def test_a_standalone_worldwide_phrase_is_eligible():
+    """No list window opens here — "open to candidates in" needs the "in".
+    The standalone phrase itself is the evidence."""
     assert geo_verdict("open to candidates worldwide.",
                        "am", _CFG) == ("eligible", None)
+
+
+def test_a_stray_globally_does_not_mask_a_restriction():
+    """Anywhere-words are window-scoped on purpose: "globally" in company
+    boilerplate must not settle eligibility before the restriction scan."""
+    assert geo_verdict("we operate globally. us citizens only.",
+                       "am", _CFG) == ("restricted", "US")
 
 
 def test_a_region_that_includes_you_is_eligible():

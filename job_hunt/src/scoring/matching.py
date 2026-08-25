@@ -231,9 +231,10 @@ def geo_verdict(body: str, user_country: str,
     """What a posting says about where it hires, judged for one user.
 
     Returns one of:
-      ("eligible", None)      — a list phrase's window names the user's
-                                country, an anywhere-word, or a region the
-                                user's country belongs to
+      ("eligible", None)      — a standalone worldwide phrase, a list
+                                phrase's window naming the user's country,
+                                an anywhere-word in such a window, or a
+                                region the user's country belongs to
       ("restricted", "UK")    — a restriction template fired with a foreign
                                 country in the slot
       ("excluded", "UK, ...") — list windows name known countries, none of
@@ -274,13 +275,19 @@ def geo_verdict(body: str, user_country: str,
     user_names = countries.get(user_country) or []
     anywhere = [str(w).strip().lower()
                 for w in cfg.get("anywhere_words") or []]
-    # Checked against the whole body, not just list-phrase windows: an
-    # anywhere-word ("we hire worldwide") is a standalone signal and need
-    # not follow one of the list_phrases to count.
-    if any(has_term(word, body) for word in anywhere if word):
-        return ("eligible", None)
+
+    # Standalone worldwide statements ("open to candidates worldwide") open
+    # no list window — the phrase itself is the evidence. Only phrases a
+    # following country cannot grammatically narrow belong in this list.
+    for phrase in cfg.get("eligible_phrases") or []:
+        phrase = str(phrase).strip().lower()
+        if phrase and has_term(phrase, body):
+            return ("eligible", None)
+
     for window in windows:
         if any(has_term(name, window) for name in user_names):
+            return ("eligible", None)
+        if any(has_term(word, window) for word in anywhere if word):
             return ("eligible", None)
         for region in cfg.get("regions") or []:
             codes = {str(c).strip().lower()
