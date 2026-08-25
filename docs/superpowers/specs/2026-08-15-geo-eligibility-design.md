@@ -99,8 +99,13 @@ eligibility:
     - "we can hire in"
     - "able to hire in"
     - "available to candidates in"
-    - "hiring in"
   anywhere_words: [worldwide, anywhere, globally]
+  eligible_phrases:     # standalone worldwide statements; open no window —
+                        # the phrase itself is the evidence
+    - "open to candidates worldwide"
+    - "anywhere in the world"
+    # ... only worldwide-anchored phrasings; bare "work from anywhere" is
+    # excluded on purpose ("work from anywhere in the US" narrows it)
   regions:              # eligible-only: membership marks the user eligible;
                         # absence stays silent, never flags exclusion
     - names: [emea]
@@ -132,7 +137,7 @@ Returns one of four verdicts, checked in this order:
 
 | Verdict | When |
 |---|---|
-| `("eligible", None)` | a list phrase's window names the user's country, an anywhere-word, or a region whose member codes include the user's country |
+| `("eligible", None)` | a standalone worldwide phrase appears anywhere, or a list phrase's window names the user's country, an anywhere-word, or a region whose member codes include the user's country |
 | `("restricted", "UK")` | a restriction template matches with a foreign country in the slot |
 | `("excluded", "UK, Germany and Poland")` | list-phrase windows name known countries, none of them the user's |
 | `("unknown", None)` | nothing matched, or `user_country` is unset — the check cannot run, so nothing is claimed |
@@ -215,7 +220,10 @@ renders whatever the reason sentence says.
   capped display; eligible beats excluded across windows; anywhere-word →
   eligible; region including the user → eligible; region without the user
   → unknown (never excluded); unrecognised-country list → unknown;
-  restriction beats an excluding list; empty config → unknown.
+  restriction beats an excluding list; empty config → unknown; a
+  standalone worldwide phrase → eligible; a stray "globally" in company
+  boilerplate must NOT mask a stated restriction (anywhere-words are
+  window-scoped on purpose).
 - `Scorer._constraints`: restricted and excluded penalties fire and land in
   `fired`; `wrong_board` fires only on `unknown`; eligible suppresses
   `wrong_board`; a text restriction silences the board flag (no double
@@ -237,8 +245,14 @@ renders whatever the reason sentence says.
 - Multi-country eligibility lists in the profile; LLM-based extraction.
 - Region *exclusion* ("Europe-only" flagging a non-European user) — regions
   are eligible-only evidence by decision, see above.
-- Standalone "work-from-anywhere" phrasing with no list phrase — falls
-  through to "unknown", which carries no penalty and no claim.
+- Bare "work from anywhere" phrasing — excluded from `eligible_phrases` on
+  purpose, because "work from anywhere in the US" narrows it; only
+  worldwide-anchored standalone phrases are recognised. Everything else
+  falls through to "unknown", which carries no penalty and no claim.
+  (Corrected during Task 2: the original v3 nested the anywhere-word check
+  inside list windows only, which made "open to candidates worldwide"
+  undetectable; `eligible_phrases` covers those statements without the
+  masking hazard a whole-body anywhere-word scan would create.)
 - Detecting time-zone requirements ("must overlap 4h with PST").
 - The map-cap fix (4 → expandable) already shipped separately before this
   spec.

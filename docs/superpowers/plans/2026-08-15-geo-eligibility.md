@@ -59,12 +59,14 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["templates"]
     assert eligibility["list_phrases"]
     assert eligibility["anywhere_words"]
+    assert eligibility["eligible_phrases"]
     assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "regions"} == set(eligibility)
+            "eligible_phrases", "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
+    assert all("{country}" not in p for p in eligibility["eligible_phrases"])
     # YAML 1.1 parses a bare `no:` (Norway) or `on:` as a boolean. Every
     # code must arrive as a string — quote any future code YAML would eat.
     assert all(isinstance(code, str) for code in eligibility["countries"])
@@ -200,6 +202,22 @@ eligibility:
     - "able to hire in"
     - "available to candidates in"
   anywhere_words: [worldwide, anywhere, globally]
+  # Standalone statements of worldwide hiring. These open no list window —
+  # the phrase itself is the evidence. Only worldwide-anchored phrasings
+  # belong here: bare "work from anywhere" is excluded on purpose, because
+  # "work from anywhere in the US" narrows it and would read wrong.
+  eligible_phrases:
+    - "open to candidates worldwide"
+    - "open to applicants worldwide"
+    - "candidates from anywhere in the world"
+    - "work from anywhere in the world"
+    - "anywhere in the world"
+    - "hire worldwide"
+    - "hiring worldwide"
+    - "hire globally"
+    - "hiring globally"
+    - "remote worldwide"
+    - "worldwide remote"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.
@@ -300,6 +318,8 @@ _CFG = {
         "eligible countries",
     ],
     "anywhere_words": ["worldwide", "anywhere", "globally"],
+    "eligible_phrases": ["open to candidates worldwide",
+                         "anywhere in the world"],
     "regions": [
         {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
         {"names": ["europe"], "codes": ["gb", "de", "pl"]},
@@ -386,9 +406,23 @@ def test_eligible_anywhere_in_the_body_beats_an_earlier_foreign_list():
     assert geo_verdict(body, "am", _CFG) == ("eligible", None)
 
 
-def test_an_anywhere_word_is_eligible():
+def test_an_anywhere_word_inside_a_list_window_is_eligible():
+    assert geo_verdict("open to candidates in any country, worldwide.",
+                       "am", _CFG) == ("eligible", None)
+
+
+def test_a_standalone_worldwide_phrase_is_eligible():
+    """No list window opens here — "open to candidates in" needs the "in".
+    The standalone phrase itself is the evidence."""
     assert geo_verdict("open to candidates worldwide.",
                        "am", _CFG) == ("eligible", None)
+
+
+def test_a_stray_globally_does_not_mask_a_restriction():
+    """Anywhere-words are window-scoped on purpose: "globally" in company
+    boilerplate must not settle eligibility before the restriction scan."""
+    assert geo_verdict("we operate globally. us citizens only.",
+                       "am", _CFG) == ("restricted", "US")
 
 
 def test_a_region_that_includes_you_is_eligible():
@@ -473,7 +507,8 @@ def geo_verdict(body: str, user_country: str,
     """What a posting says about where it hires, judged for one user.
 
     Returns one of:
-      ("eligible", None)      — a list phrase's window names the user's
+      ("eligible", None)      — a standalone worldwide phrase appears, or a
+                                list phrase's window names the user's
                                 country, an anywhere-word, or a region the
                                 user's country belongs to
       ("restricted", "UK")    — a restriction template fired with a foreign
@@ -512,7 +547,15 @@ def geo_verdict(body: str, user_country: str,
         for match in re.finditer(_bounded(phrase), body):
             windows.append(body[match.end():match.end() + _LIST_WINDOW])
 
-    # 1. Eligible — every window is scanned before anything may flag.
+    # 1. Eligible — positive evidence is settled before anything may flag.
+    # Standalone worldwide statements ("open to candidates worldwide") open
+    # no list window — the phrase itself is the evidence. Only phrases a
+    # following country cannot grammatically narrow belong in that list.
+    for phrase in cfg.get("eligible_phrases") or []:
+        phrase = str(phrase).strip().lower()
+        if phrase and has_term(phrase, body):
+            return ("eligible", None)
+
     user_names = countries.get(user_country) or []
     anywhere = [str(w).strip().lower()
                 for w in cfg.get("anywhere_words") or []]
@@ -566,7 +609,18 @@ def geo_verdict(body: str, user_country: str,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_geo_verdict.py -v`
-Expected: all 20 PASS.
+Expected: all 22 PASS.
+
+> **Correction found during Task 2 implementation:** the originally-given
+> code nested the anywhere-word check inside list windows, making
+> "open to candidates worldwide" undetectable (no window opens — the list
+> phrase needs its trailing "in"). The tempting fix — scanning the whole
+> body for anywhere-words — creates a worse bug: "we operate globally. US
+> citizens only." would settle as eligible and mask the stated restriction,
+> since positive evidence is checked first. Resolution: anywhere-words stay
+> window-scoped, and a new `eligibility.eligible_phrases` vocabulary key
+> holds standalone worldwide-anchored statements matched against the whole
+> body. Both failure modes are pinned by tests above.
 
 - [ ] **Step 5: Commit**
 
