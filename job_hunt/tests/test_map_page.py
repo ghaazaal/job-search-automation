@@ -218,4 +218,18 @@ def test_hidden_postings_are_announced_in_the_meta_line():
 def test_no_hidden_word_appears_when_nothing_was_dropped():
     assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0,
                                             "hidden": 0})
+
+
+# ── Work mode leads the meta line ─────────────────────────────────────────────
+
+def test_the_role_meta_leads_with_the_work_mode():
+    role = {**_ROLE, "work_mode": "hybrid", "location": "Yerevan, Armenia"}
+    m = _map(roles=[role])
+    html = render([m])
+    assert "HYBRID · YEREVAN, ARMENIA" in html
+
+
+def test_no_mode_means_no_chip():
+    html = render([_map()])
+    assert "HYBRID" not in html and "ONSITE" not in html
     assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0})

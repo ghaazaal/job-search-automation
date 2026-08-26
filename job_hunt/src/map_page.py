@@ -149,7 +149,8 @@ def _days_ago(posted) -> str:
 
 
 def _role_meta(role: dict) -> str:
-    bits = [role.get("location") or "", f"POSTED {_days_ago(role.get('date'))}"
+    bits = [role.get("work_mode") or "",
+            role.get("location") or "", f"POSTED {_days_ago(role.get('date'))}"
             if _days_ago(role.get("date")) else "", role.get("salary") or ""]
     if not role.get("description_captured"):
         bits.append("NO DESCRIPTION CAPTURED")
