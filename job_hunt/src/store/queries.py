@@ -28,6 +28,7 @@ def _role_view(row: sqlite3.Row) -> dict:
         "salary":               row["salary"],
         "platform":             row["platform"],
         "work_mode":            row["work_mode"],
+        "eligibility_verified": bool(row["eligibility_verified"]),
         "date":                 row["posted_date"],
         "url":                  row["url"],
         "description":          row["description"],

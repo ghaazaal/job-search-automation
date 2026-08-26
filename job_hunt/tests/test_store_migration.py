@@ -197,3 +197,13 @@ def test_version_four_adds_dropped_and_old_runs_default_to_zero(tmp_path):
     assert "dropped" in _columns(conn, "run")
     assert conn.execute(
         "SELECT dropped FROM run").fetchone()["dropped"] == 0
+
+
+def test_version_five_adds_eligibility_verified_defaulting_honest(tmp_path):
+    """Old rows were scored before verification existed — 0, never a
+    guessed backfill."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    assert "eligibility_verified" in _columns(conn, "role")
+    assert conn.execute("SELECT eligibility_verified FROM role"
+                        ).fetchone()["eligibility_verified"] == 0
