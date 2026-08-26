@@ -216,6 +216,18 @@ eligibility:
               ks, ky, la, me, md, ma, mi, mn, ms, mo, mt, ne, nv, nh, nj,
               nm, ny, nc, nd, oh, ok, or, pa, ri, sc, sd, tn, tx, ut, vt,
               va, wa, wv, wi, wy, dc]
+  # Full state names for suffix-free US formats ("Austin, Texas").
+  # `georgia` is deliberately ambiguous with the country — handled in code.
+  us_state_names: [alabama, alaska, arizona, arkansas, california, colorado,
+                   connecticut, delaware, florida, georgia, hawaii, idaho,
+                   illinois, indiana, iowa, kansas, kentucky, louisiana,
+                   maine, maryland, massachusetts, michigan, minnesota,
+                   mississippi, missouri, montana, nebraska, nevada,
+                   "new hampshire", "new jersey", "new mexico", "new york",
+                   "north carolina", "north dakota", ohio, oklahoma, oregon,
+                   pennsylvania, "rhode island", "south carolina",
+                   "south dakota", tennessee, texas, utah, vermont,
+                   virginia, washington, "west virginia", wisconsin, wyoming]
   templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
@@ -286,7 +298,9 @@ eligibility:
 # role-anchored. Language facts only — whether a mode suits the user
 # lives in their profile.
 # Reviewed out: "no remote work" (…experience required), "office-based"
-# (…clients), "hybrid model" (ML term), "in-office days" (…are optional).
+# (…clients), "hybrid model" (ML term), "in-office days" (…are optional),
+# "on-site only" / "onsite only" (…gym access, …parking — amenity noise,
+# not a role-mode claim).
 work_mode:
   remote_phrases:
     - "fully remote"
@@ -297,6 +311,8 @@ work_mode:
     - "remote-only"
     - "work remotely"
     - "work from home"
+    - "work from anywhere"
+    - "telecommute"
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
@@ -310,8 +326,6 @@ work_mode:
     - "onsite role"
     - "on-site position"
     - "onsite position"
-    - "on-site only"
-    - "onsite only"
     - "in-office role"
     - "must work onsite"
     - "onsite work required"

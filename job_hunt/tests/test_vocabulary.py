@@ -71,9 +71,11 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["anywhere_words"]
     assert eligibility["eligible_phrases"]
     assert eligibility["regions"]
+    assert eligibility["us_state_names"]
+    assert all(isinstance(s, str) for s in eligibility["us_state_names"])
     assert {"countries", "templates", "list_phrases", "anywhere_words",
             "eligible_phrases", "ambiguous_names", "regions",
-            "us_states"} == set(eligibility)
+            "us_states", "us_state_names"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
@@ -101,14 +103,22 @@ def test_the_geo_penalties_are_configured():
 def test_the_work_mode_section_holds_role_anchored_phrases():
     """Phrases only, never bare words — bare 'hybrid' fires on 'hybrid
     cloud', bare 'remote' on 'remote teams', bare 'on-site' on 'on-site
-    gym'. Single-word entries are how those false positives creep back."""
+    gym'. Single-word entries are how those false positives creep back.
+
+    'telecommute' is a reviewed, named exception: it does not compound
+    into unrelated tech-stack or amenity phrases the way hybrid/remote/
+    on-site do ('telecommute cloud', 'telecommute teams' are not things
+    postings say), so a bare match carries none of the collision risk
+    the general ban exists to prevent."""
     work_mode = _vocabulary()["work_mode"]
     assert {"remote_phrases", "hybrid_phrases",
             "onsite_phrases"} == set(work_mode)
     for phrases in work_mode.values():
         assert phrases
-        assert all(" " in p or "-" in p for p in phrases), \
-            "single bare words are banned here"
+        assert all(" " in p or "-" in p or p == "telecommute"
+                   for p in phrases), \
+            "single bare words are banned here (telecommute is the one " \
+            "reviewed exception)"
 
 
 def test_the_mode_mismatch_penalty_is_configured():

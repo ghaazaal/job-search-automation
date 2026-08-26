@@ -22,6 +22,7 @@ _LOC_CFG = {
         "in": ["india"],
     },
     "us_states": ["ny", "wa", "ga", "tx", "in"],
+    "us_state_names": ["georgia", "texas", "new york"],
 }
 
 
@@ -68,10 +69,12 @@ def test_a_country_name_resolves():
 
 
 def test_the_rightmost_country_wins():
-    """Locations end with the country: 'Georgia, US' is the state,
-    'Tbilisi, Georgia' is the country."""
+    """Locations end with the country: 'Georgia, US' still resolves via
+    the unambiguous 'us' match. 'Tbilisi, Georgia' does NOT resolve to
+    'ge' — georgia is ambiguous with the US state both directions, so
+    silence is the design (see test_the_georgia_ambiguity_is_silent_both_ways)."""
     assert location_country("Georgia, US", _LOC_CFG) == "us"
-    assert location_country("Tbilisi, Georgia", _LOC_CFG) == "ge"
+    assert location_country("Tbilisi, Georgia", _LOC_CFG) is None
 
 
 def test_a_us_state_code_resolves_to_us():
@@ -101,3 +104,39 @@ def test_a_state_code_that_is_also_a_country_code_claims_nothing():
 
 def test_empty_location_config_is_silent():
     assert location_country("New York, NY", {}) is None
+
+
+def test_a_us_state_full_name_resolves():
+    assert location_country("Austin, Texas", _LOC_CFG) == "us"
+
+
+def test_the_georgia_ambiguity_is_silent_both_ways():
+    """US state or the country? A wrong answer either way corrupts the
+    drop decision, so both stay silent."""
+    assert location_country("Atlanta, Georgia", _LOC_CFG) is None
+    assert location_country("Tbilisi, Georgia", _LOC_CFG) is None
+
+
+def test_ordinary_two_letter_words_do_not_resolve():
+    """'La Paz' and 'Or Yehuda' contain la/or — place-name particles,
+    not state codes. The scan is anchored to the final segment."""
+    assert location_country("La Paz", _LOC_CFG) is None
+    assert location_country("Or Yehuda", _LOC_CFG) is None
+
+
+def test_a_zip_suffix_still_resolves():
+    assert location_country("Austin, TX 78701", _LOC_CFG) == "us"
+
+
+def test_an_ambiguous_state_code_is_silent_even_in_city_code_form():
+    """'San Francisco, CA' and 'Chennai, IN' are structurally identical —
+    only city knowledge separates them, and we have none. Accepted
+    silence; the job is kept and flagged, never dropped on a coin-flip."""
+    assert location_country("San Francisco, CA", _LOC_CFG) is None
+    assert location_country("Chennai, IN", _LOC_CFG) is None
+
+
+def test_substring_matching_would_be_wrong():
+    """Mutation killers: phrase matching must stay word-bounded."""
+    assert work_mode("we operate remote-firstly here.", _MODE_CFG) is None
+    assert location_country("Indiaville", _LOC_CFG) is None

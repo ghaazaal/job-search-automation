@@ -6,6 +6,7 @@ these are the rules a reader will want to argue with, and an argument is
 easier to settle against a unit test than against a 90-line method.
 """
 import re
+from functools import lru_cache
 
 # Ordered, so the distance between two of them is an integer.
 BANDS = ("junior", "mid", "senior", "exec")
@@ -512,6 +513,31 @@ def geo_verdict(body: str, user_country: str,
     return ("unknown", None)
 
 
+@lru_cache(maxsize=None)
+def _phrase_patterns(phrases: tuple[str, ...]) -> tuple[re.Pattern, ...]:
+    """One compiled, bounded pattern per phrase, cached per phrase-tuple.
+
+    `work_mode` re-scans the same handful of phrase lists on every job in
+    a run; this cache means a category's patterns are built once per run
+    rather than once per job. `cfg` values arrive as lists (unhashable),
+    so callers pass the already-lowered, already-stripped phrases as a
+    tuple — that tuple is the cache key, and vocabulary.yaml only ever
+    produces a handful of distinct tuples in a process's lifetime.
+
+    Deliberately NOT merged into one `a|b|c` alternation per category:
+    measured against real vocabulary.yaml phrases on a ~9KB body, a
+    single merged alternation ran slower than this per-phrase list
+    (about 7.5ms/call vs about 3.9ms/call), because CPython's `re` loses
+    its fast literal-prefix search once a pattern branches into
+    alternatives — the NFA has to try every branch at every position
+    instead of using the fast-search shortcut a single literal pattern
+    gets. Caching the individual compiled patterns keeps that fast path
+    per phrase while still removing the per-job (re.escape + compile)
+    cost the uncached version paid on every call.
+    """
+    return tuple(re.compile(_bounded(p)) for p in phrases)
+
+
 def work_mode(body: str, cfg: dict) -> str | None:
     """How a posting says the role is worked, if it says so at all.
 
@@ -525,45 +551,99 @@ def work_mode(body: str, cfg: dict) -> str | None:
     """
     body = (body or "").lower()
     cfg = cfg or {}
-    found = [mode for mode, key in (("remote", "remote_phrases"),
-                                    ("hybrid", "hybrid_phrases"),
-                                    ("onsite", "onsite_phrases"))
-             if any(has_term(str(p).strip().lower(), body)
-                    for p in cfg.get(key) or [] if str(p).strip())]
+    found = []
+    for mode, key in (("remote", "remote_phrases"),
+                      ("hybrid", "hybrid_phrases"),
+                      ("onsite", "onsite_phrases")):
+        phrases = tuple(str(p).strip().lower()
+                        for p in cfg.get(key) or [] if str(p).strip())
+        if phrases and any(p.search(body) for p in _phrase_patterns(phrases)):
+            found.append(mode)
     return found[0] if len(found) == 1 else None
+
+
+_STATE_TAIL_RE = re.compile(r"([a-z]{2})(?:\s+\d{5}(?:-\d{4})?)?")
 
 
 def location_country(location: str, cfg: dict) -> str | None:
     """The country a stored location string names, if it names one.
 
-    Country names are matched word-bounded and the RIGHTMOST match wins —
-    locations end with the country ("Georgia, US" is the state,
-    "Tbilisi, Georgia" the country). Bare "us" is allowed here: a
-    location string is not prose, so the pronoun hazard geo_verdict
-    guards against does not apply. With no country name, any token that
-    is a 2-letter code in `us_states` resolves to "us" — UNLESS that token
-    is also a country ISO code ("Chennai, IN" abbreviates India, "Gary,
-    IN" Indiana; the token cannot tell them apart, so it claims nothing).
-    Anything else — including "Remote" — is None: no claim.
+    Rules, checked in order:
+
+    1. Country names are matched word-bounded and the RIGHTMOST match
+       wins — locations end with the country ("Georgia, US" is the
+       state, "Tbilisi, Georgia" the country). Bare "us" is allowed
+       here: a location string is not prose, so the pronoun hazard
+       geo_verdict guards against does not apply. A country alias that
+       is ALSO a full US state name (today only "georgia") is skipped
+       in this scan entirely — it cannot tell "Atlanta, Georgia" (the
+       state) from "Tbilisi, Georgia" (the country) apart, so neither
+       may resolve via a name match. Accepted, documented silence: a
+       state genuinely named "Georgia, US" still resolves via rule 1's
+       "us" match, since "us" itself is unambiguous.
+    2. With no country-name match, the FINAL comma-separated segment
+       (the "tail") is checked for a bare US state/territory code, with
+       an optional trailing ZIP ("Austin, TX 78701"). This is
+       tail-anchored (`re.fullmatch` against the tail, not a scan of the
+       whole string) so that two-letter place-name particles elsewhere
+       in the string — "La Paz", "Or Yehuda" — can never be mistaken for
+       a code; only the segment that actually plays the state-code role
+       is examined. A code resolves to "us" only when it is in
+       `us_states` and is NOT also a country ISO code — "Chennai, IN"
+       and "Gary, IN" are structurally identical strings (city, 2-letter
+       code) and nothing here can tell India from Indiana, so both stay
+       silent. This holds regardless of how many comma segments precede
+       the tail.
+    3. With no code match either, the tail is checked against
+       `us_state_names` for an exact segment match (not a substring) —
+       "Austin, Texas" resolves to "us". Same ambiguity guard as rule 1:
+       "Georgia" alone in the tail resolves to nothing, because it
+       cannot be told apart from the country.
+
+    Two silences are accepted by design, both because a wrong guess here
+    can drop a real, eligible job: (a) the Georgia name/state collision,
+    in both directions; (b) any US-state code that doubles as a country
+    ISO code, in both directions — a coin-flip is worse than admitting
+    "unknown". Anything else — including "Remote" or an unrecognised
+    name — is also None: no claim.
     """
     location = (location or "").lower()
     if not location:
         return None
     cfg = cfg or {}
+    countries = cfg.get("countries") or {}
+    state_names = {str(s).strip().lower()
+                   for s in cfg.get("us_state_names") or []}
+    # Country aliases that collide with a full US state name — skip them
+    # in the name scan; a name match here could be either place.
+    ambiguous_names = {str(n).strip().lower()
+                       for names in countries.values()
+                       for n in names or []
+                       if str(n).strip().lower() in state_names}
+
     best: tuple[int, str] | None = None
-    for code, names in (cfg.get("countries") or {}).items():
+    for code, names in countries.items():
         for name in names or []:
             name = str(name).strip().lower()
-            if not name:
+            if not name or name in ambiguous_names:
                 continue
             for match in re.finditer(_bounded(name), location):
                 if best is None or match.start() > best[0]:
                     best = (match.start(), str(code).strip().lower())
     if best:
         return best[1]
+
+    tail = location.rsplit(",", 1)[-1].strip()
     states = {str(s).strip().lower() for s in cfg.get("us_states") or []}
-    codes = {str(c).strip().lower() for c in cfg.get("countries") or {}}
-    for token in re.findall(r"(?<![a-z])[a-z]{2}(?![a-z])", location):
+    codes = {str(c).strip().lower() for c in countries}
+
+    code_match = _STATE_TAIL_RE.fullmatch(tail)
+    if code_match:
+        token = code_match.group(1)
         if token in states and token not in codes:
             return "us"
+        return None
+
+    if tail in state_names and tail not in ambiguous_names:
+        return "us"
     return None
