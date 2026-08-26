@@ -106,16 +106,26 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 + [{**m, "section": "watching"} for m in sections["watching"]]
             )
             in_flight = active_run(conn, user_id)
+
+            # Only a finished run may be marked seen. Marking the in-flight
+            # run would file every role it is about to store as already seen.
+            # Fetched here (not after rendering) so the same lookup can also
+            # supply the last run's drop count to the banner.
+            latest = latest_ok_run(conn, user_id)
+            hidden = 0
+            if latest:
+                latest_run = get_run(conn, latest)
+                if latest_run:
+                    hidden = latest_run.get("dropped") or 0
+
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
-                                   sections["new"] + sections["earlier"])},
+                                   sections["new"] + sections["earlier"]),
+                      "hidden": hidden},
                 running_run_id=in_flight["id"] if in_flight else None)
 
-            # Only a finished run may be marked seen. Marking the in-flight
-            # run would file every role it is about to store as already seen.
-            latest = latest_ok_run(conn, user_id)
             if latest:
                 mark_seen(conn, user_id, latest)
             return html

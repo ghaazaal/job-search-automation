@@ -138,3 +138,17 @@ def test_latest_ok_run_ignores_a_run_still_going(conn, user):
 def test_latest_ok_run_is_none_before_any_run_succeeds(conn, user):
     runs.start_run(conn, user)
     assert runs.latest_ok_run(conn, user) is None
+
+
+def test_finishing_records_the_dropped_count(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=5, kept=3, dropped=2)
+
+    assert runs.get_run(conn, run_id)["dropped"] == 2
+
+
+def test_dropped_defaults_to_zero_when_not_given(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=1, kept=1)
+
+    assert runs.get_run(conn, run_id)["dropped"] == 0

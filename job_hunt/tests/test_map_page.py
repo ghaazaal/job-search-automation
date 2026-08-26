@@ -206,3 +206,16 @@ def test_zero_is_a_valid_id_not_a_missing_one():
     html = render([m])
     assert 'data-role="0"' in html
     assert 'data-company="0"' in html
+
+
+# ── Hidden (dropped) count ────────────────────────────────────────────────────
+
+def test_hidden_postings_are_announced_in_the_meta_line():
+    html = render([], meta={"companies": 0, "roles": 0, "hidden": 3})
+    assert "3 HIDDEN (ON-SITE ELSEWHERE)" in html
+
+
+def test_no_hidden_word_appears_when_nothing_was_dropped():
+    assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0,
+                                            "hidden": 0})
+    assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0})

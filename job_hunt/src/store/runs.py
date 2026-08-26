@@ -59,7 +59,7 @@ def set_progress(conn: sqlite3.Connection, run_id: int,
 
 def get_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
     row = conn.execute(
-        """SELECT id, status, stage, progress, error, scraped, kept
+        """SELECT id, status, stage, progress, error, scraped, kept, dropped
              FROM run WHERE id = ?""", (run_id,)).fetchone()
     if row is None:
         return None
@@ -77,6 +77,7 @@ def get_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
         "error":    row["error"] or "",
         "scraped":  row["scraped"],
         "kept":     row["kept"],
+        "dropped":  row["dropped"],
     }
 
 

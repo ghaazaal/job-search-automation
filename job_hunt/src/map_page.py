@@ -411,6 +411,13 @@ def render(maps: list[dict], meta: dict | None = None,
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
     scraped = meta.get("scraped") or datetime.now().strftime("%H:%M")
 
+    # The one policy exception that silently removes postings still has to
+    # say so somewhere the reader will see it — not just the run row.
+    hidden = meta.get("hidden") or 0
+    meta_2 = f"SCRAPED {_e(scraped)}"
+    if hidden:
+        meta_2 = f"{meta_2} &middot; {hidden} HIDDEN (ON-SITE ELSEWHERE)"
+
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 
@@ -463,7 +470,7 @@ async function startRun(){
 </div>
 <div class="meta-r">
 <div class="meta-1">{n_co} COMPANIES &middot; {n_ro} ROLES</div>
-<div class="meta-2">SCRAPED {_e(scraped)}</div>
+<div class="meta-2">{meta_2}</div>
 </div>
 </div></div>
 <div class="wrap"><div class="col">
