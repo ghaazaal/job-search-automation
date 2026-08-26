@@ -296,7 +296,7 @@ def test_a_state_code_that_is_also_a_country_code_claims_nothing():
     assert location_country("Gary, IN", _LOC_CFG) is None
 
 
-def test_empty_config_is_silent():
+def test_empty_location_config_is_silent():
     assert location_country("New York, NY", {}) is None
 ```
 
@@ -370,7 +370,8 @@ def location_country(location: str, cfg: dict) -> str | None:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_work_mode.py tests/test_matching.py tests/test_geo_verdict.py -v`
-Expected: all PASS (14 new + existing untouched).
+Expected: all PASS (13 new + existing untouched — two same-named
+tests would shadow each other, hence the distinct empty-config names).
 
 - [ ] **Step 5: Commit**
 
