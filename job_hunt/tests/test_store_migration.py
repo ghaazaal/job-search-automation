@@ -176,3 +176,13 @@ def test_the_rename_is_safe_to_replay(tmp_path):
     init_db(conn)
     init_db(conn)
     assert conn.execute("SELECT name FROM user").fetchone()["name"] == "default"
+
+
+def test_version_four_adds_work_mode_and_old_rows_stay_honest(tmp_path):
+    """Old rows were scraped before mode detection existed — NULL, never a
+    guessed backfill."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    assert "work_mode" in _columns(conn, "role")
+    assert conn.execute(
+        "SELECT work_mode FROM role").fetchone()["work_mode"] is None

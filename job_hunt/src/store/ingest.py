@@ -57,6 +57,7 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
     values = (
         job["title"], job.get("location"), job.get("salary"),
         job.get("platform"), str(job.get("date") or ""),
+        job.get("work_mode"),
         job.get("description") or "",
         1 if job.get("description_captured") else 0,
         job.get("match_score"), job.get("band"), job.get("reason"),
@@ -68,7 +69,7 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
     if existing:
         conn.execute(
             """UPDATE role SET title=?, location=?, salary=?, platform=?,
-                   posted_date=?, description=?, description_captured=?,
+                   posted_date=?, work_mode=?, description=?, description_captured=?,
                    match_score=?, band=?, reason=?, matched=?, gaps=?,
                    resume_id=?, last_seen_run_id=?
                WHERE id=?""",
@@ -76,10 +77,10 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
     else:
         conn.execute(
             """INSERT INTO role (user_id, company_id, url, url_normalised,
-                   title, location, salary, platform, posted_date, description,
-                   description_captured, match_score, band, reason, matched, gaps,
-                   resume_id, first_seen_run_id, last_seen_run_id)
-               VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?)""",
+                   title, location, salary, platform, posted_date, work_mode,
+                   description, description_captured, match_score, band, reason,
+                   matched, gaps, resume_id, first_seen_run_id, last_seen_run_id)
+               VALUES (?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?)""",
             (user_id, company_id, job["url"], url_n, *values, run_id, run_id))
 
 

@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS role (
     salary               TEXT,
     platform             TEXT,
     posted_date          TEXT,
+    work_mode            TEXT,
     description          TEXT,
     description_captured INTEGER NOT NULL DEFAULT 0,
     match_score          INTEGER,
@@ -152,6 +153,9 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         (None, None,
          "UPDATE user SET name = 'default'"
          " WHERE (SELECT COUNT(*) FROM user) = 1"),
+    ),
+    4: (
+        ("role", "work_mode", "ALTER TABLE role ADD COLUMN work_mode TEXT"),
     ),
 }
 

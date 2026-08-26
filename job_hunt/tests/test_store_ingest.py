@@ -156,6 +156,28 @@ def test_a_job_scored_without_a_resume_stores_null(conn):
     assert stored is None
 
 
+def test_work_mode_round_trips(conn):
+    """A detected work mode is written and read back unchanged."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/hybrid", work_mode="hybrid")])
+    stored = conn.execute(
+        "SELECT work_mode FROM role WHERE url = ?",
+        ("https://x/hybrid",)).fetchone()["work_mode"]
+    assert stored == "hybrid"
+
+
+def test_a_job_without_a_mode_stores_null(conn):
+    """A posting whose text names no mode must not be guessed at — NULL."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-mode")])
+    stored = conn.execute(
+        "SELECT work_mode FROM role WHERE url = ?",
+        ("https://x/no-mode",)).fetchone()["work_mode"]
+    assert stored is None
+
+
 def test_re_running_a_scrape_updates_the_attribution(conn):
     """A second resume can win a posting the first one won last week."""
     user_id = ensure_user(conn, "G")
