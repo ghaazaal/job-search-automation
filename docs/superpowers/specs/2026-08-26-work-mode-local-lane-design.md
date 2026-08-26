@@ -121,6 +121,10 @@ real stored locations):
   silence beats a coin-flip that can delete a real job.
 - `us_state_names` (full names) covers suffix-free US formats:
   "Austin, Texas" → us.
+- **A tail that independently says "us" outranks a country-named city**:
+  "Holland, MI" is Michigan, not the Netherlands; "Poland, OH" is Ohio.
+  ("New England" → gb stays an accepted minor: its tail is the whole
+  string.)
 - "Remote" → `None`; and in the run_core ladder a location of literally
   "Remote" **vetoes** a stray prose mode phrase entirely — conflicting
   evidence claims nothing (no drop, no flag, no stored mode).
