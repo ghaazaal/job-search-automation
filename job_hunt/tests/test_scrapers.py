@@ -54,6 +54,25 @@ def test_missing_description_is_empty_string(module, monkeypatch):
     assert job["description"] == ""
 
 
+def test_indeed_description_under_the_real_nested_shape(monkeypatch):
+    """valig~indeed-jobs-scraper nests the body as description.text/html —
+    a bare string check on item["description"] misses it entirely, which is
+    why two full production runs came back with zero Indeed descriptions."""
+    item = {
+        **_MINIMAL,
+        "description": {
+            "text": ("Description:\n\nNuclear Power is a carbon-free energy "
+                      "source. You will work on major process controls "
+                      "engineering projects."),
+            "html": ("<p>Description:</p><p>Nuclear Power is a carbon-free "
+                      "energy source.</p>"),
+        },
+    }
+    job = _scrape(indeed, monkeypatch, item)
+    assert job["description"] != ""
+    assert "Nuclear Power" in job["description"]
+
+
 def _capture(monkeypatch, module, items):
     """Record the payload each call_actor invocation received."""
     seen = []
@@ -199,3 +218,15 @@ def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
     linkedin.scrape("BI Developer", "BI Developer", "actor~id")
     assert linkedin_seen[0]["location"] == "Worldwide"
     assert linkedin_seen[0]["remote"] == ["2"]
+
+
+@pytest.mark.parametrize("module", [indeed, linkedin])
+def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
+    """The Indeed actor returns ~100 when asked for 50. The cap is
+    enforced at the client boundary regardless of actor behavior."""
+    items = [{**_MINIMAL, "jobUrl": f"https://example.com/j{i}"}
+             for i in range(100)]
+    _patch(monkeypatch, module, items)
+    jobs = module.scrape("Data Analyst", "Data Analyst", "actor~id",
+                         jobs_per_category=50)
+    assert len(jobs) == 50

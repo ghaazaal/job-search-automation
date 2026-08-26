@@ -38,15 +38,21 @@ def search_titles(resumes: list[dict]) -> list[str]:
     return titles
 
 
-def plan_steps(titles: list[str]) -> list[dict]:
+def plan_steps(titles: list[str], sources=SOURCES,
+               local: bool = False) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
-    Grouped by role rather than by source so the progress screen reads down
-    one role at a time, which is the order they actually run in.
+    Grouped by role, worldwide lane before local, which is the order they
+    actually run in. The local lane searches the profile's actual place
+    with every work mode — it exists so target-country on-site/hybrid
+    jobs arrive at all instead of by accident.
     """
-    return [{"source": name, "role": title, "state": "pending", "found": 0}
+    lanes = ("worldwide",) + (("local",) if local else ())
+    return [{"source": name, "role": title, "lane": lane,
+             "state": "pending", "found": 0}
             for title in titles
-            for name, _, _ in SOURCES]
+            for lane in lanes
+            for name, _, _ in sources]
 
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "vocabulary.yaml"
@@ -57,6 +63,7 @@ class RunResult:
     """What a run produced, for whatever the caller does next."""
     scraped: int = 0
     kept: int = 0
+    dropped: int = 0
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
@@ -76,16 +83,20 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         run_id:      an already-open RUNNING run. This never creates one.
         on_progress: called with the whole progress payload after each step.
         scrapers:    {source name: scrape callable}. Injected by tests.
-        enrich:      optional hook handed the deduped jobs before scoring,
-                     returning the jobs to score. The terminal path uses it
-                     for company enrichment; the browser run passes nothing.
+        enrich:      optional hook handed the jobs that survived the
+                     work-mode/geo policy ladder, before scoring, returning
+                     the jobs to score. The terminal path uses it for
+                     company enrichment; the browser run passes nothing.
 
     Raises:
         ValueError: when there is no active resume, or none of them name a
             target role. There is nothing to search for, and failing here is
             clearer than a run that scrapes nothing and looks broken.
     """
+    import yaml
+
     from .pipeline_store import persist_run
+    from .scoring.matching import has_term, location_country, work_mode
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
@@ -110,12 +121,20 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     country    = profile.get("country") or "us"
     work_modes = profile.get("work_modes") or ["remote"]
 
-    steps = plan_steps(titles)
+    # A source can be switched off in config.yaml (search.sources).
+    # Missing key means enabled, so existing configs keep working.
+    gates = (config.get("search", {}) or {}).get("sources") or {}
+    sources = tuple(entry for entry in SOURCES
+                    if gates.get(entry[0].lower(), True))
+
+    steps = plan_steps(titles, sources=sources,
+                      local=bool((profile.get("location") or "").strip()))
     scraped_total = 0
+    dropped_total = 0
 
     def report(stage: str) -> None:
         emit({"stage": stage, "steps": [dict(s) for s in steps],
-             "scraped": scraped_total})
+             "scraped": scraped_total, "dropped": dropped_total})
 
     # Announce the whole plan before doing any of it.
     report("scraping")
@@ -127,14 +146,21 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
         name = step["source"]
         actor_key, actor_default = next(
-            (key, default) for source, key, default in SOURCES
+            (key, default) for source, key, default in sources
             if source == name)
+        if step["lane"] == "local":
+            lane_location = (profile.get("location") or "").strip()
+            lane_modes = ("remote", "hybrid", "onsite")
+        else:
+            lane_location = location
+            lane_modes = work_modes
         try:
             jobs = scrapers[name](
                 step["role"], step["role"],
                 apify_cfg.get(actor_key, actor_default),
                 days_posted, jobs_per_cat, run_timeout,
-                location=location, country=country, work_modes=work_modes)
+                location=lane_location, country=country,
+                work_modes=lane_modes)
         except Exception as exc:
             # One source failing must not throw away the other's results.
             logger.warning("%s/%s failed: %s", name, step["role"], exc)
@@ -151,26 +177,84 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
 
+    # Work-mode policy. The one user-approved exception to flag-never-
+    # hide: a posting that states a mode the user did not search for,
+    # located in a country that is not theirs, is dropped — bounded by
+    # requiring BOTH the explicit phrase AND a confidently-parsed
+    # country. Local ones are workable in person and kept clean;
+    # unplaceable ones are flagged, because a silent drop cannot be
+    # justified without knowing where the job is. Runs before `enrich`
+    # so a dropped job never costs a company-enrichment lookup.
+    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
+        vocab = yaml.safe_load(handle)
+    mode_cfg = vocab.get("work_mode") or {}
+    loc_cfg = vocab.get("eligibility") or {}
+    # Same fallback the scrape itself uses (see `work_modes` above) — an
+    # empty profile silently disabling the policy would also leave the
+    # scorer's own "remote" fallback dead code.
+    user_modes = tuple(str(m).strip().lower()
+                       for m in work_modes if str(m).strip())
+    user_country = (profile.get("country") or "").strip().lower()
+    profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
+
+    kept_jobs = []
+    for job in new_jobs:
+        mode = work_mode(f"{job.get('title') or ''}\n"
+                         f"{job.get('description') or ''}", mode_cfg)
+        if mode:
+            job["work_mode"] = mode
+        if mode and user_modes and mode not in user_modes:
+            raw_location = (job.get("location") or "").strip().lower()
+            if has_term("remote", raw_location):
+                # The location field carrying "remote" anywhere is the
+                # actor's own tag on where the job is — it beats a stray
+                # prose phrase, whatever the actor appended after it
+                # ("Remote, US" is Indeed's own placeholder, "Remote -
+                # Canada", "Toronto, ON (Remote)"). Conflicting evidence
+                # claims nothing: no drop, no flag, no stored mode.
+                job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
+            if profile_city and has_term(profile_city, raw_location):
+                # The user's own city named in the job's location is
+                # local, whatever the country parser thinks — "Toronto,
+                # ON" has no country to parse, but it IS Toronto.
+                kept_jobs.append(job)
+                continue
+            place = location_country(job.get("location") or "", loc_cfg)
+            if place and user_country and place != user_country:
+                dropped_total += 1
+                continue
+            if not (place and user_country):
+                job["_mode_mismatch"] = mode
+        kept_jobs.append(job)
+    new_jobs = kept_jobs
+
     if enrich is not None:
         new_jobs = enrich(new_jobs)
 
     report("scoring")
     scorer = Scorer(config, VOCABULARY_PATH,
-                    user_country=profile.get("country") or "")
+                    user_country=profile.get("country") or "",
+                    user_modes=user_modes)
     scored_jobs = []
     for job in new_jobs:
         # Set by the Indeed scraper when its us-board fallback fired.
         # Popped — not read — so the transient key can never reach
         # persist_run, the store, or the terminal path's later steps.
         scraped_under = job.pop("_scraped_under", None)
+        mode_mismatch = job.pop("_mode_mismatch", None)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
-                                        scraped_under=scraped_under)})
+                                        scraped_under=scraped_under,
+                                        mode_mismatch=mode_mismatch)})
 
     report("storing")
-    persist_run(conn, user_id, run_id, scored_jobs, scraped_total)
+    persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
+               dropped=dropped_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
+                     dropped=dropped_total,
                      scored_jobs=scored_jobs, steps=steps, titles=titles)

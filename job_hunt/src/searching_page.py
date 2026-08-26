@@ -90,7 +90,7 @@ function draw(list) {{
   steps.innerHTML = list.map(s => `
     <div class="step" data-state="${{s.state}}">
       <span class="dot"></span>
-      <span class="name">${{esc(s.source)}} / ${{esc(s.role)}}</span>
+      <span class="name">${{esc(s.source)}}${{s.lane === 'local' ? ' · local' : ''}} / ${{esc(s.role)}}</span>
       <span class="found">${{s.state === 'failed' ? 'failed'
         : s.state === 'pending' ? 'waiting'
         : s.found + ' found'}}</span>
@@ -130,7 +130,10 @@ async function tick() {{
     note.className = 'note bad';
   }} else {{
     const n = (body.progress && body.progress.scraped) || 0;
-    note.textContent = n ? n + ' found so far' : 'starting';
+    const dropped = (body.progress && body.progress.dropped) || 0;
+    note.textContent = !n ? 'starting'
+      : dropped > 0 ? n + ' found so far · ' + dropped + ' hidden (on-site elsewhere)'
+      : n + ' found so far';
     note.className = 'note';
   }}
   setTimeout(tick, POLL);

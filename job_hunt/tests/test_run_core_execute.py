@@ -105,7 +105,7 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    assert len(seen[0]["steps"]) == 2      # one role, two sources
+    assert len(seen[0]["steps"]) == 4      # one role, two sources, two lanes
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -159,7 +159,7 @@ def test_duplicates_within_one_scrape_collapse(conn, user, resume):
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         linkedin_jobs=[_job("https://x/1")]))
 
-    assert result.scraped == 2
+    assert result.scraped == 4  # two lanes each finding the same job
     assert result.kept == 1
 
 
@@ -223,3 +223,212 @@ def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user,
     # Popped, not read: the transient key must be gone from what the
     # LLM/Excel steps and persist_run receive.
     assert "_scraped_under" not in evidence
+
+
+def test_a_foreign_onsite_job_is_dropped_not_stored(conn, user, resume):
+    job = _job("https://x/20")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 1
+    assert result.kept == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM role").fetchone()["n"] == 0
+
+
+def test_a_local_hybrid_job_is_kept_without_penalty(conn, user, resume):
+    """'Yerevan hybrid — bring it': a mode mismatch in the user's own
+    country is workable in person."""
+    job = _job("https://x/21")
+    job["location"] = "Toronto, Ontario, Canada"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume):
+    job = _job("https://x/22")
+    job["location"] = "Jakarta Metropolitan Area"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid, you searched remote-only" in evidence["reason"]
+    assert "_mode_mismatch" not in evidence
+
+
+def test_a_remote_tagged_location_vetoes_a_stray_prose_phrase(conn, user, resume):
+    """The location field says Remote (actor-tagged) while the prose says
+    hybrid — conflicting evidence claims nothing: kept, unflagged, no
+    stored mode. 36% of real stored locations are literally 'Remote', and
+    they are exactly where the phrase list is blindest."""
+    job = _job("https://x/25")
+    job["location"] = "Remote"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid" not in evidence["reason"]
+    assert evidence.get("work_mode") is None
+
+
+def test_a_job_with_no_mode_word_is_untouched(conn, user, resume):
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[_job("https://x/23")]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_the_dropped_count_reaches_progress(conn, user, resume):
+    seen = []
+    job = _job("https://x/24")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers=_scrapers(indeed_jobs=[job]))
+    assert seen[-1]["dropped"] == 1
+
+
+def test_a_decorated_remote_location_still_vetoes(conn, user, resume):
+    """'Remote, US' is Indeed's own we-don't-know placeholder — it must
+    land on the veto side, not resolve to a country and drop."""
+    job = _job("https://x/26")
+    job["location"] = "Remote, US"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_the_users_own_city_is_local_without_a_country(conn, user, resume):
+    """'Toronto, ON' parses to no country, but it IS Toronto — the
+    profile's own city keeps the job clean, stamp intact."""
+    job = _job("https://x/27")
+    job["location"] = "Toronto, ON"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_a_location_header_line_rescues_a_perks_mention(conn, user, resume):
+    """The reviewed real-world wrong drop: 'Location: Remote' prose plus
+    'hybrid work options' in a perks list — conflict claims nothing."""
+    job = _job("https://x/28")
+    job["location"] = "Cincinnati, OH"
+    job["description"] += (" Location: Remote. Travel 2-5 weeks per year."
+                           " We offer flexible time off, hybrid work"
+                           " options, and a 401k plan.")
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+
+
+def test_the_dropped_count_is_persisted_on_the_run_row(conn, user, resume):
+    job = _job("https://x/29")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(indeed_jobs=[job]))
+    assert conn.execute("SELECT dropped FROM run WHERE id = ?",
+                        (run_id,)).fetchone()["dropped"] == 1
+
+
+def test_dropped_jobs_never_reach_the_enrich_hook(conn, user, resume):
+    handed = []
+
+    def enrich(jobs):
+        handed.extend(j["url"] for j in jobs)
+        return jobs
+
+    dropped_job = _job("https://x/30")
+    dropped_job["location"] = "Bengaluru, Karnataka, India"
+    dropped_job["description"] += " Onsite work required."
+    # A distinct company: dedupe's fingerprint is company+title, deliberately
+    # location-blind (remote postings mirror per-country), so two jobs with
+    # the default _job() company/title would collapse into one candidate
+    # before the ladder ever ran, regardless of this test's intent.
+    survivor = _job("https://x/31", company="Widgets Inc")
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE, enrich=enrich,
+            scrapers=_scrapers(indeed_jobs=[dropped_job, survivor]))
+    assert handed == ["https://x/31"]
+
+
+def test_the_local_lane_searches_the_actual_place_with_all_modes(conn, user, resume):
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append({"location": kwargs.get("location"),
+                      "work_modes": tuple(kwargs.get("work_modes") or ())})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    local = [c for c in calls
+             if c["work_modes"] == ("remote", "hybrid", "onsite")]
+    assert len(local) == 2          # one per source
+    assert all(c["location"] == "Toronto, ON" for c in local)
+
+
+def test_no_location_means_no_local_lane(conn, user, resume):
+    profile = {**_PROFILE, "location": ""}
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], profile,
+            on_progress=seen.append, scrapers=_scrapers())
+    assert len(seen[0]["steps"]) == 2
+
+
+def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
+    config = {**_CONFIG,
+              "search": {**_CONFIG["search"], "sources": {"indeed": False}}}
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return []
+
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, config, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    sources = {s["source"] for s in seen[0]["steps"]}
+    assert sources == {"LinkedIn"}
+
+
+def test_a_missing_sources_key_enables_everything(conn, user, resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+    assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}

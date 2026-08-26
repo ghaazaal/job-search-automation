@@ -116,6 +116,18 @@ Inside the `eligibility` section (after `ambiguous_names`):
               ks, ky, la, me, md, ma, mi, mn, ms, mo, mt, ne, nv, nh, nj,
               nm, ny, nc, nd, oh, ok, or, pa, ri, sc, sd, tn, tx, ut, vt,
               va, wa, wv, wi, wy, dc]
+  # Full state names for suffix-free US formats ("Austin, Texas").
+  # `georgia` is deliberately ambiguous with the country — handled in code.
+  us_state_names: [alabama, alaska, arizona, arkansas, california, colorado,
+                   connecticut, delaware, florida, georgia, hawaii, idaho,
+                   illinois, indiana, iowa, kansas, kentucky, louisiana,
+                   maine, maryland, massachusetts, michigan, minnesota,
+                   mississippi, missouri, montana, nebraska, nevada,
+                   "new hampshire", "new jersey", "new mexico", "new york",
+                   "north carolina", "north dakota", ohio, oklahoma, oregon,
+                   pennsylvania, "rhode island", "south carolina",
+                   "south dakota", tennessee, texas, utah, vermont,
+                   virginia, washington, "west virginia", wisconsin, wyoming]
 ```
 
 At the end of the file:
@@ -126,6 +138,8 @@ At the end of the file:
 # teams", bare "on-site" on "on-site gym". Every entry must be
 # role-anchored. Language facts only — whether a mode suits the user
 # lives in their profile.
+# Reviewed out: "no remote work" (…experience required), "office-based"
+# (…clients), "hybrid model" (ML term), "in-office days" (…are optional).
 work_mode:
   remote_phrases:
     - "fully remote"
@@ -133,34 +147,45 @@ work_mode:
     - "remote position"
     - "remote role"
     - "remote-first"
+    - "remote-only"
     - "work remotely"
     - "work from home"
+    - "work from anywhere"
+    - "telecommute"
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
-    - "hybrid model"
     - "hybrid working"
     - "hybrid position"
     - "hybrid schedule"
     - "days per week in the office"
     - "days a week in the office"
-    - "in-office days"
   onsite_phrases:
     - "on-site role"
     - "onsite role"
     - "on-site position"
     - "onsite position"
-    - "office-based"
-    - "on-site only"
-    - "onsite only"
     - "in-office role"
-    - "no remote work"
+    - "must work onsite"
+    - "onsite work required"
 ```
+
+> **Correction found during Task 1 code review** (probed with the consumer's
+> own regex against realistic JD text): four given phrases had reproduced
+> false positives and were removed — "no remote work" ("…experience
+> required"), "office-based" ("…clients"), "hybrid model" (ML vocabulary:
+> "a hybrid model combining ARIMA…" — this product's own audience),
+> "in-office days" ("…are completely optional"). Three clean role-anchored
+> phrases added: "remote-only", "must work onsite", "onsite work required".
+> The review's other Critical — nine `us_states` codes are also country
+> ISO codes ("Chennai, IN", "Toronto, CA") — is fixed in Task 2's
+> `location_country` rule, not the data: an ambiguous token claims
+> nothing.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_vocabulary.py -v`
-Expected: all 13 PASS.
+Expected: all 11 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -193,7 +218,8 @@ _MODE_CFG = {
     "remote_phrases": ["fully remote", "remote position", "work from home"],
     "hybrid_phrases": ["hybrid work", "hybrid role",
                        "days a week in the office"],
-    "onsite_phrases": ["on-site role", "office-based", "no remote work"],
+    "onsite_phrases": ["on-site role", "onsite work required",
+                       "must work onsite"],
 }
 
 _LOC_CFG = {
@@ -204,7 +230,7 @@ _LOC_CFG = {
         "ge": ["georgia"],
         "in": ["india"],
     },
-    "us_states": ["ny", "wa", "ga", "tx"],
+    "us_states": ["ny", "wa", "ga", "tx", "in"],
 }
 
 
@@ -214,7 +240,7 @@ def test_each_phrase_category_is_detected():
     assert work_mode("this is a fully remote team.", _MODE_CFG) == "remote"
     assert work_mode("hybrid work, 2 days a week in the office.",
                      _MODE_CFG) == "hybrid"
-    assert work_mode("an office-based analyst position.",
+    assert work_mode("onsite work required for this analyst position.",
                      _MODE_CFG) == "onsite"
 
 
@@ -274,7 +300,15 @@ def test_a_state_code_inside_a_word_does_not_fire():
     assert location_country("Acme Company HQ", _LOC_CFG) is None
 
 
-def test_empty_config_is_silent():
+def test_a_state_code_that_is_also_a_country_code_claims_nothing():
+    """'Chennai, IN' abbreviates India; 'Gary, IN' abbreviates Indiana.
+    The bare token cannot tell them apart, so it must claim nothing —
+    a wrong 'us' here corrupts the drop decision."""
+    assert location_country("Chennai, IN", _LOC_CFG) is None
+    assert location_country("Gary, IN", _LOC_CFG) is None
+
+
+def test_empty_location_config_is_silent():
     assert location_country("New York, NY", {}) is None
 ```
 
@@ -317,8 +351,10 @@ def location_country(location: str, cfg: dict) -> str | None:
     "Tbilisi, Georgia" the country). Bare "us" is allowed here: a
     location string is not prose, so the pronoun hazard geo_verdict
     guards against does not apply. With no country name, any token that
-    is a 2-letter code in `us_states` resolves to "us". Anything else —
-    including "Remote" — is None: no claim.
+    is a 2-letter code in `us_states` resolves to "us" — UNLESS that token
+    is also a country ISO code ("Chennai, IN" abbreviates India, "Gary,
+    IN" Indiana; the token cannot tell them apart, so it claims nothing).
+    Anything else — including "Remote" — is None: no claim.
     """
     location = (location or "").lower()
     if not location:
@@ -336,27 +372,42 @@ def location_country(location: str, cfg: dict) -> str | None:
     if best:
         return best[1]
     states = {str(s).strip().lower() for s in cfg.get("us_states") or []}
-    if any(token in states for token in re.findall(r"[a-z]{2}", location)
-           if re.search(r"(?<![a-z])" + token + r"(?![a-z])", location)):
-        return "us"
-    return None
-```
-
-Note on the state check: the comprehension form above double-matches; implement it as the simpler, correct loop —
-
-```python
+    codes = {str(c).strip().lower() for c in cfg.get("countries") or {}}
     for token in re.findall(r"(?<![a-z])[a-z]{2}(?![a-z])", location):
-        if token in states:
+        if token in states and token not in codes:
             return "us"
     return None
 ```
 
-Use the loop form, not the comprehension. (The plan shows both so the reviewer can see the intent; ship only the loop.)
-
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_work_mode.py tests/test_matching.py tests/test_geo_verdict.py -v`
-Expected: all PASS (13 new + existing untouched).
+Expected: all PASS (13 new + existing untouched — two same-named
+tests would shadow each other, hence the distinct empty-config names).
+
+> **Correction found during Task 2 code review** (probed against all 549
+> real stored locations — the shipped `matching.py` and test file are the
+> authority over this task's inline blocks, which predate it):
+> - **"georgia" is ambiguous both directions** ("Atlanta, Georgia" parsed
+>   as the country `ge` on Indeed's suffix-free `city, state` format — a
+>   drop-path corruption). Country aliases that are also US state names
+>   are skipped by the country scan AND the state fallback: silence both
+>   ways, including the accepted loss of "Tbilisi, Georgia".
+> - **The state-code fallback is tail-anchored** with an optional ZIP:
+>   "La Paz", "Or Yehuda", "Al Ain" and diacritic fragments ("iaşi" →
+>   "ia") no longer resolve to `us`. An ambiguous code stays silent even
+>   in `city, CODE` form — "San Francisco, CA" and "Chennai, IN" are
+>   structurally identical, so both are None: a safe silence beats a
+>   coin-flip that can delete a real job (accepted, pinned by test).
+> - **`eligibility.us_state_names`** added (full names): "Austin, Texas"
+>   → us.
+> - **Phrases**: "on-site only"/"onsite only" removed ("on-site only gym
+>   access"); "work from anywhere"/"telecommute" added — a thin remote
+>   list next to a rich hybrid list is what turns boilerplate into drops.
+> - **`work_mode` precompiles one alternation per category** (lru_cache) —
+>   ~5.2ms/job measured, ~5× saved.
+> - Task 5's ladder gained the Remote-location veto (see its code block):
+>   a location field of literally "Remote" beats a stray prose phrase.
 
 - [ ] **Step 5: Commit**
 
@@ -595,7 +646,7 @@ Append to `job_hunt/tests/test_run_core_execute.py` (`_PROFILE` is `location "To
 def test_a_foreign_onsite_job_is_dropped_not_stored(conn, user, resume):
     job = _job("https://x/20")
     job["location"] = "Bengaluru, Karnataka, India"
-    job["description"] += " This is an office-based position."
+    job["description"] += " Onsite work required."
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[job]))
@@ -622,7 +673,7 @@ def test_a_local_hybrid_job_is_kept_without_penalty(conn, user, resume):
 
 def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume):
     job = _job("https://x/22")
-    job["location"] = "Remote"
+    job["location"] = "Jakarta Metropolitan Area"
     job["description"] += " Hybrid work, 2 days a week in the office."
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
@@ -631,6 +682,23 @@ def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume)
     evidence = result.scored_jobs[0]
     assert "says hybrid, you searched remote-only" in evidence["reason"]
     assert "_mode_mismatch" not in evidence
+
+
+def test_a_remote_tagged_location_vetoes_a_stray_prose_phrase(conn, user, resume):
+    """The location field says Remote (actor-tagged) while the prose says
+    hybrid — conflicting evidence claims nothing: kept, unflagged, no
+    stored mode. 36% of real stored locations are literally 'Remote', and
+    they are exactly where the phrase list is blindest."""
+    job = _job("https://x/25")
+    job["location"] = "Remote"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid" not in evidence["reason"]
+    assert evidence.get("work_mode") is None
 
 
 def test_a_job_with_no_mode_word_is_untouched(conn, user, resume):
@@ -646,7 +714,7 @@ def test_the_dropped_count_reaches_progress(conn, user, resume):
     seen = []
     job = _job("https://x/24")
     job["location"] = "Bengaluru, Karnataka, India"
-    job["description"] += " This is an office-based position."
+    job["description"] += " Onsite work required."
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append,
@@ -692,6 +760,14 @@ In `job_hunt/src/run_core.py`:
         if mode:
             job["work_mode"] = mode
         if mode and user_modes and mode not in user_modes:
+            raw_location = (job.get("location") or "").strip().lower()
+            if raw_location == "remote":
+                # The location field says remote (actor-tagged) while the
+                # prose says otherwise — conflicting evidence, so claim
+                # nothing: no drop, no flag, no stored mode.
+                job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
             place = location_country(job.get("location") or "", loc_cfg)
             if place and user_country and place != user_country:
                 dropped_total += 1
@@ -723,7 +799,32 @@ Note `dropped_total` is assigned inside `execute` before `report` is ever called
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_run_core_execute.py -v`
-Expected: all 19 PASS.
+Expected: all 20 PASS.
+
+> **Correction found during Task 5 quality review** (the review replayed
+> the ladder over all 549 real stored postings: 30 drops, 29 correct, one
+> real wrong deletion — the shipped code is the authority over the inline
+> block above):
+> - **The veto matches a word-bounded `remote` token in the location**,
+>   not exact equality — "Remote, US" is Indeed's own we-don't-know
+>   placeholder and was landing on the drop side for non-US users.
+> - **The user's own city keeps a job local without a country parse**:
+>   "Toronto, ON" has no parseable country, but it IS Toronto — the
+>   profile's first comma-segment, word-bounded in the job location,
+>   keeps the job clean (also pre-solves the province-code gap before
+>   Task 6's local lane).
+> - **"location: remote" joined remote_phrases** — rescues the reviewed
+>   real wrong drop (perks-list "hybrid work options" on a
+>   "Location: Remote" posting) via conflict→None.
+> - **Drops are recorded and visible**: `run.dropped` column (folded into
+>   the unreleased v4 migration), `finish_run`/`persist_run` carry it,
+>   and the searching page's note shows "N hidden (on-site elsewhere)".
+>   A silent, unrecorded deletion was the review's one unacceptable.
+> - The ladder runs BEFORE the enrich hook (dropped jobs must not cost
+>   LLM lookups), and its `user_modes` falls back to ["remote"] exactly
+>   like the scrape does.
+> - Five regression tests + a migration and a searching-page assertion
+>   were added; test counts in the steps above predate them.
 
 - [ ] **Step 5: Mutation-check the drop boundary**
 
@@ -1059,6 +1160,15 @@ Run it via PowerShell so the token (a Windows user env var) is inherited:
 powershell -Command "$env:APIFY_TOKEN=[Environment]::GetEnvironmentVariable('APIFY_TOKEN','User'); python <scratchpad-path>\diag_indeed.py"
 ```
 
+ALSO check while you have raw output: the Task 5 review found stored
+descriptions with RUN-TOGETHER text ("Location: RemoteTravel Required") —
+`extract_description` in `src/scrapers/base.py` replaces tags with a
+space, so run-together text means the SOURCE field already concatenates
+blocks. Inspect whether the raw item's description-ish field has the
+same mangling; if `extract_description` is at fault (e.g. some path not
+inserting separators), report it — a one-line fix there rescues the
+accepted Cincinnati-class wrong drops.
+
 Decide from the output: does ANY field carry the posting body (a long
 string, or an HTML body, under a key `_DESCRIPTION_KEYS` in
 `src/scrapers/base.py` does not list)?
@@ -1171,7 +1281,7 @@ from src.scoring.matching import location_country, work_mode
 vocab = yaml.safe_load(open('vocabulary.yaml', encoding='utf-8'))
 mode_cfg, loc_cfg = vocab['work_mode'], vocab['eligibility']
 for text, loc in [
-    ('This is an office-based position.', 'Bengaluru, Karnataka, India'),
+    ('Onsite work required.', 'Bengaluru, Karnataka, India'),
     ('Hybrid work, 2 days a week in the office.', 'Yerevan, Armenia'),
     ('Hybrid work, 2 days a week in the office.', 'Remote'),
     ('Experience with hybrid cloud required.', 'Singapore, Singapore'),

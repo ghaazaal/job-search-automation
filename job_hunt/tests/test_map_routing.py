@@ -142,3 +142,19 @@ def test_the_banner_shows_no_invented_total(tmp_path):
 
     body = client.get("/").get_data(as_text=True)
     assert " of " not in body.lower().split("searching now")[1][:60]
+
+
+def test_the_map_reports_what_the_last_run_hid(tmp_path):
+    """The drop count is durably recorded on the run row (Task 5) but was
+    never actually surfaced to a reader — this closes that loop."""
+    path = _ready(tmp_path)
+    conn = connect(path)
+    try:
+        user_id = ensure_user(conn, "default")
+        done = start_run(conn, user_id)
+        finish_run(conn, done, scraped=5, kept=3, dropped=2)
+    finally:
+        conn.close()
+
+    body = _client(path, tmp_path).get("/").get_data(as_text=True)
+    assert "HIDDEN (ON-SITE ELSEWHERE)" in body

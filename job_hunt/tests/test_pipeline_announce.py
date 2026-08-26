@@ -49,5 +49,24 @@ def test_announce_step_distinguishes_different_steps():
     main._announce_step(dict(indeed_step), printed_steps)
     main._announce_step(dict(linkedin_step), printed_steps)
 
-    assert printed_steps == {("Indeed", "BI Developer"),
-                             ("LinkedIn", "BI Developer")}
+    assert printed_steps == {("Indeed", "BI Developer", "worldwide"),
+                             ("LinkedIn", "BI Developer", "worldwide")}
+
+
+def test_announce_step_prints_both_lanes_of_the_same_source_and_role(capsys):
+    """The dedup key must include the lane, or the local step is silently
+    swallowed as a duplicate of the worldwide one."""
+    printed_steps: set = set()
+    worldwide_step = {"source": "Indeed", "role": "BI Developer",
+                      "lane": "worldwide", "state": "done", "found": 3}
+    local_step = {"source": "Indeed", "role": "BI Developer",
+                  "lane": "local", "state": "done", "found": 2}
+
+    main._announce_step(dict(worldwide_step), printed_steps)
+    main._announce_step(dict(local_step), printed_steps)
+
+    output = capsys.readouterr().out
+    lines = [line for line in output.splitlines()
+             if "BI Developer" in line]
+    assert len(lines) == 2
+    assert any("local" in line for line in lines)

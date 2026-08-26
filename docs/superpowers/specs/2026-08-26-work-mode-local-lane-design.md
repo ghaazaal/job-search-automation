@@ -38,6 +38,15 @@ Field data from run 2 (post-Ship-4, user in Yerevan, remote-only profile,
 - **Unparseable location → flag, not drop.** Without knowing where the
   job is, a silent drop cannot be justified; the posting stays with a
   penalty and a stated reason.
+- **Drops are recorded and visible** (hardened after review replayed the
+  ladder on 549 real postings: 30 drops, 29 correct, 1 wrong): the run
+  row keeps a `dropped` count and the progress screen says "N hidden
+  (on-site elsewhere)". A word-bounded `remote` token anywhere in the
+  location field vetoes the mode claim ("Remote, US" is Indeed's
+  placeholder); the profile's own city in the job location keeps it
+  local without a country parse; "location: remote" counts as remote
+  evidence so a perks-list "hybrid work options" resolves as conflict,
+  not a drop.
 - **No mode word → no claim.** Same discipline as geography.
 - **Add the local lane.** Each run searches every role twice per source:
   the worldwide-remote cast (unchanged) plus the profile's location with
@@ -68,8 +77,12 @@ work_mode:
                      days per week in the office, days a week in the office,
                      in-office days]
   onsite_phrases:   [on-site role, onsite role, on-site position,
-                     onsite position, office-based, on-site only,
-                     onsite only, in-office role, no remote work]
+                     onsite position, in-office role, must work onsite,
+                     onsite work required]
+  # Reviewed out for reproduced false positives: "no remote work"
+  # (...experience required), "office-based" (...clients), "hybrid model"
+  # (ML term), "in-office days" (...are optional), "on-site only" (...gym
+  # access). Added: remote-only, work from anywhere, telecommute.
 
 penalties:
   mode_mismatch: 15   # says hybrid/on-site, user searched remote-only,
@@ -101,10 +114,29 @@ def location_country(location: str, cfg: dict) -> str | None
 ```
 Parses a stored location string ("Bengaluru, Karnataka, India") against
 `eligibility.countries` names, word-bounded, **rightmost match wins**
-(locations end with the country: "Georgia, US" → us, "Tbilisi, Georgia"
-→ ge). Bare "us" is allowed here — a location string is not prose, so the
-pronoun hazard does not apply. No country-name match → if any token is a
-2-letter code in `us_states` → "us"; else `None`. "Remote" → `None`.
+(locations end with the country: "Georgia, US" → us). Bare "us" is
+allowed here — a location string is not prose, so the pronoun hazard does
+not apply. Hardened during implementation review (probed against all 549
+real stored locations):
+
+- A country alias that is also a US state name ("georgia") is **silent
+  both ways** — "Atlanta, Georgia" must not parse as the country, and
+  the accepted cost is "Tbilisi, Georgia" parsing as nothing.
+- The 2-letter `us_states` fallback is **anchored to the final
+  comma-segment** with an optional ZIP ("Austin, TX 78701" → us) —
+  "La Paz", "Or Yehuda" and diacritic fragments no longer read as us.
+- An ambiguous code stays silent even there: "San Francisco, CA" and
+  "Chennai, IN" are structurally identical, so both are `None` — a safe
+  silence beats a coin-flip that can delete a real job.
+- `us_state_names` (full names) covers suffix-free US formats:
+  "Austin, Texas" → us.
+- **A tail that independently says "us" outranks a country-named city**:
+  "Holland, MI" is Michigan, not the Netherlands; "Poland, OH" is Ohio.
+  ("New England" → gb stays an accepted minor: its tail is the whole
+  string.)
+- "Remote" → `None`; and in the run_core ladder a location of literally
+  "Remote" **vetoes** a stray prose mode phrase entirely — conflicting
+  evidence claims nothing (no drop, no flag, no stored mode).
 
 ### run_core.py — the policy ladder and the local lane
 

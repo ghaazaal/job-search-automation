@@ -99,6 +99,11 @@ def scrape(category: str, title: str,
             "description": extract_description(item),
         })
 
+    # Actors overshoot (Indeed returns ~100 for maxResults=50). The cap
+    # is a promise to the user about volume and cost, so it is enforced
+    # here, not trusted to the actor.
+    jobs = jobs[:jobs_per_category]
+
     if fellback and payload["country"] != _LEGACY_COUNTRY:
         # These jobs came off the us board, not the one that was asked for.
         # Transient by design: run_core pops the key before anything is

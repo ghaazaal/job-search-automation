@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS run (
     status      TEXT NOT NULL CHECK (status IN ('RUNNING','OK','FAILED')),
     scraped     INTEGER NOT NULL DEFAULT 0,
     kept        INTEGER NOT NULL DEFAULT 0,
+    dropped     INTEGER NOT NULL DEFAULT 0,
     stage       TEXT,
     progress    TEXT NOT NULL DEFAULT '{}',
     error       TEXT
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS role (
     salary               TEXT,
     platform             TEXT,
     posted_date          TEXT,
+    work_mode            TEXT,
     description          TEXT,
     description_captured INTEGER NOT NULL DEFAULT 0,
     match_score          INTEGER,
@@ -152,6 +154,11 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         (None, None,
          "UPDATE user SET name = 'default'"
          " WHERE (SELECT COUNT(*) FROM user) = 1"),
+    ),
+    4: (
+        ("role", "work_mode", "ALTER TABLE role ADD COLUMN work_mode TEXT"),
+        ("run", "dropped",
+         "ALTER TABLE run ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0"),
     ),
 }
 

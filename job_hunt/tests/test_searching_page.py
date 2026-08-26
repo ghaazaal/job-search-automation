@@ -44,3 +44,18 @@ def test_no_score_or_percentage_appears():
 
 def test_the_page_uses_the_project_palette():
     assert "#F7F2E6" in render(42)
+
+
+def test_dropped_jobs_are_surfaced_in_the_progress_note():
+    """Drops are the one silent policy exception — the progress screen
+    still has to say so, not just the final map."""
+    html = render(42)
+    assert "progress.dropped" in html
+    assert "hidden" in html.lower()
+
+
+def test_the_step_row_can_label_the_local_lane():
+    """The page appends ' · local' from the step's lane field — the
+    source name itself stays clean for the scraper lookup."""
+    html = render(7)
+    assert "s.lane === 'local'" in html

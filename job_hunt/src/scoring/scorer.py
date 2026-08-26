@@ -41,7 +41,7 @@ class Scorer:
     """Scores postings against resumes. One instance per run."""
 
     def __init__(self, config: dict, vocabulary_path: Path,
-                 user_country: str = ""):
+                 user_country: str = "", user_modes: tuple = ()):
         self._vocab = _load(vocabulary_path)
         # Band cut-offs on the internal 1-10 score.
         self._bands = config.get("scoring", {}).get("bands",
@@ -49,9 +49,14 @@ class Scorer:
         # Where the user can be hired. Empty means unknown, and unknown
         # means the geography checks stay silent rather than guess.
         self._user_country = (user_country or "").strip().lower()
+        # What the user searched for. Only used to word the mode-mismatch
+        # clause — the policy decision lives in run_core.
+        self._user_modes = tuple(str(m).strip().lower()
+                                 for m in user_modes if str(m).strip())
 
     def score_job(self, title: str, description: str, resume: dict,
-                  scraped_under: str | None = None) -> dict:
+                  scraped_under: str | None = None,
+                  mode_mismatch: str | None = None) -> dict:
         """Evidence for one posting judged against one resume."""
         vocab = self._vocab
         lowered = (title or "").lower()
@@ -83,7 +88,7 @@ class Scorer:
                                              vocab.get("mismatch") or {})
 
         penalty, fired = self._constraints(body, jd_band, my_band,
-                                           scraped_under)
+                                           scraped_under, mode_mismatch)
         if mismatch:
             fired.append("little overlap with the tools this post names")
 
@@ -121,7 +126,8 @@ class Scorer:
 
     def best_match(self, title: str, description: str,
                    resumes: list[dict],
-                   scraped_under: str | None = None) -> dict:
+                   scraped_under: str | None = None,
+                   mode_mismatch: str | None = None) -> dict:
         """Score against every active resume and keep the strongest.
 
         Someone with a Data Engineer resume and a BI Developer resume should
@@ -135,12 +141,14 @@ class Scorer:
         if not resumes:
             raise ValueError("cannot score without at least one active resume")
         scored = [self.score_job(title, description, resume,
-                                 scraped_under=scraped_under)
+                                 scraped_under=scraped_under,
+                                 mode_mismatch=mode_mismatch)
                   for resume in resumes]
         return max(scored, key=lambda evidence: evidence["match_score"])
 
     def _constraints(self, body: str, jd_band: str, my_band: str,
-                     scraped_under: str | None = None) -> tuple[int, list[str]]:
+                     scraped_under: str | None = None,
+                     mode_mismatch: str | None = None) -> tuple[int, list[str]]:
         """Employment constraints that rule a posting out whatever your stack."""
         cfg = self._vocab["penalties"]
         penalty = 0
@@ -175,6 +183,17 @@ class Scorer:
             penalty += cfg.get("wrong_board", 10)
             fired.append("found via Indeed's US board, "
                          "not verified for your country")
+
+        if mode_mismatch:
+            # run_core sends this only for the keep-and-flag rung of the
+            # policy ladder: the posting states a mode the user did not
+            # search for and its location could not be placed. Confirmed
+            # foreign ones were dropped before scoring; local ones were
+            # kept clean.
+            searched = "/".join(self._user_modes) or "remote"
+            penalty += cfg.get("mode_mismatch", 15)
+            fired.append(f"says {mode_mismatch}, "
+                         f"you searched {searched}-only")
 
         # An executive posting only counts against you if you are not one.
         if jd_band == "exec" and my_band != "exec":
