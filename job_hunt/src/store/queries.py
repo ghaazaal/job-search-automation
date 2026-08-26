@@ -63,6 +63,8 @@ def _group(conn, rows, shortlist_min) -> list[dict]:
     for company_id, group in by_company.items():
         group.sort(key=lambda r: -(r["match_score"] or 0))
         best = group[0]["match_score"] or 0
+        verified = max((1 if r["eligibility_verified"] else 0)
+                       for r in group)
         name = conn.execute("SELECT name FROM company WHERE id = ?",
                             (company_id,)).fetchone()["name"]
         maps.append({
@@ -72,11 +74,12 @@ def _group(conn, rows, shortlist_min) -> list[dict]:
             "why":   _why(group),
             "roles": [_role_view(r) for r in group],
             "_rank": best,
+            "_tier": verified,
         })
-    maps.sort(key=lambda m: (0 if m["state"] == "ACT_NOW" else 1, -m["_rank"],
-                             m["name"].lower()))
+    maps.sort(key=lambda m: (0 if m["state"] == "ACT_NOW" else 1,
+                             -m["_tier"], -m["_rank"], m["name"].lower()))
     for m in maps:
-        del m["_rank"]
+        del m["_rank"], m["_tier"]
     return maps
 
 

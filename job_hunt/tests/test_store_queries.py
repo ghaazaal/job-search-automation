@@ -214,3 +214,18 @@ def test_another_users_roles_are_not_reported(conn):
 
     urls, rows = known_listings(conn, mine)
     assert (urls, rows) == ([], [])
+
+
+def test_verified_companies_outrank_unverified_within_a_section(conn):
+    """A verified-eligible PARTIAL FIT beats an unverified STRONG FIT:
+    a sure thing you can take outranks a maybe you might not."""
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [
+        _job("https://x/unverified", company="Unverified Corp", score=9,
+             band="STRONG FIT", eligibility_verified=0),
+        _job("https://x/verified", company="Verified Ltd", score=6,
+             band="PARTIAL FIT", eligibility_verified=1),
+    ])
+    sections = map_sections(conn, u, shortlist_min=5)
+    names = [m["name"] for m in sections["new"]]
+    assert names.index("Verified Ltd") < names.index("Unverified Corp")
