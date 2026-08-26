@@ -99,5 +99,5 @@ def test_a_state_code_that_is_also_a_country_code_claims_nothing():
     assert location_country("Gary, IN", _LOC_CFG) is None
 
 
-def test_empty_config_is_silent():
+def test_empty_location_config_is_silent():
     assert location_country("New York, NY", {}) is None
