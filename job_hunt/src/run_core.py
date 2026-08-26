@@ -57,6 +57,7 @@ class RunResult:
     """What a run produced, for whatever the caller does next."""
     scraped: int = 0
     kept: int = 0
+    dropped: int = 0
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
@@ -85,7 +86,10 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             target role. There is nothing to search for, and failing here is
             clearer than a run that scrapes nothing and looks broken.
     """
+    import yaml
+
     from .pipeline_store import persist_run
+    from .scoring.matching import location_country, work_mode
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
@@ -112,10 +116,11 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     steps = plan_steps(titles)
     scraped_total = 0
+    dropped_total = 0
 
     def report(stage: str) -> None:
         emit({"stage": stage, "steps": [dict(s) for s in steps],
-             "scraped": scraped_total})
+             "scraped": scraped_total, "dropped": dropped_total})
 
     # Announce the whole plan before doing any of it.
     report("scraping")
@@ -154,23 +159,67 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     if enrich is not None:
         new_jobs = enrich(new_jobs)
 
+    # Work-mode policy. The one user-approved exception to flag-never-
+    # hide: a posting that states a mode the user did not search for,
+    # located in a country that is not theirs, is dropped — bounded by
+    # requiring BOTH the explicit phrase AND a confidently-parsed
+    # country. Local ones are workable in person and kept clean;
+    # unplaceable ones are flagged, because a silent drop cannot be
+    # justified without knowing where the job is.
+    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
+        vocab = yaml.safe_load(handle)
+    mode_cfg = vocab.get("work_mode") or {}
+    loc_cfg = vocab.get("eligibility") or {}
+    user_modes = tuple(str(m).strip().lower()
+                       for m in (profile.get("work_modes") or [])
+                       if str(m).strip())
+    user_country = (profile.get("country") or "").strip().lower()
+
+    kept_jobs = []
+    for job in new_jobs:
+        mode = work_mode(f"{job.get('title') or ''}\n"
+                         f"{job.get('description') or ''}", mode_cfg)
+        if mode:
+            job["work_mode"] = mode
+        if mode and user_modes and mode not in user_modes:
+            raw_location = (job.get("location") or "").strip().lower()
+            if raw_location == "remote":
+                # The location field says remote (actor-tagged) while the
+                # prose says otherwise — conflicting evidence, so claim
+                # nothing: no drop, no flag, no stored mode.
+                job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
+            place = location_country(job.get("location") or "", loc_cfg)
+            if place and user_country and place != user_country:
+                dropped_total += 1
+                continue
+            if not (place and user_country):
+                job["_mode_mismatch"] = mode
+        kept_jobs.append(job)
+    new_jobs = kept_jobs
+
     report("scoring")
     scorer = Scorer(config, VOCABULARY_PATH,
-                    user_country=profile.get("country") or "")
+                    user_country=profile.get("country") or "",
+                    user_modes=user_modes)
     scored_jobs = []
     for job in new_jobs:
         # Set by the Indeed scraper when its us-board fallback fired.
         # Popped — not read — so the transient key can never reach
         # persist_run, the store, or the terminal path's later steps.
         scraped_under = job.pop("_scraped_under", None)
+        mode_mismatch = job.pop("_mode_mismatch", None)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
-                                        scraped_under=scraped_under)})
+                                        scraped_under=scraped_under,
+                                        mode_mismatch=mode_mismatch)})
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
+                     dropped=dropped_total,
                      scored_jobs=scored_jobs, steps=steps, titles=titles)

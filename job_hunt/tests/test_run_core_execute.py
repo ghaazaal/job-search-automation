@@ -223,3 +223,82 @@ def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user,
     # Popped, not read: the transient key must be gone from what the
     # LLM/Excel steps and persist_run receive.
     assert "_scraped_under" not in evidence
+
+
+def test_a_foreign_onsite_job_is_dropped_not_stored(conn, user, resume):
+    job = _job("https://x/20")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 1
+    assert result.kept == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM role").fetchone()["n"] == 0
+
+
+def test_a_local_hybrid_job_is_kept_without_penalty(conn, user, resume):
+    """'Yerevan hybrid — bring it': a mode mismatch in the user's own
+    country is workable in person."""
+    job = _job("https://x/21")
+    job["location"] = "Toronto, Ontario, Canada"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume):
+    job = _job("https://x/22")
+    job["location"] = "Jakarta Metropolitan Area"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid, you searched remote-only" in evidence["reason"]
+    assert "_mode_mismatch" not in evidence
+
+
+def test_a_remote_tagged_location_vetoes_a_stray_prose_phrase(conn, user, resume):
+    """The location field says Remote (actor-tagged) while the prose says
+    hybrid — conflicting evidence claims nothing: kept, unflagged, no
+    stored mode. 36% of real stored locations are literally 'Remote', and
+    they are exactly where the phrase list is blindest."""
+    job = _job("https://x/25")
+    job["location"] = "Remote"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid" not in evidence["reason"]
+    assert evidence.get("work_mode") is None
+
+
+def test_a_job_with_no_mode_word_is_untouched(conn, user, resume):
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[_job("https://x/23")]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_the_dropped_count_reaches_progress(conn, user, resume):
+    seen = []
+    job = _job("https://x/24")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers=_scrapers(indeed_jobs=[job]))
+    assert seen[-1]["dropped"] == 1
