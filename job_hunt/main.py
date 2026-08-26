@@ -84,7 +84,7 @@ def _open_store():
     return conn, ensure_user(conn, DEFAULT_USER)
 
 
-def _announce_step(step: dict, printed_steps: set[tuple[str, str]]) -> None:
+def _announce_step(step: dict, printed_steps: set[tuple[str, str, str]]) -> None:
     """Print one scrape step's result the first time it's seen done/failed.
 
     `printed_steps` is owned by the caller and must persist across calls —
@@ -94,14 +94,17 @@ def _announce_step(step: dict, printed_steps: set[tuple[str, str]]) -> None:
     step dict itself; it has to live in a set the caller keeps alive for the
     whole run.
     """
-    key = (step["source"], step["role"])
+    key = (step["source"], step["role"], step.get("lane", "worldwide"))
+    label = step["source"]
+    if step.get("lane") == "local":
+        label += " · local"
     if step.get("state") == "done" and key not in printed_steps:
         printed_steps.add(key)
-        print(f"  {step['source']} / {step['role']}...")
+        print(f"  {label} / {step['role']}...")
         print(f"    -> {step['found']} fetched")
     elif step.get("state") == "failed" and key not in printed_steps:
         printed_steps.add(key)
-        print(f"  {step['source']} / {step['role']}... FAILED")
+        print(f"  {label} / {step['role']}... FAILED")
 
 
 logging.basicConfig(level=logging.INFO,
@@ -249,7 +252,7 @@ def run_pipeline(config: dict) -> None:
               f"{len(resumes)} resume(s)...")
         return new_jobs
 
-    printed_steps: set[tuple[str, str]] = set()
+    printed_steps: set[tuple[str, str, str]] = set()
 
     def _announce(event: dict) -> None:
         """Print each scrape step as it finishes, as this always has."""

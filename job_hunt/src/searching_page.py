@@ -90,7 +90,7 @@ function draw(list) {{
   steps.innerHTML = list.map(s => `
     <div class="step" data-state="${{s.state}}">
       <span class="dot"></span>
-      <span class="name">${{esc(s.source)}} / ${{esc(s.role)}}</span>
+      <span class="name">${{esc(s.source)}}${{s.lane === 'local' ? ' · local' : ''}} / ${{esc(s.role)}}</span>
       <span class="found">${{s.state === 'failed' ? 'failed'
         : s.state === 'pending' ? 'waiting'
         : s.found + ' found'}}</span>

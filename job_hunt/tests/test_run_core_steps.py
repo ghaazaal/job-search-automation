@@ -43,3 +43,16 @@ def test_steps_are_grouped_by_role_so_the_screen_reads_in_order():
     steps = plan_steps(["BI Developer", "Data Analyst"])
     assert [s["role"] for s in steps] == [
         "BI Developer", "BI Developer", "Data Analyst", "Data Analyst"]
+
+
+def test_a_location_doubles_the_plan_with_a_local_lane():
+    steps = plan_steps(["BI Developer"], local=True)
+    assert len(steps) == 4
+    assert [s["lane"] for s in steps] == ["worldwide", "worldwide",
+                                          "local", "local"]
+
+
+def test_without_a_location_the_plan_is_worldwide_only():
+    steps = plan_steps(["BI Developer"])
+    assert len(steps) == 2
+    assert all(s["lane"] == "worldwide" for s in steps)

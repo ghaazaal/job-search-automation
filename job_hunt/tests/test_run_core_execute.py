@@ -105,7 +105,7 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    assert len(seen[0]["steps"]) == 2      # one role, two sources
+    assert len(seen[0]["steps"]) == 4      # one role, two sources, two lanes
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -159,7 +159,7 @@ def test_duplicates_within_one_scrape_collapse(conn, user, resume):
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         linkedin_jobs=[_job("https://x/1")]))
 
-    assert result.scraped == 2
+    assert result.scraped == 4  # two lanes each finding the same job
     assert result.kept == 1
 
 
@@ -378,3 +378,30 @@ def test_dropped_jobs_never_reach_the_enrich_hook(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE, enrich=enrich,
             scrapers=_scrapers(indeed_jobs=[dropped_job, survivor]))
     assert handed == ["https://x/31"]
+
+
+def test_the_local_lane_searches_the_actual_place_with_all_modes(conn, user, resume):
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append({"location": kwargs.get("location"),
+                      "work_modes": tuple(kwargs.get("work_modes") or ())})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    local = [c for c in calls
+             if c["work_modes"] == ("remote", "hybrid", "onsite")]
+    assert len(local) == 2          # one per source
+    assert all(c["location"] == "Toronto, ON" for c in local)
+
+
+def test_no_location_means_no_local_lane(conn, user, resume):
+    profile = {**_PROFILE, "location": ""}
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], profile,
+            on_progress=seen.append, scrapers=_scrapers())
+    assert len(seen[0]["steps"]) == 2

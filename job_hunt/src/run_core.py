@@ -38,15 +38,21 @@ def search_titles(resumes: list[dict]) -> list[str]:
     return titles
 
 
-def plan_steps(titles: list[str]) -> list[dict]:
+def plan_steps(titles: list[str], sources=SOURCES,
+               local: bool = False) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
-    Grouped by role rather than by source so the progress screen reads down
-    one role at a time, which is the order they actually run in.
+    Grouped by role, worldwide lane before local, which is the order they
+    actually run in. The local lane searches the profile's actual place
+    with every work mode — it exists so target-country on-site/hybrid
+    jobs arrive at all instead of by accident.
     """
-    return [{"source": name, "role": title, "state": "pending", "found": 0}
+    lanes = ("worldwide",) + (("local",) if local else ())
+    return [{"source": name, "role": title, "lane": lane,
+             "state": "pending", "found": 0}
             for title in titles
-            for name, _, _ in SOURCES]
+            for lane in lanes
+            for name, _, _ in sources]
 
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "vocabulary.yaml"
@@ -115,7 +121,8 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     country    = profile.get("country") or "us"
     work_modes = profile.get("work_modes") or ["remote"]
 
-    steps = plan_steps(titles)
+    steps = plan_steps(titles,
+                      local=bool((profile.get("location") or "").strip()))
     scraped_total = 0
     dropped_total = 0
 
@@ -135,12 +142,19 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         actor_key, actor_default = next(
             (key, default) for source, key, default in SOURCES
             if source == name)
+        if step["lane"] == "local":
+            lane_location = (profile.get("location") or "").strip()
+            lane_modes = ("remote", "hybrid", "onsite")
+        else:
+            lane_location = location
+            lane_modes = work_modes
         try:
             jobs = scrapers[name](
                 step["role"], step["role"],
                 apify_cfg.get(actor_key, actor_default),
                 days_posted, jobs_per_cat, run_timeout,
-                location=location, country=country, work_modes=work_modes)
+                location=lane_location, country=country,
+                work_modes=lane_modes)
         except Exception as exc:
             # One source failing must not throw away the other's results.
             logger.warning("%s/%s failed: %s", name, step["role"], exc)
