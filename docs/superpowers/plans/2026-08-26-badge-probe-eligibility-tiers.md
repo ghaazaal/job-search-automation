@@ -292,6 +292,13 @@ git commit -m "feat: cards say whether eligibility was verified, never imply it"
 
 ---
 
+> **Correction found during Task 4 review:** `local_evidence` also
+> silences the `wrong_board` flag (`_constraints` gains the parameter) —
+> otherwise a locally-verified job would rank verified while its own
+> sentence said "not verified for your country". Same principle as the
+> eligible verdict suppressing the board flag in Ship 4. Pinned by
+> `test_local_evidence_silences_the_board_flag`.
+
 ### Task 5: probe steps — planned, scraped, labeled
 
 **Files:**
