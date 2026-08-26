@@ -56,3 +56,17 @@ def test_without_a_location_the_plan_is_worldwide_only():
     steps = plan_steps(["BI Developer"])
     assert len(steps) == 2
     assert all(s["lane"] == "worldwide" for s in steps)
+
+
+def test_probes_append_two_linkedin_steps_per_role():
+    steps = plan_steps(["BI Developer"], probes=True)
+    lanes = [(s["source"], s["lane"]) for s in steps]
+    assert lanes == [("Indeed", "worldwide"), ("LinkedIn", "worldwide"),
+                     ("LinkedIn", "probe hybrid"),
+                     ("LinkedIn", "probe onsite")]
+
+
+def test_probes_require_linkedin_to_be_enabled():
+    indeed_only = tuple(s for s in SOURCES if s[0] == "Indeed")
+    steps = plan_steps(["BI Developer"], sources=indeed_only, probes=True)
+    assert all(not s["lane"].startswith("probe") for s in steps)

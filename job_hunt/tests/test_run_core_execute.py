@@ -105,7 +105,7 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    assert len(seen[0]["steps"]) == 4      # one role, two sources, two lanes
+    assert len(seen[0]["steps"]) == 6      # two lanes + two probes
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -404,7 +404,7 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
-    assert len(seen[0]["steps"]) == 2
+    assert len(seen[0]["steps"]) == 4
 
 
 def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
@@ -432,3 +432,43 @@ def test_a_missing_sources_key_enables_everything(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
     assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}
+
+
+def test_probe_results_are_evidence_not_candidates(conn, user, resume):
+    """Probe jobs are never scored or stored; their step still reports
+    a found count."""
+    probe_job = _job("https://x/probe1")
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        modes = tuple(kwargs.get("work_modes") or ())
+        if modes in (("hybrid",), ("onsite",)):
+            return [probe_job]
+        return []
+
+    seen = []
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     on_progress=seen.append,
+                     scrapers={"Indeed": spy, "LinkedIn": spy})
+    assert result.kept == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM role").fetchone()["n"] == 0
+    probe_steps = [s for s in seen[-1]["steps"]
+                   if s["lane"].startswith("probe")]
+    assert [s["found"] for s in probe_steps] == [1, 1]
+    assert result.scraped == 0      # probes don't inflate the count
+
+
+def test_probe_calls_are_worldwide_and_single_mode(conn, user, resume):
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append((kwargs.get("location"),
+                      tuple(kwargs.get("work_modes") or ())))
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+    probe_calls = [c for c in calls if c[1] in (("hybrid",), ("onsite",))]
+    assert len(probe_calls) == 2
+    assert all(loc == "" for loc, _ in probe_calls)

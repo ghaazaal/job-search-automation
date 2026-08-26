@@ -70,3 +70,23 @@ def test_announce_step_prints_both_lanes_of_the_same_source_and_role(capsys):
              if "BI Developer" in line]
     assert len(lines) == 2
     assert any("local" in line for line in lines)
+
+
+def test_announce_step_labels_a_probe_lane(capsys):
+    """Any lane other than 'worldwide' gets a '· <lane>' suffix — probe
+    lanes included, not just 'local'. A worldwide step stays unsuffixed."""
+    printed_steps: set = set()
+    probe_step = {"source": "LinkedIn", "role": "BI Developer",
+                  "lane": "probe hybrid", "state": "done", "found": 3}
+    worldwide_step = {"source": "LinkedIn", "role": "BI Developer",
+                      "lane": "worldwide", "state": "done", "found": 5}
+
+    main._announce_step(dict(probe_step), printed_steps)
+    main._announce_step(dict(worldwide_step), printed_steps)
+
+    output = capsys.readouterr().out
+    lines = [line for line in output.splitlines()
+             if "BI Developer" in line]
+    assert len(lines) == 2
+    assert any("· probe hybrid" in line for line in lines)
+    assert not any("worldwide" in line for line in lines)

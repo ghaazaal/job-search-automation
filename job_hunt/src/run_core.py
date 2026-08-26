@@ -39,20 +39,36 @@ def search_titles(resumes: list[dict]) -> list[str]:
 
 
 def plan_steps(titles: list[str], sources=SOURCES,
-               local: bool = False) -> list[dict]:
+               local: bool = False, probes: bool = False) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
     actually run in. The local lane searches the profile's actual place
     with every work mode — it exists so target-country on-site/hybrid
     jobs arrive at all instead of by accident.
+
+    Probes are evidence-gathering searches, not candidate lanes: two extra
+    LinkedIn-only searches per role (hybrid, onsite), appended after the
+    real lanes. LinkedIn's search filter respects the workplace badge
+    server-side even though per-item output doesn't carry it, so a job's
+    presence in a filtered probe result is evidence of its badge. They run
+    only when LinkedIn survives `sources` — there is nothing to probe
+    otherwise.
     """
     lanes = ("worldwide",) + (("local",) if local else ())
-    return [{"source": name, "role": title, "lane": lane,
+    steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
             for title in titles
             for lane in lanes
             for name, _, _ in sources]
+
+    if probes and any(name == "LinkedIn" for name, _, _ in sources):
+        for title in titles:
+            for lane in ("probe hybrid", "probe onsite"):
+                steps.append({"source": "LinkedIn", "role": title,
+                              "lane": lane, "state": "pending", "found": 0})
+
+    return steps
 
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "vocabulary.yaml"
@@ -99,7 +115,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     from .scoring.matching import has_term, location_country, work_mode
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
-    from .tracker.dedup import dedupe
+    from .tracker.dedup import dedupe, normalize_url
 
     if not resumes:
         raise ValueError("no active resume on file, so there is nothing to "
@@ -128,9 +144,11 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                     if gates.get(entry[0].lower(), True))
 
     steps = plan_steps(titles, sources=sources,
-                      local=bool((profile.get("location") or "").strip()))
+                      local=bool((profile.get("location") or "").strip()),
+                      probes=True)
     scraped_total = 0
     dropped_total = 0
+    probe_badges: dict[str, str] = {}
 
     def report(stage: str) -> None:
         emit({"stage": stage, "steps": [dict(s) for s in steps],
@@ -148,6 +166,29 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         actor_key, actor_default = next(
             (key, default) for source, key, default in sources
             if source == name)
+
+        if step["lane"].startswith("probe"):
+            probe_mode = step["lane"].split(" ", 1)[1]      # hybrid|onsite
+            try:
+                found = scrapers[name](
+                    step["role"], step["role"],
+                    apify_cfg.get(actor_key, actor_default),
+                    days_posted, jobs_per_cat, run_timeout,
+                    location="", country=country,
+                    work_modes=(probe_mode,))
+            except Exception as exc:
+                logger.warning("%s/%s failed: %s", name, step["role"], exc)
+                step["state"] = "failed"
+                step["found"] = 0
+            else:
+                step["state"] = "done"
+                step["found"] = len(found)
+                for job in found:
+                    probe_badges.setdefault(
+                        normalize_url(job.get("url") or ""), probe_mode)
+            report("scraping")
+            continue
+
         if step["lane"] == "local":
             lane_location = (profile.get("location") or "").strip()
             lane_modes = ("remote", "hybrid", "onsite")
