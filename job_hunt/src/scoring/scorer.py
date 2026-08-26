@@ -89,7 +89,8 @@ class Scorer:
                                              vocab.get("mismatch") or {})
 
         penalty, fired, geo_verdict = self._constraints(
-            body, jd_band, my_band, scraped_under, mode_mismatch)
+            body, jd_band, my_band, scraped_under, mode_mismatch,
+            local_evidence)
         if mismatch:
             fired.append("little overlap with the tools this post names")
 
@@ -157,6 +158,7 @@ class Scorer:
         self, body: str, jd_band: str, my_band: str,
         scraped_under: str | None = None,
         mode_mismatch: str | None = None,
+        local_evidence: bool = False,
     ) -> tuple[int, list[str], str]:
         """Employment constraints that rule a posting out whatever your stack.
 
@@ -187,13 +189,17 @@ class Scorer:
             penalty += cfg.get("geo_restricted", 30)
             fired.append(f"remote, but open only to {detail}")
         elif (verdict == "unknown" and scraped_under and self._user_country
-              and scraped_under.strip().lower() != self._user_country):
+              and scraped_under.strip().lower() != self._user_country
+              and not local_evidence):
             # The Indeed fallback searched the us board because the actor
             # rejected the user's country. That is uncertainty, not a stated
             # restriction — softer penalty, wording that claims no more than
             # we know, and never on top of anything the text did state.
             # "eligible" lands here too: positive evidence beats board
-            # uncertainty, so nothing fires at all.
+            # uncertainty, so nothing fires at all. And local evidence (the
+            # job is in the user's own place) needs no board warning
+            # either — positive evidence beats board uncertainty, the same
+            # rule the eligible verdict follows.
             penalty += cfg.get("wrong_board", 10)
             fired.append("found via Indeed's US board, "
                          "not verified for your country")

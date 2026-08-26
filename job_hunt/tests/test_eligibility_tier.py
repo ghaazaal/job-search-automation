@@ -68,3 +68,14 @@ def test_best_match_passes_local_evidence_through():
     e = _scorer().best_match("BI Developer", _JD, [_RESUME],
                              local_evidence=True)
     assert e["eligibility_verified"] is True
+
+
+def test_local_evidence_silences_the_board_flag():
+    """A job verified as local needs no 'found via the US board' warning —
+    positive evidence beats board uncertainty, and the card must not rank
+    verified while its sentence claims otherwise."""
+    e = _scorer().score_job("BI Developer", _JD, _RESUME,
+                            scraped_under="us", local_evidence=True)
+    assert e["eligibility_verified"] is True
+    assert "US board" not in e["reason"]
+    assert "open to your location" in e["reason"]
