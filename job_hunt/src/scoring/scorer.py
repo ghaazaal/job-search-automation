@@ -56,7 +56,8 @@ class Scorer:
 
     def score_job(self, title: str, description: str, resume: dict,
                   scraped_under: str | None = None,
-                  mode_mismatch: str | None = None) -> dict:
+                  mode_mismatch: str | None = None,
+                  local_evidence: bool = False) -> dict:
         """Evidence for one posting judged against one resume."""
         vocab = self._vocab
         lowered = (title or "").lower()
@@ -87,8 +88,8 @@ class Scorer:
         mismatch = matching.mismatch_penalty(description, tools, mine,
                                              vocab.get("mismatch") or {})
 
-        penalty, fired = self._constraints(body, jd_band, my_band,
-                                           scraped_under, mode_mismatch)
+        penalty, fired, geo_verdict = self._constraints(
+            body, jd_band, my_band, scraped_under, mode_mismatch)
         if mismatch:
             fired.append("little overlap with the tools this post names")
 
@@ -119,6 +120,10 @@ class Scorer:
             "tailoring":            _tailoring(match_score),
             "resume_id":            resume.get("id"),
             "resume_label":         resume.get("label") or "",
+            # Internal + stored: positive evidence the user can take the
+            # job. Never rendered as a number — reason.py words it.
+            "eligibility_verified": bool(local_evidence
+                                         or geo_verdict == "eligible"),
         }
         # A band is never handed out without its sentence.
         evidence["reason"] = compose_reason(evidence)
@@ -127,7 +132,8 @@ class Scorer:
     def best_match(self, title: str, description: str,
                    resumes: list[dict],
                    scraped_under: str | None = None,
-                   mode_mismatch: str | None = None) -> dict:
+                   mode_mismatch: str | None = None,
+                   local_evidence: bool = False) -> dict:
         """Score against every active resume and keep the strongest.
 
         Someone with a Data Engineer resume and a BI Developer resume should
@@ -142,14 +148,22 @@ class Scorer:
             raise ValueError("cannot score without at least one active resume")
         scored = [self.score_job(title, description, resume,
                                  scraped_under=scraped_under,
-                                 mode_mismatch=mode_mismatch)
+                                 mode_mismatch=mode_mismatch,
+                                 local_evidence=local_evidence)
                   for resume in resumes]
         return max(scored, key=lambda evidence: evidence["match_score"])
 
-    def _constraints(self, body: str, jd_band: str, my_band: str,
-                     scraped_under: str | None = None,
-                     mode_mismatch: str | None = None) -> tuple[int, list[str]]:
-        """Employment constraints that rule a posting out whatever your stack."""
+    def _constraints(
+        self, body: str, jd_band: str, my_band: str,
+        scraped_under: str | None = None,
+        mode_mismatch: str | None = None,
+    ) -> tuple[int, list[str], str]:
+        """Employment constraints that rule a posting out whatever your stack.
+
+        Returns `(penalty, fired, verdict)` — `verdict` is the geo-verdict
+        string (`eligible` / `restricted` / `excluded` / `unknown`) so
+        `score_job` can use it as positive eligibility evidence.
+        """
         cfg = self._vocab["penalties"]
         penalty = 0
         fired: list[str] = []
@@ -200,4 +214,4 @@ class Scorer:
             penalty += cfg.get("exec_penalty", 10)
             fired.append("executive role")
 
-        return penalty, fired
+        return penalty, fired, verdict

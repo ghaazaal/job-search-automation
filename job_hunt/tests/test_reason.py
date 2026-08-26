@@ -44,9 +44,18 @@ def test_penalties_are_stated_plainly():
     assert "clearance" in r
 
 
-def test_clean_run_says_no_restrictions_found():
+def test_a_verified_clean_run_says_open_to_your_location():
+    r = compose_reason(_ev(matched=["dbt"], penalties=[],
+                           eligibility_verified=True))
+    assert "open to your location" in r
+
+
+def test_an_unverified_clean_run_says_not_verified():
+    """No penalties fired, but nothing positively confirmed eligibility
+    either — unchecked must not read as fine."""
     r = compose_reason(_ev(matched=["dbt"], penalties=[]))
-    assert "no visa or clearance" in r
+    assert "location eligibility not verified" in r
+    assert "no visa or clearance limits found" not in r
 
 
 def test_no_description_uses_reduced_confidence_wording():
