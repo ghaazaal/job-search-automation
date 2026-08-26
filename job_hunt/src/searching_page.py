@@ -130,7 +130,10 @@ async function tick() {{
     note.className = 'note bad';
   }} else {{
     const n = (body.progress && body.progress.scraped) || 0;
-    note.textContent = n ? n + ' found so far' : 'starting';
+    const dropped = (body.progress && body.progress.dropped) || 0;
+    note.textContent = !n ? 'starting'
+      : dropped > 0 ? n + ' found so far · ' + dropped + ' hidden (on-site elsewhere)'
+      : n + ' found so far';
     note.className = 'note';
   }}
   setTimeout(tick, POLL);

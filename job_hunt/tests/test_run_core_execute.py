@@ -302,3 +302,79 @@ def test_the_dropped_count_reaches_progress(conn, user, resume):
             on_progress=seen.append,
             scrapers=_scrapers(indeed_jobs=[job]))
     assert seen[-1]["dropped"] == 1
+
+
+def test_a_decorated_remote_location_still_vetoes(conn, user, resume):
+    """'Remote, US' is Indeed's own we-don't-know placeholder — it must
+    land on the veto side, not resolve to a country and drop."""
+    job = _job("https://x/26")
+    job["location"] = "Remote, US"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_the_users_own_city_is_local_without_a_country(conn, user, resume):
+    """'Toronto, ON' parses to no country, but it IS Toronto — the
+    profile's own city keeps the job clean, stamp intact."""
+    job = _job("https://x/27")
+    job["location"] = "Toronto, ON"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_a_location_header_line_rescues_a_perks_mention(conn, user, resume):
+    """The reviewed real-world wrong drop: 'Location: Remote' prose plus
+    'hybrid work options' in a perks list — conflict claims nothing."""
+    job = _job("https://x/28")
+    job["location"] = "Cincinnati, OH"
+    job["description"] += (" Location: Remote. Travel 2-5 weeks per year."
+                           " We offer flexible time off, hybrid work"
+                           " options, and a 401k plan.")
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+
+
+def test_the_dropped_count_is_persisted_on_the_run_row(conn, user, resume):
+    job = _job("https://x/29")
+    job["location"] = "Bengaluru, Karnataka, India"
+    job["description"] += " Onsite work required."
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(indeed_jobs=[job]))
+    assert conn.execute("SELECT dropped FROM run WHERE id = ?",
+                        (run_id,)).fetchone()["dropped"] == 1
+
+
+def test_dropped_jobs_never_reach_the_enrich_hook(conn, user, resume):
+    handed = []
+
+    def enrich(jobs):
+        handed.extend(j["url"] for j in jobs)
+        return jobs
+
+    dropped_job = _job("https://x/30")
+    dropped_job["location"] = "Bengaluru, Karnataka, India"
+    dropped_job["description"] += " Onsite work required."
+    # A distinct company: dedupe's fingerprint is company+title, deliberately
+    # location-blind (remote postings mirror per-country), so two jobs with
+    # the default _job() company/title would collapse into one candidate
+    # before the ladder ever ran, regardless of this test's intent.
+    survivor = _job("https://x/31", company="Widgets Inc")
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE, enrich=enrich,
+            scrapers=_scrapers(indeed_jobs=[dropped_job, survivor]))
+    assert handed == ["https://x/31"]

@@ -313,6 +313,7 @@ work_mode:
     - "work from home"
     - "work from anywhere"
     - "telecommute"
+    - "location: remote"  # JD header line; rescues perks-list "hybrid work options" via conflict→None
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"

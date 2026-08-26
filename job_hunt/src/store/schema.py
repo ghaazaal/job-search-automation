@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS run (
     status      TEXT NOT NULL CHECK (status IN ('RUNNING','OK','FAILED')),
     scraped     INTEGER NOT NULL DEFAULT 0,
     kept        INTEGER NOT NULL DEFAULT 0,
+    dropped     INTEGER NOT NULL DEFAULT 0,
     stage       TEXT,
     progress    TEXT NOT NULL DEFAULT '{}',
     error       TEXT
@@ -156,6 +157,8 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
     ),
     4: (
         ("role", "work_mode", "ALTER TABLE role ADD COLUMN work_mode TEXT"),
+        ("run", "dropped",
+         "ALTER TABLE run ADD COLUMN dropped INTEGER NOT NULL DEFAULT 0"),
     ),
 }
 

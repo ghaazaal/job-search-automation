@@ -77,9 +77,10 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         run_id:      an already-open RUNNING run. This never creates one.
         on_progress: called with the whole progress payload after each step.
         scrapers:    {source name: scrape callable}. Injected by tests.
-        enrich:      optional hook handed the deduped jobs before scoring,
-                     returning the jobs to score. The terminal path uses it
-                     for company enrichment; the browser run passes nothing.
+        enrich:      optional hook handed the jobs that survived the
+                     work-mode/geo policy ladder, before scoring, returning
+                     the jobs to score. The terminal path uses it for
+                     company enrichment; the browser run passes nothing.
 
     Raises:
         ValueError: when there is no active resume, or none of them name a
@@ -89,7 +90,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     import yaml
 
     from .pipeline_store import persist_run
-    from .scoring.matching import location_country, work_mode
+    from .scoring.matching import has_term, location_country, work_mode
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
@@ -156,24 +157,25 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
 
-    if enrich is not None:
-        new_jobs = enrich(new_jobs)
-
     # Work-mode policy. The one user-approved exception to flag-never-
     # hide: a posting that states a mode the user did not search for,
     # located in a country that is not theirs, is dropped — bounded by
     # requiring BOTH the explicit phrase AND a confidently-parsed
     # country. Local ones are workable in person and kept clean;
     # unplaceable ones are flagged, because a silent drop cannot be
-    # justified without knowing where the job is.
+    # justified without knowing where the job is. Runs before `enrich`
+    # so a dropped job never costs a company-enrichment lookup.
     with open(VOCABULARY_PATH, encoding="utf-8") as handle:
         vocab = yaml.safe_load(handle)
     mode_cfg = vocab.get("work_mode") or {}
     loc_cfg = vocab.get("eligibility") or {}
+    # Same fallback the scrape itself uses (see `work_modes` above) — an
+    # empty profile silently disabling the policy would also leave the
+    # scorer's own "remote" fallback dead code.
     user_modes = tuple(str(m).strip().lower()
-                       for m in (profile.get("work_modes") or [])
-                       if str(m).strip())
+                       for m in work_modes if str(m).strip())
     user_country = (profile.get("country") or "").strip().lower()
+    profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
 
     kept_jobs = []
     for job in new_jobs:
@@ -183,11 +185,20 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             job["work_mode"] = mode
         if mode and user_modes and mode not in user_modes:
             raw_location = (job.get("location") or "").strip().lower()
-            if raw_location == "remote":
-                # The location field says remote (actor-tagged) while the
-                # prose says otherwise — conflicting evidence, so claim
-                # nothing: no drop, no flag, no stored mode.
+            if has_term("remote", raw_location):
+                # The location field carrying "remote" anywhere is the
+                # actor's own tag on where the job is — it beats a stray
+                # prose phrase, whatever the actor appended after it
+                # ("Remote, US" is Indeed's own placeholder, "Remote -
+                # Canada", "Toronto, ON (Remote)"). Conflicting evidence
+                # claims nothing: no drop, no flag, no stored mode.
                 job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
+            if profile_city and has_term(profile_city, raw_location):
+                # The user's own city named in the job's location is
+                # local, whatever the country parser thinks — "Toronto,
+                # ON" has no country to parse, but it IS Toronto.
                 kept_jobs.append(job)
                 continue
             place = location_country(job.get("location") or "", loc_cfg)
@@ -198,6 +209,9 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                 job["_mode_mismatch"] = mode
         kept_jobs.append(job)
     new_jobs = kept_jobs
+
+    if enrich is not None:
+        new_jobs = enrich(new_jobs)
 
     report("scoring")
     scorer = Scorer(config, VOCABULARY_PATH,
@@ -218,7 +232,8 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                                         mode_mismatch=mode_mismatch)})
 
     report("storing")
-    persist_run(conn, user_id, run_id, scored_jobs, scraped_total)
+    persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
+               dropped=dropped_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total,

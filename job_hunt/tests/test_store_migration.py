@@ -186,3 +186,14 @@ def test_version_four_adds_work_mode_and_old_rows_stay_honest(tmp_path):
     assert "work_mode" in _columns(conn, "role")
     assert conn.execute(
         "SELECT work_mode FROM role").fetchone()["work_mode"] is None
+
+
+def test_version_four_adds_dropped_and_old_runs_default_to_zero(tmp_path):
+    """A run recorded before the policy ladder existed dropped nothing it
+    knew about — 0, not NULL, since 'dropped' is a count, not a fact that
+    could be missing."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    assert "dropped" in _columns(conn, "run")
+    assert conn.execute(
+        "SELECT dropped FROM run").fetchone()["dropped"] == 0
