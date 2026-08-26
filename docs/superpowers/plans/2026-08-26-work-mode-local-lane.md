@@ -1160,6 +1160,15 @@ Run it via PowerShell so the token (a Windows user env var) is inherited:
 powershell -Command "$env:APIFY_TOKEN=[Environment]::GetEnvironmentVariable('APIFY_TOKEN','User'); python <scratchpad-path>\diag_indeed.py"
 ```
 
+ALSO check while you have raw output: the Task 5 review found stored
+descriptions with RUN-TOGETHER text ("Location: RemoteTravel Required") —
+`extract_description` in `src/scrapers/base.py` replaces tags with a
+space, so run-together text means the SOURCE field already concatenates
+blocks. Inspect whether the raw item's description-ish field has the
+same mangling; if `extract_description` is at fault (e.g. some path not
+inserting separators), report it — a one-line fix there rescues the
+accepted Cincinnati-class wrong drops.
+
 Decide from the output: does ANY field carry the posting body (a long
 string, or an HTML body, under a key `_DESCRIPTION_KEYS` in
 `src/scrapers/base.py` does not list)?
