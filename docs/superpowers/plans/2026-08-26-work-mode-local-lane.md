@@ -126,6 +126,8 @@ At the end of the file:
 # teams", bare "on-site" on "on-site gym". Every entry must be
 # role-anchored. Language facts only — whether a mode suits the user
 # lives in their profile.
+# Reviewed out: "no remote work" (…experience required), "office-based"
+# (…clients), "hybrid model" (ML term), "in-office days" (…are optional).
 work_mode:
   remote_phrases:
     - "fully remote"
@@ -133,34 +135,45 @@ work_mode:
     - "remote position"
     - "remote role"
     - "remote-first"
+    - "remote-only"
     - "work remotely"
     - "work from home"
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
-    - "hybrid model"
     - "hybrid working"
     - "hybrid position"
     - "hybrid schedule"
     - "days per week in the office"
     - "days a week in the office"
-    - "in-office days"
   onsite_phrases:
     - "on-site role"
     - "onsite role"
     - "on-site position"
     - "onsite position"
-    - "office-based"
     - "on-site only"
     - "onsite only"
     - "in-office role"
-    - "no remote work"
+    - "must work onsite"
+    - "onsite work required"
 ```
+
+> **Correction found during Task 1 code review** (probed with the consumer's
+> own regex against realistic JD text): four given phrases had reproduced
+> false positives and were removed — "no remote work" ("…experience
+> required"), "office-based" ("…clients"), "hybrid model" (ML vocabulary:
+> "a hybrid model combining ARIMA…" — this product's own audience),
+> "in-office days" ("…are completely optional"). Three clean role-anchored
+> phrases added: "remote-only", "must work onsite", "onsite work required".
+> The review's other Critical — nine `us_states` codes are also country
+> ISO codes ("Chennai, IN", "Toronto, CA") — is fixed in Task 2's
+> `location_country` rule, not the data: an ambiguous token claims
+> nothing.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_vocabulary.py -v`
-Expected: all 13 PASS.
+Expected: all 11 PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -193,7 +206,8 @@ _MODE_CFG = {
     "remote_phrases": ["fully remote", "remote position", "work from home"],
     "hybrid_phrases": ["hybrid work", "hybrid role",
                        "days a week in the office"],
-    "onsite_phrases": ["on-site role", "office-based", "no remote work"],
+    "onsite_phrases": ["on-site role", "onsite work required",
+                       "must work onsite"],
 }
 
 _LOC_CFG = {
@@ -204,7 +218,7 @@ _LOC_CFG = {
         "ge": ["georgia"],
         "in": ["india"],
     },
-    "us_states": ["ny", "wa", "ga", "tx"],
+    "us_states": ["ny", "wa", "ga", "tx", "in"],
 }
 
 
@@ -214,7 +228,7 @@ def test_each_phrase_category_is_detected():
     assert work_mode("this is a fully remote team.", _MODE_CFG) == "remote"
     assert work_mode("hybrid work, 2 days a week in the office.",
                      _MODE_CFG) == "hybrid"
-    assert work_mode("an office-based analyst position.",
+    assert work_mode("onsite work required for this analyst position.",
                      _MODE_CFG) == "onsite"
 
 
@@ -274,6 +288,14 @@ def test_a_state_code_inside_a_word_does_not_fire():
     assert location_country("Acme Company HQ", _LOC_CFG) is None
 
 
+def test_a_state_code_that_is_also_a_country_code_claims_nothing():
+    """'Chennai, IN' abbreviates India; 'Gary, IN' abbreviates Indiana.
+    The bare token cannot tell them apart, so it must claim nothing —
+    a wrong 'us' here corrupts the drop decision."""
+    assert location_country("Chennai, IN", _LOC_CFG) is None
+    assert location_country("Gary, IN", _LOC_CFG) is None
+
+
 def test_empty_config_is_silent():
     assert location_country("New York, NY", {}) is None
 ```
@@ -317,8 +339,10 @@ def location_country(location: str, cfg: dict) -> str | None:
     "Tbilisi, Georgia" the country). Bare "us" is allowed here: a
     location string is not prose, so the pronoun hazard geo_verdict
     guards against does not apply. With no country name, any token that
-    is a 2-letter code in `us_states` resolves to "us". Anything else —
-    including "Remote" — is None: no claim.
+    is a 2-letter code in `us_states` resolves to "us" — UNLESS that token
+    is also a country ISO code ("Chennai, IN" abbreviates India, "Gary,
+    IN" Indiana; the token cannot tell them apart, so it claims nothing).
+    Anything else — including "Remote" — is None: no claim.
     """
     location = (location or "").lower()
     if not location:
@@ -336,27 +360,17 @@ def location_country(location: str, cfg: dict) -> str | None:
     if best:
         return best[1]
     states = {str(s).strip().lower() for s in cfg.get("us_states") or []}
-    if any(token in states for token in re.findall(r"[a-z]{2}", location)
-           if re.search(r"(?<![a-z])" + token + r"(?![a-z])", location)):
-        return "us"
-    return None
-```
-
-Note on the state check: the comprehension form above double-matches; implement it as the simpler, correct loop —
-
-```python
+    codes = {str(c).strip().lower() for c in cfg.get("countries") or {}}
     for token in re.findall(r"(?<![a-z])[a-z]{2}(?![a-z])", location):
-        if token in states:
+        if token in states and token not in codes:
             return "us"
     return None
 ```
 
-Use the loop form, not the comprehension. (The plan shows both so the reviewer can see the intent; ship only the loop.)
-
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_work_mode.py tests/test_matching.py tests/test_geo_verdict.py -v`
-Expected: all PASS (13 new + existing untouched).
+Expected: all PASS (14 new + existing untouched).
 
 - [ ] **Step 5: Commit**
 
@@ -595,7 +609,7 @@ Append to `job_hunt/tests/test_run_core_execute.py` (`_PROFILE` is `location "To
 def test_a_foreign_onsite_job_is_dropped_not_stored(conn, user, resume):
     job = _job("https://x/20")
     job["location"] = "Bengaluru, Karnataka, India"
-    job["description"] += " This is an office-based position."
+    job["description"] += " Onsite work required."
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[job]))
@@ -646,7 +660,7 @@ def test_the_dropped_count_reaches_progress(conn, user, resume):
     seen = []
     job = _job("https://x/24")
     job["location"] = "Bengaluru, Karnataka, India"
-    job["description"] += " This is an office-based position."
+    job["description"] += " Onsite work required."
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append,
@@ -1171,7 +1185,7 @@ from src.scoring.matching import location_country, work_mode
 vocab = yaml.safe_load(open('vocabulary.yaml', encoding='utf-8'))
 mode_cfg, loc_cfg = vocab['work_mode'], vocab['eligibility']
 for text, loc in [
-    ('This is an office-based position.', 'Bengaluru, Karnataka, India'),
+    ('Onsite work required.', 'Bengaluru, Karnataka, India'),
     ('Hybrid work, 2 days a week in the office.', 'Yerevan, Armenia'),
     ('Hybrid work, 2 days a week in the office.', 'Remote'),
     ('Experience with hybrid cloud required.', 'Singapore, Singapore'),
