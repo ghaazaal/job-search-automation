@@ -83,6 +83,7 @@ class RunResult:
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
+    badge_hits: int = 0
 
 
 def _default_scrapers() -> dict:
@@ -238,14 +239,38 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     user_country = (profile.get("country") or "").strip().lower()
     profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
 
+    badge_hits = 0
     kept_jobs = []
     for job in new_jobs:
-        mode = work_mode(f"{job.get('title') or ''}\n"
-                         f"{job.get('description') or ''}", mode_cfg)
+        text_mode = work_mode(f"{job.get('title') or ''}\n"
+                              f"{job.get('description') or ''}", mode_cfg)
+        badge = probe_badges.get(normalize_url(job.get("url") or ""))
+        if text_mode and badge and text_mode != badge:
+            # LinkedIn badges mislabel ~19% of the time (our own
+            # measurement) and text can lie too — disagreement claims
+            # nothing, the same rule every other conflict follows.
+            mode = None
+        elif badge and not text_mode:
+            mode = badge
+            badge_hits += 1
+        else:
+            if badge and text_mode == badge:
+                badge_hits += 1
+            mode = text_mode
         if mode:
             job["work_mode"] = mode
+
+        raw_location = (job.get("location") or "").strip().lower()
+        place = location_country(job.get("location") or "", loc_cfg)
+        local_ok = bool(
+            (profile_city and has_term(profile_city, raw_location))
+            or (place and user_country and place == user_country))
+        if local_ok:
+            # Positive evidence the job is in the user's own place —
+            # popped before scoring, handed to the scorer explicitly.
+            job["_local_ok"] = True
+
         if mode and user_modes and mode not in user_modes:
-            raw_location = (job.get("location") or "").strip().lower()
             if has_term("remote", raw_location):
                 # The location field carrying "remote" anywhere is the
                 # actor's own tag on where the job is — it beats a stray
@@ -256,13 +281,14 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                 job.pop("work_mode", None)
                 kept_jobs.append(job)
                 continue
-            if profile_city and has_term(profile_city, raw_location):
-                # The user's own city named in the job's location is
-                # local, whatever the country parser thinks — "Toronto,
-                # ON" has no country to parse, but it IS Toronto.
+            if local_ok:
+                # The user's own city named in the job's location, or a
+                # parsed country matching the user's, is local — workable
+                # in person whatever the country parser thinks otherwise
+                # ("Toronto, ON" has no country to parse, but it IS
+                # Toronto).
                 kept_jobs.append(job)
                 continue
-            place = location_country(job.get("location") or "", loc_cfg)
             if place and user_country and place != user_country:
                 dropped_total += 1
                 continue
@@ -285,12 +311,14 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         # persist_run, the store, or the terminal path's later steps.
         scraped_under = job.pop("_scraped_under", None)
         mode_mismatch = job.pop("_mode_mismatch", None)
+        local_ok = job.pop("_local_ok", False)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
                                         scraped_under=scraped_under,
-                                        mode_mismatch=mode_mismatch)})
+                                        mode_mismatch=mode_mismatch,
+                                        local_evidence=local_ok)})
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
@@ -298,4 +326,5 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total,
-                     scored_jobs=scored_jobs, steps=steps, titles=titles)
+                     scored_jobs=scored_jobs, steps=steps, titles=titles,
+                     badge_hits=badge_hits)

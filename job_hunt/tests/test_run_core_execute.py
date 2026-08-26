@@ -214,7 +214,11 @@ def test_a_foreign_restriction_reaches_the_stored_reason(conn, user, resume):
 
 
 def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user, resume):
-    tagged = {**_job("https://x/8"), "_scraped_under": "us"}
+    # Location must be unplaceable, not the fixture's default "Toronto,
+    # ON" — that verifies locally now (Task 6) and local evidence beats
+    # board uncertainty, silencing the very flag this test checks for.
+    tagged = {**_job("https://x/8"), "_scraped_under": "us",
+             "location": "Remote"}
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[tagged]))
@@ -472,3 +476,83 @@ def test_probe_calls_are_worldwide_and_single_mode(conn, user, resume):
     probe_calls = [c for c in calls if c[1] in (("hybrid",), ("onsite",))]
     assert len(probe_calls) == 2
     assert all(loc == "" for loc, _ in probe_calls)
+
+
+def _with_probe(probe_url, probe_mode, jobs):
+    """Scrapers where one probe lane returns a job at probe_url."""
+    def spy(category, title, actor_id, *args, **kwargs):
+        modes = tuple(kwargs.get("work_modes") or ())
+        if modes == (probe_mode,):
+            return [_job(probe_url)]
+        if modes in (("hybrid",), ("onsite",)):
+            return []
+        return list(jobs)
+    return {"Indeed": spy, "LinkedIn": spy}
+
+
+def test_the_salford_case_a_badge_hybrid_foreign_job_is_dropped(conn, user, resume):
+    """The ship's reason to exist: badge-only hybrid in another country.
+    Text says nothing; probe membership says hybrid; UK != ca -> drop."""
+    job = _job("https://x/salford")
+    job["location"] = "Salford, England, United Kingdom"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/salford", "hybrid",
+                                          [job]))
+    assert result.dropped == 1
+    assert result.kept == 0
+    assert result.badge_hits == 1
+
+
+def test_a_badge_conflicting_with_text_claims_nothing(conn, user, resume):
+    """LinkedIn badges mislabel ~19% of the time (our own measurement) —
+    badge says hybrid, text says fully remote: no claim, job kept."""
+    job = _job("https://x/conflict")
+    job["location"] = "Salford, England, United Kingdom"
+    job["description"] += " This is a fully remote role."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/conflict", "hybrid",
+                                          [job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_a_badge_hybrid_local_job_is_kept_clean(conn, user, resume):
+    job = _job("https://x/localbadge")
+    job["location"] = "Toronto, Ontario, Canada"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/localbadge", "hybrid",
+                                          [job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_local_country_verifies_eligibility(conn, user, resume):
+    job = _job("https://x/verified")
+    job["location"] = "Toronto, Ontario, Canada"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    evidence = result.scored_jobs[0]
+    assert evidence["eligibility_verified"] is True
+    assert "open to your location" in evidence["reason"]
+    assert conn.execute(
+        "SELECT eligibility_verified FROM role WHERE url = ?",
+        ("https://x/verified",)).fetchone()["eligibility_verified"] == 1
+
+
+def test_an_unplaceable_job_is_stored_unverified(conn, user, resume):
+    job = _job("https://x/unv")
+    job["location"] = "Remote"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    evidence = result.scored_jobs[0]
+    assert evidence["eligibility_verified"] is False
+    assert "location eligibility not verified" in evidence["reason"]
+    assert "_local_ok" not in evidence
