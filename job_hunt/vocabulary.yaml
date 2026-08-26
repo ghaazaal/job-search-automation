@@ -314,6 +314,8 @@ work_mode:
     - "work from anywhere"
     - "telecommute"
     - "location: remote"  # JD header line; rescues perks-list "hybrid work options" via conflict→None
+    - "work setup & shift: remote"  # BPO JD-header idiom
+    - "work setup: remote"  # BPO JD-header idiom
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
@@ -322,6 +324,8 @@ work_mode:
     - "hybrid schedule"
     - "days per week in the office"
     - "days a week in the office"
+    - "work setup & shift: hybrid"  # BPO JD-header idiom
+    - "work setup: hybrid"  # BPO JD-header idiom
   onsite_phrases:
     - "on-site role"
     - "onsite role"
@@ -330,3 +334,5 @@ work_mode:
     - "in-office role"
     - "must work onsite"
     - "onsite work required"
+    - "work setup & shift: onsite"  # BPO JD-header idiom
+    - "work setup: onsite"  # BPO JD-header idiom
