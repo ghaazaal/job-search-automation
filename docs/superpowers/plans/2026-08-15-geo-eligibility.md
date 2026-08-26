@@ -53,11 +53,20 @@ def test_the_eligibility_section_holds_market_facts():
     language facts, so they live here — but nothing in them may describe a
     particular person."""
     eligibility = _vocabulary()["eligibility"]
+    # all()/for over an empty collection passes vacuously — a bad merge
+    # that emptied a list would sail through without these.
+    assert eligibility["countries"]
+    assert eligibility["templates"]
+    assert eligibility["list_phrases"]
+    assert eligibility["anywhere_words"]
+    assert eligibility["eligible_phrases"]
+    assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "regions"} == set(eligibility)
+            "eligible_phrases", "regions"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
+    assert all("{country}" not in p for p in eligibility["eligible_phrases"])
     # YAML 1.1 parses a bare `no:` (Norway) or `on:` as a boolean. Every
     # code must arrive as a string — quote any future code YAML would eat.
     assert all(isinstance(code, str) for code in eligibility["countries"])
@@ -110,7 +119,7 @@ Then append at the end of the file:
 eligibility:
   countries:            # code -> names as postings write them
     am: [armenia]
-    us: [us, usa, u.s., united states, america]
+    us: [us, usa, u.s., united states]   # no bare `america` — it fires inside "latin america"/"north america"
     gb: [uk, united kingdom, britain, england]
     ca: [canada]
     au: [australia]
@@ -147,7 +156,7 @@ eligibility:
     mt: [malta]
     ua: [ukraine]
     by: [belarus]
-    ge: [georgia]       # also a US state; a restriction reads the same either way
+    ge: [georgia]       # also a US state: a flag fired on the state still reads right, but a user whose own country is ge gets US-state mentions wrongly self-exempted — accepted, documented risk
     az: [azerbaijan]
     kz: [kazakhstan]
     tr: [turkey]
@@ -179,12 +188,12 @@ eligibility:
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
-    - "located in {country}"
     - "authorized to work in {country}"
     - "eligible to work in {country}"
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
+    - "be located in {country}"
   list_phrases:         # introduce a list of eligible countries/regions
     - "open to candidates in"
     - "open to applicants in"
@@ -192,8 +201,19 @@ eligibility:
     - "we can hire in"
     - "able to hire in"
     - "available to candidates in"
-    - "hiring in"
   anywhere_words: [worldwide, anywhere, globally]
+  # Standalone statements of worldwide hiring. These open no list window —
+  # the phrase itself is the evidence. Candidate-scoped phrasings only:
+  # phrases describing the company ("worldwide remote team", "we hire
+  # globally") must not settle eligibility — they mask stated restrictions.
+  # Bare "work from anywhere" is excluded too: "work from anywhere in the
+  # US" narrows it and would read wrong.
+  eligible_phrases:
+    - "open to candidates worldwide"
+    - "open to applicants worldwide"
+    - "candidates from anywhere in the world"
+    - "work from anywhere in the world"
+    - "anywhere in the world"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.
@@ -216,6 +236,7 @@ eligibility:
       codes: [ie, de, fr, nl, be, lu, es, it, pt, pl, cz, sk, ro, bg, gr,
               hu, hr, si, ee, lv, lt, se, dk, fi, at, cy, mt]
     - names: [apac, asia pacific, asia-pacific]
+      # Includes South Asia (in, pk, bd, lk) — corporate APAC usually does.
       codes: [au, nz, in, sg, jp, kr, cn, ph, id, vn, th, my, pk, bd, lk]
     - names: [north america]
       codes: [us, ca, mx]
@@ -224,6 +245,14 @@ eligibility:
     - names: [latam, latin america]
       codes: [mx, br, ar, co]
 ```
+
+> **Correction found during Task 1 code review:** the original data had three
+> defects, fixed above and in the shipped file: a bare `america` alias for
+> `us` (word-bounded matching would fire it inside "latin america"/"north
+> america" list windows — a false "eligible" for US users); `hiring in` as a
+> list phrase (generic boilerplate opening false eligibility windows); and a
+> `ge` comment that overstated its own safety. The guard test also gained
+> non-emptiness assertions — `all()` over an empty list passes vacuously.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -262,7 +291,7 @@ from src.scoring.matching import geo_verdict
 _CFG = {
     "countries": {
         "am": ["armenia"],
-        "us": ["us", "usa", "u.s.", "united states", "america"],
+        "us": ["us", "usa", "u.s.", "united states"],
         "gb": ["uk", "united kingdom", "britain", "england"],
         "ca": ["canada"],
         "de": ["germany"],
@@ -285,9 +314,13 @@ _CFG = {
         "eligible countries",
     ],
     "anywhere_words": ["worldwide", "anywhere", "globally"],
+    "eligible_phrases": ["open to candidates worldwide",
+                         "anywhere in the world"],
     "regions": [
         {"names": ["emea"], "codes": ["am", "gb", "de", "pl"]},
         {"names": ["europe"], "codes": ["gb", "de", "pl"]},
+        {"names": ["north america"], "codes": ["us", "ca"]},
+        {"names": ["latam", "latin america"], "codes": ["mx", "br"]},
     ],
 }
 
@@ -336,10 +369,10 @@ def test_word_boundaries_hold_on_short_names():
                        "am", _CFG) == ("unknown", None)
 
 
-def test_a_nearby_country_is_not_the_named_one():
-    """'south america' must not satisfy an 'america' template — the name
+def test_a_nearby_place_is_not_the_named_country():
+    """'new england' must not satisfy an 'england' template — the name
     must sit exactly where the template puts it."""
-    assert geo_verdict("must be based in south america.",
+    assert geo_verdict("must be based in new england.",
                        "am", _CFG) == ("unknown", None)
 
 
@@ -369,9 +402,23 @@ def test_eligible_anywhere_in_the_body_beats_an_earlier_foreign_list():
     assert geo_verdict(body, "am", _CFG) == ("eligible", None)
 
 
-def test_an_anywhere_word_is_eligible():
+def test_an_anywhere_word_inside_a_list_window_is_eligible():
+    assert geo_verdict("open to candidates in any country, worldwide.",
+                       "am", _CFG) == ("eligible", None)
+
+
+def test_a_standalone_worldwide_phrase_is_eligible():
+    """No list window opens here — "open to candidates in" needs the "in".
+    The standalone phrase itself is the evidence."""
     assert geo_verdict("open to candidates worldwide.",
                        "am", _CFG) == ("eligible", None)
+
+
+def test_a_stray_globally_does_not_mask_a_restriction():
+    """Anywhere-words are window-scoped on purpose: "globally" in company
+    boilerplate must not settle eligibility before the restriction scan."""
+    assert geo_verdict("we operate globally. us citizens only.",
+                       "am", _CFG) == ("restricted", "US")
 
 
 def test_a_region_that_includes_you_is_eligible():
@@ -385,6 +432,20 @@ def test_a_region_without_you_stays_silent_never_excluded():
     flag."""
     assert geo_verdict("open to candidates in europe.",
                        "am", _CFG) == ("unknown", None)
+
+
+def test_north_america_is_a_region_not_the_us_name():
+    """A US user is eligible for a 'north america' list via the region
+    entry — `america` is deliberately not a us alias."""
+    assert geo_verdict("open to candidates in north america.",
+                       "us", _CFG) == ("eligible", None)
+
+
+def test_a_continent_phrase_is_not_the_us():
+    """'latin america' must not read as the US: the latam region omits
+    `us`, no country name matches, and the verdict is silence."""
+    assert geo_verdict("open to candidates in latin america.",
+                       "us", _CFG) == ("unknown", None)
 
 
 def test_a_list_of_unrecognised_countries_stays_silent():
@@ -442,7 +503,8 @@ def geo_verdict(body: str, user_country: str,
     """What a posting says about where it hires, judged for one user.
 
     Returns one of:
-      ("eligible", None)      — a list phrase's window names the user's
+      ("eligible", None)      — a standalone worldwide phrase appears, or a
+                                list phrase's window names the user's
                                 country, an anywhere-word, or a region the
                                 user's country belongs to
       ("restricted", "UK")    — a restriction template fired with a foreign
@@ -481,7 +543,15 @@ def geo_verdict(body: str, user_country: str,
         for match in re.finditer(_bounded(phrase), body):
             windows.append(body[match.end():match.end() + _LIST_WINDOW])
 
-    # 1. Eligible — every window is scanned before anything may flag.
+    # 1. Eligible — positive evidence is settled before anything may flag.
+    # Standalone worldwide statements ("open to candidates worldwide") open
+    # no list window — the phrase itself is the evidence. Only phrases a
+    # following country cannot grammatically narrow belong in that list.
+    for phrase in cfg.get("eligible_phrases") or []:
+        phrase = str(phrase).strip().lower()
+        if phrase and has_term(phrase, body):
+            return ("eligible", None)
+
     user_names = countries.get(user_country) or []
     anywhere = [str(w).strip().lower()
                 for w in cfg.get("anywhere_words") or []]
@@ -535,7 +605,61 @@ def geo_verdict(body: str, user_country: str,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_geo_verdict.py -v`
-Expected: all 18 PASS.
+Expected: all 28 PASS (22 given above + 6 added by the code-review
+correction, listed in the note below Step 5).
+
+> **Correction found during Task 2 implementation:** the originally-given
+> code nested the anywhere-word check inside list windows, making
+> "open to candidates worldwide" undetectable (no window opens — the list
+> phrase needs its trailing "in"). The tempting fix — scanning the whole
+> body for anywhere-words — creates a worse bug: "we operate globally. US
+> citizens only." would settle as eligible and mask the stated restriction,
+> since positive evidence is checked first. Resolution: anywhere-words stay
+> window-scoped, and a new `eligibility.eligible_phrases` vocabulary key
+> holds standalone worldwide-anchored statements matched against the whole
+> body. Both failure modes are pinned by tests above.
+
+> **Correction found during Task 2 code review** (measured, adversarially
+> probed — the shipped `src/scoring/matching.py` is the authority over this
+> plan's inline Step 3 code, which predates it):
+> - **Windows are (start, limit) ranges over the full body, not slices** —
+>   a slice's edge let "ukraine" half-match as "uk" against end-of-string,
+>   and absolute offsets give true text-ordering of exclusion names.
+> - **`_LIST_WINDOW` is 400** (160 truncated real 15–30-country lists), and
+>   **the user's own country is scanned with no window limit at all** —
+>   from each list phrase to end of body — so a list that names the user
+>   anywhere can never read as exclusion. (A first attempt gated "excluded"
+>   on a list-terminator heuristic; independent re-review proved newlines
+>   in bullet lists and abbreviation dots defeat it both ways, so it was
+>   removed in favor of the unlimited user scan.) When a hit-bearing
+>   window ran full, the exclusion display appends "and others" — the
+>   enumeration may continue with countries we did not name.
+> - **The restriction scan is prefiltered by template stems** (plain
+>   substring checks) before any per-name regex work: the unfiltered loop
+>   compiled ~693 patterns per call at ~208 ms — ~2 minutes per 300-job
+>   scrape, ~15× the cost of the whole existing scorer.
+> - **Six company-scoped `eligible_phrases` were dropped** ("hire/hiring
+>   worldwide/globally", "remote worldwide", "worldwide remote") — each
+>   proven to mask a stated restriction ("we are a worldwide remote
+>   company. us citizens only." read as eligible). Five candidate-scoped
+>   phrases remain.
+> - **`located in {country}` became `be located in {country}`** — bare
+>   "located in" fired on company prose ("our office is located in
+>   germany but this role is fully remote" → false restricted-Germany).
+> - `has_term` now delegates to `_bounded`; `_join_names` guards empty
+>   input. Six regression tests added (28 total in test_geo_verdict.py):
+>   single-name exclusion, cross-window text order, long-list-naming-user,
+>   truncated-list downgrade, boilerplate-does-not-mask, company-location
+>   prose.
+> - **Ambiguous-name (article) discipline**, added after the unlimited
+>   user scan was found to hand the bare `us` alias unbounded reach:
+>   "come join us!" anywhere after a list phrase made every list-restricted
+>   posting read eligible for a US user, and a pronoun inside a window
+>   fabricated "US" into exclusion displays. New
+>   `eligibility.ambiguous_names: [us]` key: in list windows such names
+>   count only as "the us"; a bare occurrence poisons that window's
+>   exclusion claim; restriction templates are exempt ("us citizens only"
+>   disambiguates itself). Final test count: 35.
 
 - [ ] **Step 5: Commit**
 
@@ -869,6 +993,12 @@ git commit -m "feat: Indeed's us-board fallback marks the jobs it fetched"
 ```
 
 ---
+
+> **Note from Task 3 quality review:** `geo_verdict` is resume-invariant
+> but runs once per active resume via `best_match` (~1.7 ms × resumes ×
+> jobs ≈ 0.5–0.9 s per 300-job run with 2 resumes). Accepted for this
+> ship — scraping I/O dominates by minutes. Hoist to once-per-job only if
+> resume counts grow.
 
 ### Task 5: run_core — the explicit hand-off
 

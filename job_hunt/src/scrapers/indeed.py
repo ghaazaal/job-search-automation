@@ -56,6 +56,7 @@ def scrape(category: str, title: str,
     # The actor's input schema is undocumented. A rejected payload comes back
     # as an empty list, indistinguishable from a genuinely empty search, so
     # the only safe response is to retry once with the values known to work.
+    fellback = False
     legacy = {**payload, "location": _LEGACY_LOCATION,
               "country": _LEGACY_COUNTRY}
     if not raw and legacy != payload:
@@ -65,6 +66,7 @@ def scrape(category: str, title: str,
             category, payload["location"], payload["country"])
         raw = call_actor(actor_id, legacy, f"Indeed/{category} (legacy)",
                          run_timeout)
+        fellback = True
 
     today = date.today().isoformat()
     jobs: list[dict] = []
@@ -96,4 +98,11 @@ def scrape(category: str, title: str,
                 item.get("baseSalary") or item.get("salary") or {}),
             "description": extract_description(item),
         })
+
+    if fellback and payload["country"] != _LEGACY_COUNTRY:
+        # These jobs came off the us board, not the one that was asked for.
+        # Transient by design: run_core pops the key before anything is
+        # scored or stored; the scorer receives it as an explicit argument.
+        for job in jobs:
+            job["_scraped_under"] = _LEGACY_COUNTRY
     return jobs

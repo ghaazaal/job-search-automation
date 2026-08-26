@@ -40,13 +40,18 @@ def _tailoring(match_score: int) -> str:
 class Scorer:
     """Scores postings against resumes. One instance per run."""
 
-    def __init__(self, config: dict, vocabulary_path: Path):
+    def __init__(self, config: dict, vocabulary_path: Path,
+                 user_country: str = ""):
         self._vocab = _load(vocabulary_path)
         # Band cut-offs on the internal 1-10 score.
         self._bands = config.get("scoring", {}).get("bands",
                                                     {"strong": 8, "partial": 5})
+        # Where the user can be hired. Empty means unknown, and unknown
+        # means the geography checks stay silent rather than guess.
+        self._user_country = (user_country or "").strip().lower()
 
-    def score_job(self, title: str, description: str, resume: dict) -> dict:
+    def score_job(self, title: str, description: str, resume: dict,
+                  scraped_under: str | None = None) -> dict:
         """Evidence for one posting judged against one resume."""
         vocab = self._vocab
         lowered = (title or "").lower()
@@ -77,7 +82,8 @@ class Scorer:
         mismatch = matching.mismatch_penalty(description, tools, mine,
                                              vocab.get("mismatch") or {})
 
-        penalty, fired = self._constraints(body, jd_band, my_band)
+        penalty, fired = self._constraints(body, jd_band, my_band,
+                                           scraped_under)
         if mismatch:
             fired.append("little overlap with the tools this post names")
 
@@ -114,7 +120,8 @@ class Scorer:
         return evidence
 
     def best_match(self, title: str, description: str,
-                   resumes: list[dict]) -> dict:
+                   resumes: list[dict],
+                   scraped_under: str | None = None) -> dict:
         """Score against every active resume and keep the strongest.
 
         Someone with a Data Engineer resume and a BI Developer resume should
@@ -127,12 +134,13 @@ class Scorer:
         """
         if not resumes:
             raise ValueError("cannot score without at least one active resume")
-        scored = [self.score_job(title, description, resume)
+        scored = [self.score_job(title, description, resume,
+                                 scraped_under=scraped_under)
                   for resume in resumes]
         return max(scored, key=lambda evidence: evidence["match_score"])
 
-    def _constraints(self, body: str, jd_band: str,
-                     my_band: str) -> tuple[int, list[str]]:
+    def _constraints(self, body: str, jd_band: str, my_band: str,
+                     scraped_under: str | None = None) -> tuple[int, list[str]]:
         """Employment constraints that rule a posting out whatever your stack."""
         cfg = self._vocab["penalties"]
         penalty = 0
@@ -147,6 +155,27 @@ class Scorer:
         if matching.has_term("cpt", body) or matching.has_term("opt", body):
             penalty += cfg.get("cpt", 20)
             fired.append("visa restriction")
+
+        verdict, detail = matching.geo_verdict(
+            body, self._user_country, self._vocab.get("eligibility") or {})
+        if verdict == "restricted":
+            penalty += cfg.get("geo_restricted", 30)
+            fired.append(f"remote, but restricted to {detail}")
+        elif verdict == "excluded":
+            penalty += cfg.get("geo_restricted", 30)
+            fired.append(f"remote, but open only to {detail}")
+        elif (verdict == "unknown" and scraped_under and self._user_country
+              and scraped_under.strip().lower() != self._user_country):
+            # The Indeed fallback searched the us board because the actor
+            # rejected the user's country. That is uncertainty, not a stated
+            # restriction — softer penalty, wording that claims no more than
+            # we know, and never on top of anything the text did state.
+            # "eligible" lands here too: positive evidence beats board
+            # uncertainty, so nothing fires at all.
+            penalty += cfg.get("wrong_board", 10)
+            fired.append("found via Indeed's US board, "
+                         "not verified for your country")
+
         # An executive posting only counts against you if you are not one.
         if jd_band == "exec" and my_band != "exec":
             penalty += cfg.get("exec_penalty", 10)

@@ -200,3 +200,26 @@ def test_a_resume_with_no_target_roles_also_refuses(conn, user):
     with pytest.raises(ValueError, match="target roles"):
         execute(conn, user, run_id, _CONFIG, [empty_resume], _PROFILE,
                 scrapers=_scrapers())
+
+
+def test_a_foreign_restriction_reaches_the_stored_reason(conn, user, resume):
+    """The profile's country must arrive at the scorer — this is the wiring
+    guard for the single Scorer construction site."""
+    job = _job("https://x/9")
+    job["description"] += " Must be based in the UK."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert "restricted to UK" in result.scored_jobs[0]["reason"]
+
+
+def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user, resume):
+    tagged = {**_job("https://x/8"), "_scraped_under": "us"}
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[tagged]))
+    evidence = result.scored_jobs[0]
+    assert "not verified for your country" in evidence["reason"]
+    # Popped, not read: the transient key must be gone from what the
+    # LLM/Excel steps and persist_run receive.
+    assert "_scraped_under" not in evidence

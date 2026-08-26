@@ -86,12 +86,14 @@ eligibility:
     - "must be based in {country}"
     - "must reside in {country}"
     - "based in {country} only"
-    - "located in {country}"
     - "authorized to work in {country}"
     - "eligible to work in {country}"
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
+    - "be located in {country}"   # anchored: bare "located in" fires on
+                                  # company prose ("our office is located
+                                  # in Germany but this role is remote")
   list_phrases:         # introduce a list of eligible countries/regions
     - "open to candidates in"
     - "open to applicants in"
@@ -99,8 +101,15 @@ eligibility:
     - "we can hire in"
     - "able to hire in"
     - "available to candidates in"
-    - "hiring in"
   anywhere_words: [worldwide, anywhere, globally]
+  eligible_phrases:     # standalone worldwide statements; open no window —
+                        # the phrase itself is the evidence
+    - "open to candidates worldwide"
+    - "anywhere in the world"
+    # ... candidate-scoped, worldwide-anchored phrasings ONLY. Company-
+    # scoped ones ("worldwide remote team", "we hire globally") mask
+    # stated restrictions; bare "work from anywhere" is excluded because
+    # "work from anywhere in the US" narrows it.
   regions:              # eligible-only: membership marks the user eligible;
                         # absence stays silent, never flags exclusion
     - names: [emea]
@@ -132,17 +141,46 @@ Returns one of four verdicts, checked in this order:
 
 | Verdict | When |
 |---|---|
-| `("eligible", None)` | a list phrase's window names the user's country, an anywhere-word, or a region whose member codes include the user's country |
+| `("eligible", None)` | a standalone worldwide phrase appears anywhere, or a list phrase's window names the user's country, an anywhere-word, or a region whose member codes include the user's country |
 | `("restricted", "UK")` | a restriction template matches with a foreign country in the slot |
 | `("excluded", "UK, Germany and Poland")` | list-phrase windows name known countries, none of them the user's |
 | `("unknown", None)` | nothing matched, or `user_country` is unset — the check cannot run, so nothing is claimed |
 
 Mechanics:
 
-- **Windows**: each list-phrase occurrence opens a fixed 160-character
-  window after it (no sentence-splitting — "u.s." breaks naive period
-  logic). All windows are scanned for eligible evidence before anything
+- **Windows**: each list-phrase occurrence opens a 400-character window
+  after it, held as a (start, limit) range over the full body — never a
+  string slice, so a country name at the edge cannot half-match ("ukraine"
+  sliced to "uk"). No sentence-splitting — "u.s." breaks naive period
+  logic. All windows are scanned for eligible evidence before anything
   else, so a list that names the user's country anywhere wins.
+- **Truncation never fabricates**: the user's own country is scanned with
+  no window limit at all — from each list phrase to end of body — so a
+  list that names the user anywhere can never read as exclusion. When a
+  hit-bearing window ran full, the exclusion display appends "and others",
+  because the enumeration may continue with countries we did not name.
+  Exclusion names render in text order, earliest position winning for a
+  repeated country.
+- **Accepted residual (reviewed, kept)**: the unlimited user scan checks
+  only that the user's country is named *somewhere after* a list phrase,
+  not that the mention is still inside the enumeration — so "open to
+  candidates in germany and poland only. … our partner office in armenia
+  handles regional support." reads eligible for an Armenian user. This is
+  the deliberate trade for never fabricating an exclusion: a false
+  eligible is silence in the UI and costs at most one wasted application,
+  while the false exclusions it replaced hid real opportunities. Do not
+  re-raise as a bug; revisit only with evidence it fires often.
+- **Ambiguous names take the article**: names colliding with ordinary
+  English words (`eligibility.ambiguous_names`, currently `us` — the
+  pronoun in "join us"/"about us") count in list windows only as
+  "the us"; a bare occurrence poisons that window's exclusion claim,
+  since country and pronoun cannot be told apart. Restriction templates
+  are exempt — "us citizens only" disambiguates itself. Without this, the
+  unlimited user scan made every list-restricted posting read eligible
+  for a US user.
+- **Performance**: the restriction scan is prefiltered by template stems
+  (plain substring checks) before any per-name regex work; the common
+  no-geo-statement body must stay well under 1 ms.
 - **Matching** uses the same lookaround word boundaries as `has_term` —
   'us' must not fire inside 'campus'. Restriction templates allow an
   optional `the ` before the country name.
@@ -215,7 +253,10 @@ renders whatever the reason sentence says.
   capped display; eligible beats excluded across windows; anywhere-word →
   eligible; region including the user → eligible; region without the user
   → unknown (never excluded); unrecognised-country list → unknown;
-  restriction beats an excluding list; empty config → unknown.
+  restriction beats an excluding list; empty config → unknown; a
+  standalone worldwide phrase → eligible; a stray "globally" in company
+  boilerplate must NOT mask a stated restriction (anywhere-words are
+  window-scoped on purpose).
 - `Scorer._constraints`: restricted and excluded penalties fire and land in
   `fired`; `wrong_board` fires only on `unknown`; eligible suppresses
   `wrong_board`; a text restriction silences the board flag (no double
@@ -237,8 +278,14 @@ renders whatever the reason sentence says.
 - Multi-country eligibility lists in the profile; LLM-based extraction.
 - Region *exclusion* ("Europe-only" flagging a non-European user) — regions
   are eligible-only evidence by decision, see above.
-- Standalone "work-from-anywhere" phrasing with no list phrase — falls
-  through to "unknown", which carries no penalty and no claim.
+- Bare "work from anywhere" phrasing — excluded from `eligible_phrases` on
+  purpose, because "work from anywhere in the US" narrows it; only
+  worldwide-anchored standalone phrases are recognised. Everything else
+  falls through to "unknown", which carries no penalty and no claim.
+  (Corrected during Task 2: the original v3 nested the anywhere-word check
+  inside list windows only, which made "open to candidates worldwide"
+  undetectable; `eligible_phrases` covers those statements without the
+  masking hazard a whole-body anywhere-word scan would create.)
 - Detecting time-zone requirements ("must overlap 4h with PST").
 - The map-cap fix (4 → expandable) already shipped separately before this
   spec.

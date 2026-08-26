@@ -155,12 +155,19 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         new_jobs = enrich(new_jobs)
 
     report("scoring")
-    scorer = Scorer(config, VOCABULARY_PATH)
-    scored_jobs = [
-        {**job, **scorer.best_match(job["title"], job.get("description", ""),
-                                    resumes)}
-        for job in new_jobs
-    ]
+    scorer = Scorer(config, VOCABULARY_PATH,
+                    user_country=profile.get("country") or "")
+    scored_jobs = []
+    for job in new_jobs:
+        # Set by the Indeed scraper when its us-board fallback fired.
+        # Popped — not read — so the transient key can never reach
+        # persist_run, the store, or the terminal path's later steps.
+        scraped_under = job.pop("_scraped_under", None)
+        scored_jobs.append(
+            {**job, **scorer.best_match(job["title"],
+                                        job.get("description", ""),
+                                        resumes,
+                                        scraped_under=scraped_under)})
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total)
