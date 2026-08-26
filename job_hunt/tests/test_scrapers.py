@@ -230,3 +230,27 @@ def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
     jobs = module.scrape("Data Analyst", "Data Analyst", "actor~id",
                          jobs_per_category=50)
     assert len(jobs) == 50
+
+
+@pytest.mark.parametrize("module", [indeed, linkedin])
+def test_html_is_preferred_over_a_prefused_plain_field(module, monkeypatch):
+    """valig's plain `description` arrives pre-flattened with NO
+    separators ("…RemoteTravel Required…"), defeating word-boundary
+    matching. The html sibling has real structure, and tag-flattening
+    inserts a space per tag — so html wins whenever both exist."""
+    item = {**_MINIMAL,
+            "description": "Location: RemoteTravel Required: 2-5 Weeks",
+            "descriptionHtml": "<p>Location: Remote</p>"
+                               "<p>Travel Required: 2-5 Weeks</p>"}
+    job = _scrape(module, monkeypatch, item)
+    assert "RemoteTravel" not in job["description"]
+    assert "Location: Remote" in job["description"]
+
+
+def test_indeed_nested_dict_prefers_html_over_text(monkeypatch):
+    item = {**_MINIMAL,
+            "description": {"text": "runtogetherText here",
+                            "html": "<p>run</p><p>together</p><p>Text here</p>"}}
+    job = _scrape(indeed, monkeypatch, item)
+    assert "runtogetherText" not in job["description"]
+    assert "run together Text here" == job["description"]
