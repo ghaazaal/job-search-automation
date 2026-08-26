@@ -105,7 +105,7 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    assert len(seen[0]["steps"]) == 4      # one role, two sources, two lanes
+    assert len(seen[0]["steps"]) == 6      # two lanes + two probes
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -214,7 +214,11 @@ def test_a_foreign_restriction_reaches_the_stored_reason(conn, user, resume):
 
 
 def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user, resume):
-    tagged = {**_job("https://x/8"), "_scraped_under": "us"}
+    # Location must be unplaceable, not the fixture's default "Toronto,
+    # ON" — that verifies locally now (Task 6) and local evidence beats
+    # board uncertainty, silencing the very flag this test checks for.
+    tagged = {**_job("https://x/8"), "_scraped_under": "us",
+             "location": "Remote"}
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[tagged]))
@@ -404,7 +408,7 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
-    assert len(seen[0]["steps"]) == 2
+    assert len(seen[0]["steps"]) == 4
 
 
 def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
@@ -432,3 +436,221 @@ def test_a_missing_sources_key_enables_everything(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
     assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}
+
+
+def test_probe_results_are_evidence_not_candidates(conn, user, resume):
+    """Probe jobs are never scored or stored; their step still reports
+    a found count."""
+    probe_job = _job("https://x/probe1")
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        modes = tuple(kwargs.get("work_modes") or ())
+        if modes in (("hybrid",), ("onsite",)):
+            return [probe_job]
+        return []
+
+    seen = []
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     on_progress=seen.append,
+                     scrapers={"Indeed": spy, "LinkedIn": spy})
+    assert result.kept == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM role").fetchone()["n"] == 0
+    probe_steps = [s for s in seen[-1]["steps"]
+                   if s["lane"].startswith("probe")]
+    assert [s["found"] for s in probe_steps] == [1, 1]
+    assert result.scraped == 0      # probes don't inflate the count
+
+
+def test_probe_calls_are_worldwide_and_single_mode(conn, user, resume):
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append((kwargs.get("location"),
+                      tuple(kwargs.get("work_modes") or ())))
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+    probe_calls = [c for c in calls if c[1] in (("hybrid",), ("onsite",))]
+    assert len(probe_calls) == 2
+    assert all(loc == "" for loc, _ in probe_calls)
+
+
+def _with_probe(probe_url, probe_mode, jobs):
+    """Scrapers where one probe lane returns a job at probe_url."""
+    def spy(category, title, actor_id, *args, **kwargs):
+        modes = tuple(kwargs.get("work_modes") or ())
+        if modes == (probe_mode,):
+            return [_job(probe_url)]
+        if modes in (("hybrid",), ("onsite",)):
+            return []
+        return list(jobs)
+    return {"Indeed": spy, "LinkedIn": spy}
+
+
+def test_the_salford_case_a_badge_hybrid_foreign_job_is_dropped(conn, user, resume):
+    """The ship's reason to exist: badge-only hybrid in another country.
+    Text says nothing; probe membership says hybrid; UK != ca -> drop."""
+    job = _job("https://x/salford")
+    job["location"] = "Salford, England, United Kingdom"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/salford", "hybrid",
+                                          [job]))
+    assert result.dropped == 1
+    assert result.kept == 0
+    assert result.badge_hits == 1
+
+
+def test_a_badge_conflicting_with_text_claims_nothing(conn, user, resume):
+    """LinkedIn badges mislabel ~19% of the time (our own measurement) —
+    badge says hybrid, text says fully remote: no claim, job kept."""
+    job = _job("https://x/conflict")
+    job["location"] = "Salford, England, United Kingdom"
+    job["description"] += " This is a fully remote role."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/conflict", "hybrid",
+                                          [job]))
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+def test_a_badge_hybrid_local_job_is_kept_clean(conn, user, resume):
+    job = _job("https://x/localbadge")
+    job["location"] = "Toronto, Ontario, Canada"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/localbadge", "hybrid",
+                                          [job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "hybrid"
+    assert "says hybrid" not in evidence["reason"]
+
+
+def test_local_country_verifies_eligibility(conn, user, resume):
+    job = _job("https://x/verified")
+    job["location"] = "Toronto, Ontario, Canada"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    evidence = result.scored_jobs[0]
+    assert evidence["eligibility_verified"] is True
+    assert "open to your location" in evidence["reason"]
+    assert conn.execute(
+        "SELECT eligibility_verified FROM role WHERE url = ?",
+        ("https://x/verified",)).fetchone()["eligibility_verified"] == 1
+
+
+def test_an_unplaceable_job_is_stored_unverified(conn, user, resume):
+    job = _job("https://x/unv")
+    job["location"] = "Remote"
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    evidence = result.scored_jobs[0]
+    assert evidence["eligibility_verified"] is False
+    assert "location eligibility not verified" in evidence["reason"]
+    assert "_local_ok" not in evidence
+
+
+def test_probes_and_the_local_lane_never_fall_back(conn, user, resume):
+    """The Critical: a probe or the local lane finding nothing must stay
+    silent, not retry with the legacy Worldwide/remote-us payload — that
+    fabricates badge evidence (a probe) or re-fetches the worldwide
+    lane's own results and double-counts `scraped` (the local lane)."""
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append({"work_modes": tuple(kwargs.get("work_modes") or ()),
+                      "allow_fallback": kwargs.get("allow_fallback")})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    probe_calls = [c for c in calls
+                  if c["work_modes"] in (("hybrid",), ("onsite",))]
+    local_calls = [c for c in calls
+                  if c["work_modes"] == ("remote", "hybrid", "onsite")]
+    worldwide_calls = [c for c in calls
+                       if c["work_modes"] == tuple(_PROFILE["work_modes"])]
+
+    assert probe_calls and all(c["allow_fallback"] is False
+                               for c in probe_calls)
+    assert local_calls and all(c["allow_fallback"] is False
+                               for c in local_calls)
+    assert worldwide_calls and all(c["allow_fallback"] is not False
+                                   for c in worldwide_calls)
+
+
+def test_contested_probe_membership_claims_nothing(conn, user, resume):
+    """Both probes claim the same URL under different modes — exactly
+    what the Critical's double-retry produced. Disagreement claims
+    nothing: kept, unstamped, undropped."""
+    job = _job("https://x/contested")
+    job["location"] = "Salford, England, United Kingdom"
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        modes = tuple(kwargs.get("work_modes") or ())
+        if modes == ("hybrid",):
+            return [_job("https://x/contested")]
+        if modes == ("onsite",):
+            return [_job("https://x/contested")]
+        return list([job])
+
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers={"Indeed": spy, "LinkedIn": spy})
+    assert result.dropped == 0
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+    assert result.badge_hits == 0
+
+
+def test_badge_hits_counts_only_fills_not_agreement(conn, user, resume):
+    """A badge that agrees with text is not a 'hit' — the text already
+    said it. badge_hits counts only badge-filled silence."""
+    job = _job("https://x/agree")
+    job["location"] = "Toronto, Ontario, Canada"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_with_probe("https://x/agree", "hybrid",
+                                          [job]))
+    assert result.kept == 1
+    assert result.badge_hits == 0
+
+
+def test_probes_off_plans_and_calls_none(conn, user, resume):
+    config = {**_CONFIG,
+              "search": {**_CONFIG["search"], "probes": False}}
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        calls.append(tuple(kwargs.get("work_modes") or ()))
+        return []
+
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, config, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    probe_steps = [s for s in seen[0]["steps"] if s["lane"].startswith("probe")]
+    assert probe_steps == []
+    assert ("hybrid",) not in calls and ("onsite",) not in calls
+
+
+def test_a_missing_probes_key_enables_probes(conn, user, resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+    probe_steps = [s for s in seen[0]["steps"] if s["lane"].startswith("probe")]
+    assert len(probe_steps) == 2

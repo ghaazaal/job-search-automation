@@ -12,9 +12,13 @@ logger = logging.getLogger(__name__)
 
 APIFY_BASE = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
 
-# Actors disagree on the description field name; take the first non-empty one.
-_DESCRIPTION_KEYS = ("description", "descriptionText", "jobDescription",
-                     "descriptionHtml", "jobDescriptionText", "snippet")
+# Actors disagree on the description field name; take the first non-empty
+# one. HTML-shaped fields come first: the actors' plain fields arrive
+# pre-flattened without separators (e.g. "...RemoteTravel Required..."),
+# which defeats word-boundary phrase matching, while tag-flattening below
+# inserts a space per tag — so HTML input always yields separated text.
+_DESCRIPTION_KEYS = ("descriptionHtml", "description", "descriptionText",
+                     "jobDescription", "jobDescriptionText", "snippet")
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE  = re.compile(r"\s+")
@@ -32,8 +36,9 @@ def extract_description(item: dict) -> str:
         if isinstance(raw, dict):
             # valig~indeed-jobs-scraper nests the body under
             # description: {"text": ..., "html": ...} instead of putting
-            # a string directly on the top-level key.
-            raw = raw.get("text") or raw.get("html")
+            # a string directly on the top-level key. Prefer html: the
+            # text sibling arrives pre-flattened with no separators.
+            raw = raw.get("html") or raw.get("text")
         if isinstance(raw, str) and raw.strip():
             text = html.unescape(_TAG_RE.sub(" ", raw))
             return _WS_RE.sub(" ", text).strip()

@@ -178,6 +178,30 @@ def test_a_job_without_a_mode_stores_null(conn):
     assert stored is None
 
 
+def test_eligibility_verified_round_trips(conn):
+    """A verified role is written and read back as 1."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id,
+                [_job(url="https://x/verified", eligibility_verified=True)])
+    stored = conn.execute(
+        "SELECT eligibility_verified FROM role WHERE url = ?",
+        ("https://x/verified",)).fetchone()["eligibility_verified"]
+    assert stored == 1
+
+
+def test_a_job_without_eligibility_verification_stores_zero(conn):
+    """A posting scored before verification ran must not be guessed at —
+    0, never a fabricated pass."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/unverified")])
+    stored = conn.execute(
+        "SELECT eligibility_verified FROM role WHERE url = ?",
+        ("https://x/unverified",)).fetchone()["eligibility_verified"]
+    assert stored == 0
+
+
 def test_re_running_a_scrape_updates_the_attribution(conn):
     """A second resume can win a posting the first one won last week."""
     user_id = ensure_user(conn, "G")

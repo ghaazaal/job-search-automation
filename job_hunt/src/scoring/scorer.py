@@ -56,7 +56,8 @@ class Scorer:
 
     def score_job(self, title: str, description: str, resume: dict,
                   scraped_under: str | None = None,
-                  mode_mismatch: str | None = None) -> dict:
+                  mode_mismatch: str | None = None,
+                  local_evidence: bool = False) -> dict:
         """Evidence for one posting judged against one resume."""
         vocab = self._vocab
         lowered = (title or "").lower()
@@ -87,8 +88,9 @@ class Scorer:
         mismatch = matching.mismatch_penalty(description, tools, mine,
                                              vocab.get("mismatch") or {})
 
-        penalty, fired = self._constraints(body, jd_band, my_band,
-                                           scraped_under, mode_mismatch)
+        penalty, fired, geo_verdict = self._constraints(
+            body, jd_band, my_band, scraped_under, mode_mismatch,
+            local_evidence)
         if mismatch:
             fired.append("little overlap with the tools this post names")
 
@@ -119,6 +121,17 @@ class Scorer:
             "tailoring":            _tailoring(match_score),
             "resume_id":            resume.get("id"),
             "resume_label":         resume.get("label") or "",
+            # Internal + stored: positive evidence the user can take the
+            # job. Never rendered as a number — reason.py words it. Local
+            # evidence (the job is in the user's own place) cannot verify
+            # past a stated restriction: a Yerevan-tagged posting that
+            # says "must be based in the UK" is not a verified sure
+            # thing, whatever its location field says — the tier and the
+            # sentence must agree.
+            "eligibility_verified": bool(
+                (local_evidence and geo_verdict not in ("restricted",
+                                                        "excluded"))
+                or geo_verdict == "eligible"),
         }
         # A band is never handed out without its sentence.
         evidence["reason"] = compose_reason(evidence)
@@ -127,7 +140,8 @@ class Scorer:
     def best_match(self, title: str, description: str,
                    resumes: list[dict],
                    scraped_under: str | None = None,
-                   mode_mismatch: str | None = None) -> dict:
+                   mode_mismatch: str | None = None,
+                   local_evidence: bool = False) -> dict:
         """Score against every active resume and keep the strongest.
 
         Someone with a Data Engineer resume and a BI Developer resume should
@@ -142,14 +156,23 @@ class Scorer:
             raise ValueError("cannot score without at least one active resume")
         scored = [self.score_job(title, description, resume,
                                  scraped_under=scraped_under,
-                                 mode_mismatch=mode_mismatch)
+                                 mode_mismatch=mode_mismatch,
+                                 local_evidence=local_evidence)
                   for resume in resumes]
         return max(scored, key=lambda evidence: evidence["match_score"])
 
-    def _constraints(self, body: str, jd_band: str, my_band: str,
-                     scraped_under: str | None = None,
-                     mode_mismatch: str | None = None) -> tuple[int, list[str]]:
-        """Employment constraints that rule a posting out whatever your stack."""
+    def _constraints(
+        self, body: str, jd_band: str, my_band: str,
+        scraped_under: str | None = None,
+        mode_mismatch: str | None = None,
+        local_evidence: bool = False,
+    ) -> tuple[int, list[str], str]:
+        """Employment constraints that rule a posting out whatever your stack.
+
+        Returns `(penalty, fired, verdict)` — `verdict` is the geo-verdict
+        string (`eligible` / `restricted` / `excluded` / `unknown`) so
+        `score_job` can use it as positive eligibility evidence.
+        """
         cfg = self._vocab["penalties"]
         penalty = 0
         fired: list[str] = []
@@ -173,13 +196,17 @@ class Scorer:
             penalty += cfg.get("geo_restricted", 30)
             fired.append(f"remote, but open only to {detail}")
         elif (verdict == "unknown" and scraped_under and self._user_country
-              and scraped_under.strip().lower() != self._user_country):
+              and scraped_under.strip().lower() != self._user_country
+              and not local_evidence):
             # The Indeed fallback searched the us board because the actor
             # rejected the user's country. That is uncertainty, not a stated
             # restriction — softer penalty, wording that claims no more than
             # we know, and never on top of anything the text did state.
             # "eligible" lands here too: positive evidence beats board
-            # uncertainty, so nothing fires at all.
+            # uncertainty, so nothing fires at all. And local evidence (the
+            # job is in the user's own place) needs no board warning
+            # either — positive evidence beats board uncertainty, the same
+            # rule the eligible verdict follows.
             penalty += cfg.get("wrong_board", 10)
             fired.append("found via Indeed's US board, "
                          "not verified for your country")
@@ -200,4 +227,4 @@ class Scorer:
             penalty += cfg.get("exec_penalty", 10)
             fired.append("executive role")
 
-        return penalty, fired
+        return penalty, fired, verdict

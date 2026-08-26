@@ -39,20 +39,36 @@ def search_titles(resumes: list[dict]) -> list[str]:
 
 
 def plan_steps(titles: list[str], sources=SOURCES,
-               local: bool = False) -> list[dict]:
+               local: bool = False, probes: bool = False) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
     actually run in. The local lane searches the profile's actual place
     with every work mode — it exists so target-country on-site/hybrid
     jobs arrive at all instead of by accident.
+
+    Probes are evidence-gathering searches, not candidate lanes: two extra
+    LinkedIn-only searches per role (hybrid, onsite), appended after the
+    real lanes. LinkedIn's search filter respects the workplace badge
+    server-side even though per-item output doesn't carry it, so a job's
+    presence in a filtered probe result is evidence of its badge. They run
+    only when LinkedIn survives `sources` — there is nothing to probe
+    otherwise.
     """
     lanes = ("worldwide",) + (("local",) if local else ())
-    return [{"source": name, "role": title, "lane": lane,
+    steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
             for title in titles
             for lane in lanes
             for name, _, _ in sources]
+
+    if probes and any(name == "LinkedIn" for name, _, _ in sources):
+        for title in titles:
+            for lane in ("probe hybrid", "probe onsite"):
+                steps.append({"source": "LinkedIn", "role": title,
+                              "lane": lane, "state": "pending", "found": 0})
+
+    return steps
 
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "vocabulary.yaml"
@@ -67,6 +83,7 @@ class RunResult:
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
+    badge_hits: int = 0
 
 
 def _default_scrapers() -> dict:
@@ -99,7 +116,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     from .scoring.matching import has_term, location_country, work_mode
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
-    from .tracker.dedup import dedupe
+    from .tracker.dedup import dedupe, normalize_url
 
     if not resumes:
         raise ValueError("no active resume on file, so there is nothing to "
@@ -126,11 +143,16 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     gates = (config.get("search", {}) or {}).get("sources") or {}
     sources = tuple(entry for entry in SOURCES
                     if gates.get(entry[0].lower(), True))
+    # Same convention for the probe lanes (search.probes). Missing key
+    # means enabled.
+    probes_on = bool((config.get("search", {}) or {}).get("probes", True))
 
     steps = plan_steps(titles, sources=sources,
-                      local=bool((profile.get("location") or "").strip()))
+                      local=bool((profile.get("location") or "").strip()),
+                      probes=probes_on)
     scraped_total = 0
     dropped_total = 0
+    probe_badges: dict[str, str] = {}
 
     def report(stage: str) -> None:
         emit({"stage": stage, "steps": [dict(s) for s in steps],
@@ -148,19 +170,62 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         actor_key, actor_default = next(
             (key, default) for source, key, default in sources
             if source == name)
+
+        if step["lane"].startswith("probe"):
+            probe_mode = step["lane"].split(" ", 1)[1]      # hybrid|onsite
+            try:
+                # allow_fallback=False: a probe asks a narrow, deliberate
+                # question (does this URL show up in a hybrid/onsite-
+                # filtered search?). The legacy Worldwide/remote retry
+                # answers a different one — genuinely remote jobs — and
+                # recording those under this probe's mode would fabricate
+                # badge evidence. An empty answer must stay empty.
+                found = scrapers[name](
+                    step["role"], step["role"],
+                    apify_cfg.get(actor_key, actor_default),
+                    days_posted, jobs_per_cat, run_timeout,
+                    location="", country=country,
+                    work_modes=(probe_mode,), allow_fallback=False)
+            except Exception as exc:
+                logger.warning("%s/%s failed: %s", name, step["role"], exc)
+                step["state"] = "failed"
+                step["found"] = 0
+            else:
+                step["state"] = "done"
+                step["found"] = len(found)
+                for job in found:
+                    url = normalize_url(job.get("url") or "")
+                    seen = probe_badges.get(url)
+                    if seen is None:
+                        probe_badges[url] = probe_mode
+                    elif seen and seen != probe_mode:
+                        # Both probes claimed the same URL under different
+                        # modes — disagreement claims nothing, the same
+                        # rule every other conflict follows.
+                        probe_badges[url] = ""
+            report("scraping")
+            continue
+
         if step["lane"] == "local":
             lane_location = (profile.get("location") or "").strip()
             lane_modes = ("remote", "hybrid", "onsite")
+            # allow_fallback=False: a Yerevan search that comes back empty
+            # must not silently fall back to Worldwide/remote-us — that
+            # re-fetches the worldwide lane's own results under the local
+            # lane, double-counting `scraped` and defeating the point of
+            # having a local lane at all.
+            lane_kwargs = {"allow_fallback": False}
         else:
             lane_location = location
             lane_modes = work_modes
+            lane_kwargs = {}
         try:
             jobs = scrapers[name](
                 step["role"], step["role"],
                 apify_cfg.get(actor_key, actor_default),
                 days_posted, jobs_per_cat, run_timeout,
                 location=lane_location, country=country,
-                work_modes=lane_modes)
+                work_modes=lane_modes, **lane_kwargs)
         except Exception as exc:
             # One source failing must not throw away the other's results.
             logger.warning("%s/%s failed: %s", name, step["role"], exc)
@@ -197,14 +262,42 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     user_country = (profile.get("country") or "").strip().lower()
     profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
 
+    badge_hits = 0
     kept_jobs = []
     for job in new_jobs:
-        mode = work_mode(f"{job.get('title') or ''}\n"
-                         f"{job.get('description') or ''}", mode_cfg)
+        text_mode = work_mode(f"{job.get('title') or ''}\n"
+                              f"{job.get('description') or ''}", mode_cfg)
+        # A "" entry means the two probes claimed this URL under different
+        # modes — contested membership, already silence — `or None`
+        # collapses it the same as no badge at all.
+        badge = probe_badges.get(normalize_url(job.get("url") or "")) or None
+        if text_mode and badge and text_mode != badge:
+            # LinkedIn badges mislabel ~19% of the time (our own
+            # measurement) and text can lie too — disagreement claims
+            # nothing, the same rule every other conflict follows.
+            mode = None
+        elif badge and not text_mode:
+            # badge_hits counts only this: how often the badge told us
+            # something the text did not. Agreement is not a "hit" — the
+            # text already said it.
+            mode = badge
+            badge_hits += 1
+        else:
+            mode = text_mode
         if mode:
             job["work_mode"] = mode
+
+        raw_location = (job.get("location") or "").strip().lower()
+        place = location_country(job.get("location") or "", loc_cfg)
+        local_ok = bool(
+            (profile_city and has_term(profile_city, raw_location))
+            or (place and user_country and place == user_country))
+        if local_ok:
+            # Positive evidence the job is in the user's own place —
+            # popped before scoring, handed to the scorer explicitly.
+            job["_local_ok"] = True
+
         if mode and user_modes and mode not in user_modes:
-            raw_location = (job.get("location") or "").strip().lower()
             if has_term("remote", raw_location):
                 # The location field carrying "remote" anywhere is the
                 # actor's own tag on where the job is — it beats a stray
@@ -215,13 +308,14 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                 job.pop("work_mode", None)
                 kept_jobs.append(job)
                 continue
-            if profile_city and has_term(profile_city, raw_location):
-                # The user's own city named in the job's location is
-                # local, whatever the country parser thinks — "Toronto,
-                # ON" has no country to parse, but it IS Toronto.
+            if local_ok:
+                # The user's own city named in the job's location, or a
+                # parsed country matching the user's, is local — workable
+                # in person whatever the country parser thinks otherwise
+                # ("Toronto, ON" has no country to parse, but it IS
+                # Toronto).
                 kept_jobs.append(job)
                 continue
-            place = location_country(job.get("location") or "", loc_cfg)
             if place and user_country and place != user_country:
                 dropped_total += 1
                 continue
@@ -244,12 +338,14 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         # persist_run, the store, or the terminal path's later steps.
         scraped_under = job.pop("_scraped_under", None)
         mode_mismatch = job.pop("_mode_mismatch", None)
+        local_ok = job.pop("_local_ok", False)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
                                         scraped_under=scraped_under,
-                                        mode_mismatch=mode_mismatch)})
+                                        mode_mismatch=mode_mismatch,
+                                        local_evidence=local_ok)})
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
@@ -257,4 +353,5 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total,
-                     scored_jobs=scored_jobs, steps=steps, titles=titles)
+                     scored_jobs=scored_jobs, steps=steps, titles=titles,
+                     badge_hits=badge_hits)

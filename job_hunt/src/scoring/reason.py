@@ -52,9 +52,13 @@ def compose_reason(evidence: dict) -> str:
     penalties = list(evidence.get("penalties") or [])
     if penalties:
         clauses.append(_readable_list(penalties))
+    elif matched and evidence.get("eligibility_verified"):
+        clauses.append("open to your location")
     elif matched:
-        # Only worth stating the absence when something else was found.
-        clauses.append("no visa or clearance limits found")
+        # Nothing was verifiable either way — unchecked must not
+        # masquerade as fine ("no limits found" used to imply exactly
+        # that).
+        clauses.append("location eligibility not verified")
 
     if not clauses:
         clauses.append("none of your tools were named in this posting")

@@ -96,8 +96,9 @@ def _announce_step(step: dict, printed_steps: set[tuple[str, str, str]]) -> None
     """
     key = (step["source"], step["role"], step.get("lane", "worldwide"))
     label = step["source"]
-    if step.get("lane") == "local":
-        label += " · local"
+    lane = step.get("lane", "worldwide")
+    if lane != "worldwide":
+        label += f" · {lane}"
     if step.get("state") == "done" and key not in printed_steps:
         printed_steps.add(key)
         print(f"  {label} / {step['role']}...")

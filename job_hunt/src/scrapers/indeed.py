@@ -43,7 +43,8 @@ def scrape(category: str, title: str,
            run_timeout: int = 120,
            location: str = _LEGACY_LOCATION,
            country: str = _LEGACY_COUNTRY,
-           work_modes=("remote",)) -> list[dict]:
+           work_modes=("remote",),
+           allow_fallback: bool = True) -> list[dict]:
     payload = {
         "query":      title,
         "location":   _location_for(location, work_modes),
@@ -56,10 +57,14 @@ def scrape(category: str, title: str,
     # The actor's input schema is undocumented. A rejected payload comes back
     # as an empty list, indistinguishable from a genuinely empty search, so
     # the only safe response is to retry once with the values known to work.
+    # But a probe or the local lane asked a narrow, deliberate question —
+    # remote/us answers a different one entirely (and re-fetches the
+    # worldwide lane's own results for the local lane). A search that found
+    # nothing there must stay silent rather than fabricate.
     fellback = False
     legacy = {**payload, "location": _LEGACY_LOCATION,
               "country": _LEGACY_COUNTRY}
-    if not raw and legacy != payload:
+    if allow_fallback and not raw and legacy != payload:
         logger.warning(
             "Indeed returned nothing for %s with location=%r country=%r — "
             "retrying with the legacy remote/us payload",

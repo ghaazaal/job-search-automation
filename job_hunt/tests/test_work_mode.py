@@ -154,3 +154,13 @@ def test_a_us_city_named_after_a_country_is_us():
     the string."""
     assert location_country("Holland, NY", _LOC_CFG) == "us"
     assert location_country("Georgia, US", _LOC_CFG) == "us"
+
+
+def test_jd_header_idioms_are_detected():
+    """'Work setup & shift: Onsite' is how BPO postings state the mode —
+    only matchable now that descriptions arrive unmangled."""
+    import yaml
+    cfg = yaml.safe_load(open("vocabulary.yaml", encoding="utf-8"))["work_mode"]
+    assert work_mode("work setup & shift: onsite. why join us?", cfg) == "onsite"
+    assert work_mode("work setup: hybrid, 3 days on site.", cfg) == "hybrid"
+    assert work_mode("work setup & shift: remote, night shift.", cfg) == "remote"
