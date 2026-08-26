@@ -160,6 +160,28 @@ def test_indeed_does_not_tag_without_a_fallback(monkeypatch):
     assert "_scraped_under" not in jobs[0]
 
 
+def test_indeed_stays_silent_when_fallback_is_disallowed(monkeypatch):
+    """A probe or the local lane asked a narrow question. An empty first
+    answer must stay empty — falling back to remote/us answers a
+    different question and, for a probe, would fabricate badge evidence."""
+    seen = _capture(monkeypatch, indeed, [[]])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Yerevan, Armenia", country="am",
+                         work_modes=["onsite"], allow_fallback=False)
+    assert len(seen) == 1
+    assert jobs == []
+
+
+def test_indeed_still_falls_back_by_default(monkeypatch):
+    """Pinning existing behaviour: worldwide lanes keep the retry."""
+    seen = _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
+                         location="Yerevan, Armenia", country="am",
+                         work_modes=["onsite"])
+    assert len(seen) == 2
+    assert len(jobs) == 1
+
+
 # ── LinkedIn ──────────────────────────────────────────────────────────────────
 
 def test_linkedin_maps_work_modes_to_remote_codes(monkeypatch):
@@ -205,6 +227,28 @@ def test_linkedin_returns_nothing_gracefully_when_the_retry_also_fails(monkeypat
                            work_modes=["onsite"])
     assert jobs == []
     assert len(seen) == 2
+
+
+def test_linkedin_stays_silent_when_fallback_is_disallowed(monkeypatch):
+    """This is the Critical: a probe's empty first answer must stay empty.
+    The legacy retry (Worldwide/remote) would otherwise hand back genuinely
+    remote jobs that get recorded as hybrid/onsite badge evidence."""
+    seen = _capture(monkeypatch, linkedin, [[]])
+    jobs = linkedin.scrape("BI Developer", "BI Developer", "actor~id",
+                           location="", country="ca",
+                           work_modes=["hybrid"], allow_fallback=False)
+    assert len(seen) == 1
+    assert jobs == []
+
+
+def test_linkedin_still_falls_back_by_default(monkeypatch):
+    """Pinning existing behaviour: worldwide lanes keep the retry."""
+    seen = _capture(monkeypatch, linkedin, [[], [_MINIMAL]])
+    jobs = linkedin.scrape("BI Developer", "BI Developer", "actor~id",
+                           location="Toronto, ON", country="ca",
+                           work_modes=["onsite"])
+    assert len(seen) == 2
+    assert len(jobs) == 1
 
 
 def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):

@@ -39,7 +39,8 @@ def scrape(category: str, title: str,
            run_timeout: int = 120,
            location: str = _LEGACY_LOCATION,
            country: str = "us",
-           work_modes=("remote",)) -> list[dict]:
+           work_modes=("remote",),
+           allow_fallback: bool = True) -> list[dict]:
     where, codes = _filters_for(location, work_modes)
     payload = {
         "title":      title,
@@ -51,10 +52,14 @@ def scrape(category: str, title: str,
     raw = call_actor(actor_id, payload, f"LinkedIn/{category}", run_timeout)
 
     # See the note in indeed.py: a rejected payload is indistinguishable from
-    # an empty search, so retry once with the values known to work.
+    # an empty search, so retry once with the values known to work. But a
+    # probe or the local lane asked a narrow, deliberate question — Worldwide/
+    # remote answers a different one, and for a probe that answer gets
+    # recorded as badge evidence. A search that found nothing there must
+    # stay silent rather than fabricate.
     legacy = {**payload, "location": _LEGACY_LOCATION,
               "remote": list(_LEGACY_REMOTE)}
-    if not raw and legacy != payload:
+    if allow_fallback and not raw and legacy != payload:
         logger.warning(
             "LinkedIn returned nothing for %s with location=%r remote=%r — "
             "retrying with the legacy Worldwide/remote payload",

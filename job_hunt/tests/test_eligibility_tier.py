@@ -70,6 +70,16 @@ def test_best_match_passes_local_evidence_through():
     assert e["eligibility_verified"] is True
 
 
+def test_a_stated_restriction_beats_local_evidence():
+    """A Yerevan-tagged posting that says 'must be based in the UK' is
+    not a verified sure thing — the tier and the sentence must agree."""
+    e = _scorer().score_job(
+        "BI Developer", _JD + " Must be based in the UK.", _RESUME,
+        local_evidence=True)
+    assert e["eligibility_verified"] is False
+    assert "restricted to UK" in e["reason"]
+
+
 def test_local_evidence_silences_the_board_flag():
     """A job verified as local needs no 'found via the US board' warning —
     positive evidence beats board uncertainty, and the card must not rank

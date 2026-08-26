@@ -122,9 +122,16 @@ class Scorer:
             "resume_id":            resume.get("id"),
             "resume_label":         resume.get("label") or "",
             # Internal + stored: positive evidence the user can take the
-            # job. Never rendered as a number — reason.py words it.
-            "eligibility_verified": bool(local_evidence
-                                         or geo_verdict == "eligible"),
+            # job. Never rendered as a number — reason.py words it. Local
+            # evidence (the job is in the user's own place) cannot verify
+            # past a stated restriction: a Yerevan-tagged posting that
+            # says "must be based in the UK" is not a verified sure
+            # thing, whatever its location field says — the tier and the
+            # sentence must agree.
+            "eligibility_verified": bool(
+                (local_evidence and geo_verdict not in ("restricted",
+                                                        "excluded"))
+                or geo_verdict == "eligible"),
         }
         # A band is never handed out without its sentence.
         evidence["reason"] = compose_reason(evidence)

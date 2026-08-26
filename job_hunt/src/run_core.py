@@ -143,10 +143,13 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     gates = (config.get("search", {}) or {}).get("sources") or {}
     sources = tuple(entry for entry in SOURCES
                     if gates.get(entry[0].lower(), True))
+    # Same convention for the probe lanes (search.probes). Missing key
+    # means enabled.
+    probes_on = bool((config.get("search", {}) or {}).get("probes", True))
 
     steps = plan_steps(titles, sources=sources,
                       local=bool((profile.get("location") or "").strip()),
-                      probes=True)
+                      probes=probes_on)
     scraped_total = 0
     dropped_total = 0
     probe_badges: dict[str, str] = {}
@@ -171,12 +174,18 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         if step["lane"].startswith("probe"):
             probe_mode = step["lane"].split(" ", 1)[1]      # hybrid|onsite
             try:
+                # allow_fallback=False: a probe asks a narrow, deliberate
+                # question (does this URL show up in a hybrid/onsite-
+                # filtered search?). The legacy Worldwide/remote retry
+                # answers a different one — genuinely remote jobs — and
+                # recording those under this probe's mode would fabricate
+                # badge evidence. An empty answer must stay empty.
                 found = scrapers[name](
                     step["role"], step["role"],
                     apify_cfg.get(actor_key, actor_default),
                     days_posted, jobs_per_cat, run_timeout,
                     location="", country=country,
-                    work_modes=(probe_mode,))
+                    work_modes=(probe_mode,), allow_fallback=False)
             except Exception as exc:
                 logger.warning("%s/%s failed: %s", name, step["role"], exc)
                 step["state"] = "failed"
@@ -185,24 +194,38 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                 step["state"] = "done"
                 step["found"] = len(found)
                 for job in found:
-                    probe_badges.setdefault(
-                        normalize_url(job.get("url") or ""), probe_mode)
+                    url = normalize_url(job.get("url") or "")
+                    seen = probe_badges.get(url)
+                    if seen is None:
+                        probe_badges[url] = probe_mode
+                    elif seen and seen != probe_mode:
+                        # Both probes claimed the same URL under different
+                        # modes — disagreement claims nothing, the same
+                        # rule every other conflict follows.
+                        probe_badges[url] = ""
             report("scraping")
             continue
 
         if step["lane"] == "local":
             lane_location = (profile.get("location") or "").strip()
             lane_modes = ("remote", "hybrid", "onsite")
+            # allow_fallback=False: a Yerevan search that comes back empty
+            # must not silently fall back to Worldwide/remote-us — that
+            # re-fetches the worldwide lane's own results under the local
+            # lane, double-counting `scraped` and defeating the point of
+            # having a local lane at all.
+            lane_kwargs = {"allow_fallback": False}
         else:
             lane_location = location
             lane_modes = work_modes
+            lane_kwargs = {}
         try:
             jobs = scrapers[name](
                 step["role"], step["role"],
                 apify_cfg.get(actor_key, actor_default),
                 days_posted, jobs_per_cat, run_timeout,
                 location=lane_location, country=country,
-                work_modes=lane_modes)
+                work_modes=lane_modes, **lane_kwargs)
         except Exception as exc:
             # One source failing must not throw away the other's results.
             logger.warning("%s/%s failed: %s", name, step["role"], exc)
@@ -244,18 +267,22 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     for job in new_jobs:
         text_mode = work_mode(f"{job.get('title') or ''}\n"
                               f"{job.get('description') or ''}", mode_cfg)
-        badge = probe_badges.get(normalize_url(job.get("url") or ""))
+        # A "" entry means the two probes claimed this URL under different
+        # modes — contested membership, already silence — `or None`
+        # collapses it the same as no badge at all.
+        badge = probe_badges.get(normalize_url(job.get("url") or "")) or None
         if text_mode and badge and text_mode != badge:
             # LinkedIn badges mislabel ~19% of the time (our own
             # measurement) and text can lie too — disagreement claims
             # nothing, the same rule every other conflict follows.
             mode = None
         elif badge and not text_mode:
+            # badge_hits counts only this: how often the badge told us
+            # something the text did not. Agreement is not a "hit" — the
+            # text already said it.
             mode = badge
             badge_hits += 1
         else:
-            if badge and text_mode == badge:
-                badge_hits += 1
             mode = text_mode
         if mode:
             job["work_mode"] = mode
