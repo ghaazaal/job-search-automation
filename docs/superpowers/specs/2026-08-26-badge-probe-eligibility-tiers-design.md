@@ -130,6 +130,22 @@ no geography at all — is **unverified**.
   dropped or flagged, probe steps visible, unverified cards reworded
   and ranked below verified.
 
+## Accepted residuals (reviewed, kept — with triggers)
+
+- **Probe recall is unmeasured** (top-50 worldwide window per filter).
+  `RunResult.badge_hits` counts badge-filled-silence; read it after the
+  first live runs to turn recall from a guess into a number.
+- **The reverse leak is unmeasured**: the hybrid filter may also leak
+  genuinely-remote postings, and a badge-only foreign "hybrid" with
+  silent text is dropped. The user's explicit product stance ("drop
+  them") plus the recorded-and-visible drop (run.dropped, the map's
+  HIDDEN note) carries this. Trigger to revisit: if live-run badge drops
+  appear, spot-check a sample against the live postings; a confirmed
+  reverse leak routes badge-only modes to the flag path instead.
+- A probe or local search that finds nothing is now indistinguishable
+  from an actor-rejected payload (`allow_fallback=False` trades that
+  signal away deliberately — silence over a wrong answer).
+
 ## Out of scope
 
 - Logged-in/cookie-based LinkedIn scraping (ToS and brittleness — not
