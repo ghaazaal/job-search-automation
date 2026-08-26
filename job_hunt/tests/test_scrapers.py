@@ -54,6 +54,25 @@ def test_missing_description_is_empty_string(module, monkeypatch):
     assert job["description"] == ""
 
 
+def test_indeed_description_under_the_real_nested_shape(monkeypatch):
+    """valig~indeed-jobs-scraper nests the body as description.text/html —
+    a bare string check on item["description"] misses it entirely, which is
+    why two full production runs came back with zero Indeed descriptions."""
+    item = {
+        **_MINIMAL,
+        "description": {
+            "text": ("Description:\n\nNuclear Power is a carbon-free energy "
+                      "source. You will work on major process controls "
+                      "engineering projects."),
+            "html": ("<p>Description:</p><p>Nuclear Power is a carbon-free "
+                      "energy source.</p>"),
+        },
+    }
+    job = _scrape(indeed, monkeypatch, item)
+    assert job["description"] != ""
+    assert "Nuclear Power" in job["description"]
+
+
 def _capture(monkeypatch, module, items):
     """Record the payload each call_actor invocation received."""
     seen = []

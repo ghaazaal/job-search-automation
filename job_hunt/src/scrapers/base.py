@@ -29,6 +29,11 @@ def extract_description(item: dict) -> str:
     """
     for key in _DESCRIPTION_KEYS:
         raw = item.get(key)
+        if isinstance(raw, dict):
+            # valig~indeed-jobs-scraper nests the body under
+            # description: {"text": ..., "html": ...} instead of putting
+            # a string directly on the top-level key.
+            raw = raw.get("text") or raw.get("html")
         if isinstance(raw, str) and raw.strip():
             text = html.unescape(_TAG_RE.sub(" ", raw))
             return _WS_RE.sub(" ", text).strip()
