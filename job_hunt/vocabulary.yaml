@@ -285,6 +285,8 @@ eligibility:
 # teams", bare "on-site" on "on-site gym". Every entry must be
 # role-anchored. Language facts only — whether a mode suits the user
 # lives in their profile.
+# Reviewed out: "no remote work" (…experience required), "office-based"
+# (…clients), "hybrid model" (ML term), "in-office days" (…are optional).
 work_mode:
   remote_phrases:
     - "fully remote"
@@ -292,25 +294,24 @@ work_mode:
     - "remote position"
     - "remote role"
     - "remote-first"
+    - "remote-only"
     - "work remotely"
     - "work from home"
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
-    - "hybrid model"
     - "hybrid working"
     - "hybrid position"
     - "hybrid schedule"
     - "days per week in the office"
     - "days a week in the office"
-    - "in-office days"
   onsite_phrases:
     - "on-site role"
     - "onsite role"
     - "on-site position"
     - "onsite position"
-    - "office-based"
     - "on-site only"
     - "onsite only"
     - "in-office role"
-    - "no remote work"
+    - "must work onsite"
+    - "onsite work required"
