@@ -116,6 +116,18 @@ Inside the `eligibility` section (after `ambiguous_names`):
               ks, ky, la, me, md, ma, mi, mn, ms, mo, mt, ne, nv, nh, nj,
               nm, ny, nc, nd, oh, ok, or, pa, ri, sc, sd, tn, tx, ut, vt,
               va, wa, wv, wi, wy, dc]
+  # Full state names for suffix-free US formats ("Austin, Texas").
+  # `georgia` is deliberately ambiguous with the country — handled in code.
+  us_state_names: [alabama, alaska, arizona, arkansas, california, colorado,
+                   connecticut, delaware, florida, georgia, hawaii, idaho,
+                   illinois, indiana, iowa, kansas, kentucky, louisiana,
+                   maine, maryland, massachusetts, michigan, minnesota,
+                   mississippi, missouri, montana, nebraska, nevada,
+                   "new hampshire", "new jersey", "new mexico", "new york",
+                   "north carolina", "north dakota", ohio, oklahoma, oregon,
+                   pennsylvania, "rhode island", "south carolina",
+                   "south dakota", tennessee, texas, utah, vermont,
+                   virginia, washington, "west virginia", wisconsin, wyoming]
 ```
 
 At the end of the file:
@@ -138,6 +150,8 @@ work_mode:
     - "remote-only"
     - "work remotely"
     - "work from home"
+    - "work from anywhere"
+    - "telecommute"
   hybrid_phrases:
     - "hybrid work"
     - "hybrid role"
@@ -151,8 +165,6 @@ work_mode:
     - "onsite role"
     - "on-site position"
     - "onsite position"
-    - "on-site only"
-    - "onsite only"
     - "in-office role"
     - "must work onsite"
     - "onsite work required"
@@ -372,6 +384,30 @@ def location_country(location: str, cfg: dict) -> str | None:
 Run: `python -m pytest tests/test_work_mode.py tests/test_matching.py tests/test_geo_verdict.py -v`
 Expected: all PASS (13 new + existing untouched — two same-named
 tests would shadow each other, hence the distinct empty-config names).
+
+> **Correction found during Task 2 code review** (probed against all 549
+> real stored locations — the shipped `matching.py` and test file are the
+> authority over this task's inline blocks, which predate it):
+> - **"georgia" is ambiguous both directions** ("Atlanta, Georgia" parsed
+>   as the country `ge` on Indeed's suffix-free `city, state` format — a
+>   drop-path corruption). Country aliases that are also US state names
+>   are skipped by the country scan AND the state fallback: silence both
+>   ways, including the accepted loss of "Tbilisi, Georgia".
+> - **The state-code fallback is tail-anchored** with an optional ZIP:
+>   "La Paz", "Or Yehuda", "Al Ain" and diacritic fragments ("iaşi" →
+>   "ia") no longer resolve to `us`. An ambiguous code stays silent even
+>   in `city, CODE` form — "San Francisco, CA" and "Chennai, IN" are
+>   structurally identical, so both are None: a safe silence beats a
+>   coin-flip that can delete a real job (accepted, pinned by test).
+> - **`eligibility.us_state_names`** added (full names): "Austin, Texas"
+>   → us.
+> - **Phrases**: "on-site only"/"onsite only" removed ("on-site only gym
+>   access"); "work from anywhere"/"telecommute" added — a thin remote
+>   list next to a rich hybrid list is what turns boilerplate into drops.
+> - **`work_mode` precompiles one alternation per category** (lru_cache) —
+>   ~5.2ms/job measured, ~5× saved.
+> - Task 5's ladder gained the Remote-location veto (see its code block):
+>   a location field of literally "Remote" beats a stray prose phrase.
 
 - [ ] **Step 5: Commit**
 
@@ -637,7 +673,7 @@ def test_a_local_hybrid_job_is_kept_without_penalty(conn, user, resume):
 
 def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume):
     job = _job("https://x/22")
-    job["location"] = "Remote"
+    job["location"] = "Jakarta Metropolitan Area"
     job["description"] += " Hybrid work, 2 days a week in the office."
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
@@ -646,6 +682,23 @@ def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume)
     evidence = result.scored_jobs[0]
     assert "says hybrid, you searched remote-only" in evidence["reason"]
     assert "_mode_mismatch" not in evidence
+
+
+def test_a_remote_tagged_location_vetoes_a_stray_prose_phrase(conn, user, resume):
+    """The location field says Remote (actor-tagged) while the prose says
+    hybrid — conflicting evidence claims nothing: kept, unflagged, no
+    stored mode. 36% of real stored locations are literally 'Remote', and
+    they are exactly where the phrase list is blindest."""
+    job = _job("https://x/25")
+    job["location"] = "Remote"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[job]))
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert "says hybrid" not in evidence["reason"]
+    assert evidence.get("work_mode") is None
 
 
 def test_a_job_with_no_mode_word_is_untouched(conn, user, resume):
@@ -707,6 +760,14 @@ In `job_hunt/src/run_core.py`:
         if mode:
             job["work_mode"] = mode
         if mode and user_modes and mode not in user_modes:
+            raw_location = (job.get("location") or "").strip().lower()
+            if raw_location == "remote":
+                # The location field says remote (actor-tagged) while the
+                # prose says otherwise — conflicting evidence, so claim
+                # nothing: no drop, no flag, no stored mode.
+                job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
             place = location_country(job.get("location") or "", loc_cfg)
             if place and user_country and place != user_country:
                 dropped_total += 1
@@ -738,7 +799,7 @@ Note `dropped_total` is assigned inside `execute` before `report` is ever called
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_run_core_execute.py -v`
-Expected: all 19 PASS.
+Expected: all 20 PASS.
 
 - [ ] **Step 5: Mutation-check the drop boundary**
 
