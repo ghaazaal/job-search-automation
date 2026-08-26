@@ -72,8 +72,8 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["eligible_phrases"]
     assert eligibility["regions"]
     assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "eligible_phrases", "ambiguous_names",
-            "regions"} == set(eligibility)
+            "eligible_phrases", "ambiguous_names", "regions",
+            "us_states"} == set(eligibility)
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
@@ -96,3 +96,31 @@ def test_the_geo_penalties_are_configured():
     penalties = _vocabulary()["penalties"]
     assert penalties["geo_restricted"] == penalties["clearance"]
     assert penalties["wrong_board"] < penalties["geo_restricted"]
+
+
+def test_the_work_mode_section_holds_role_anchored_phrases():
+    """Phrases only, never bare words — bare 'hybrid' fires on 'hybrid
+    cloud', bare 'remote' on 'remote teams', bare 'on-site' on 'on-site
+    gym'. Single-word entries are how those false positives creep back."""
+    work_mode = _vocabulary()["work_mode"]
+    assert {"remote_phrases", "hybrid_phrases",
+            "onsite_phrases"} == set(work_mode)
+    for phrases in work_mode.values():
+        assert phrases
+        assert all(" " in p or "-" in p for p in phrases), \
+            "single bare words are banned here"
+
+
+def test_the_mode_mismatch_penalty_is_configured():
+    penalties = _vocabulary()["penalties"]
+    assert 0 < penalties["mode_mismatch"] < penalties["geo_restricted"]
+
+
+def test_us_states_are_two_letter_strings():
+    """`in` (Indiana) is not a YAML boolean, but `on`/`no`/`off` would be —
+    none of them are US states, and this guard keeps every entry a
+    2-letter string if that ever changes."""
+    states = _vocabulary()["eligibility"]["us_states"]
+    assert states
+    assert all(isinstance(s, str) and len(s) == 2 for s in states)
+    assert "ny" in states and "dc" in states

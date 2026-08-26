@@ -107,6 +107,7 @@ penalties:
   exec_penalty: 10
   geo_restricted: 30   # a stated country restriction is the same class of blocker as clearance
   wrong_board:    10   # softer: results from Indeed's us fallback carry uncertainty, not a stated restriction
+  mode_mismatch:  15   # says hybrid/on-site, the user searched remote-only, and the place could not be parsed
 
 # Point values. Kept here rather than in code so the weights can be tuned
 # without a commit to src/. These are seeds, not findings — validating them
@@ -208,6 +209,13 @@ eligibility:
   # country from the pronoun. Restriction templates are exempt: their
   # surrounding text ("us citizens only") disambiguates on its own.
   ambiguous_names: [us]
+  # For parsing stored location strings ("New York, NY" -> us). Two-letter
+  # state codes; none collide with YAML booleans today, and the guard test
+  # keeps it that way.
+  us_states: [al, ak, az, ar, ca, co, ct, de, fl, ga, hi, id, il, in, ia,
+              ks, ky, la, me, md, ma, mi, mn, ms, mo, mt, ne, nv, nh, nj,
+              nm, ny, nc, nd, oh, ok, or, pa, ri, sc, sd, tn, tx, ut, vt,
+              va, wa, wv, wi, wy, dc]
   templates:            # restriction phrasings; {country} is the slot
     - "must be based in {country}"
     - "must reside in {country}"
@@ -271,3 +279,38 @@ eligibility:
       codes: [us, ca, mx, br, ar, co]
     - names: [latam, latin america]
       codes: [mx, br, ar, co]
+
+# How postings phrase the way a role is worked. Phrases only, never bare
+# words: bare "hybrid" fires on "hybrid cloud", bare "remote" on "remote
+# teams", bare "on-site" on "on-site gym". Every entry must be
+# role-anchored. Language facts only — whether a mode suits the user
+# lives in their profile.
+work_mode:
+  remote_phrases:
+    - "fully remote"
+    - "100% remote"
+    - "remote position"
+    - "remote role"
+    - "remote-first"
+    - "work remotely"
+    - "work from home"
+  hybrid_phrases:
+    - "hybrid work"
+    - "hybrid role"
+    - "hybrid model"
+    - "hybrid working"
+    - "hybrid position"
+    - "hybrid schedule"
+    - "days per week in the office"
+    - "days a week in the office"
+    - "in-office days"
+  onsite_phrases:
+    - "on-site role"
+    - "onsite role"
+    - "on-site position"
+    - "onsite position"
+    - "office-based"
+    - "on-site only"
+    - "onsite only"
+    - "in-office role"
+    - "no remote work"
