@@ -199,3 +199,15 @@ def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
     linkedin.scrape("BI Developer", "BI Developer", "actor~id")
     assert linkedin_seen[0]["location"] == "Worldwide"
     assert linkedin_seen[0]["remote"] == ["2"]
+
+
+@pytest.mark.parametrize("module", [indeed, linkedin])
+def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
+    """The Indeed actor returns ~100 when asked for 50. The cap is
+    enforced at the client boundary regardless of actor behavior."""
+    items = [{**_MINIMAL, "jobUrl": f"https://example.com/j{i}"}
+             for i in range(100)]
+    _patch(monkeypatch, module, items)
+    jobs = module.scrape("Data Analyst", "Data Analyst", "actor~id",
+                         jobs_per_category=50)
+    assert len(jobs) == 50
