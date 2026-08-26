@@ -599,6 +599,24 @@ def location_country(location: str, cfg: dict) -> str | None:
        "Austin, Texas" resolves to "us". Same ambiguity guard as rule 1:
        "Georgia" alone in the tail resolves to nothing, because it
        cannot be told apart from the country.
+    4. TAIL PREFERENCE: US cities are routinely named after other
+       countries — "Holland, MI", "Poland, OH", "Mexico, MO", "China,
+       TX", "Denmark, SC", "Norway, MI", and Indeed's suffix-free format
+       "Holland, Michigan" all name a real US town, not the country a
+       rule-1 scan would otherwise find earlier in the string. So before
+       returning a rule-1 country-name match, the tail is independently
+       checked against rules 2 and 3 (same ambiguity guards, same
+       tail-anchoring); if the tail resolves to "us" on its own, that
+       wins over the country-name match. This does not reorder rules 2
+       and 3 against each other, and it does not touch cases where rule
+       1 already found "us" ("Georgia, US", "Remote, US" — the tail
+       there is a country NAME match, unaffected by this check). A
+       region name with no comma to split on ("New England") is a known,
+       accepted miss: the tail is the whole string, which does not look
+       like a state code or state name, so rule 1's "gb" (from
+       "england") still wins — there is nothing here that could tell
+       the parser a comma-free multi-word string is a US region rather
+       than a country-bearing phrase.
 
     Two silences are accepted by design, both because a wrong guess here
     can drop a real, eligible job: (a) the Georgia name/state collision,
@@ -630,8 +648,6 @@ def location_country(location: str, cfg: dict) -> str | None:
             for match in re.finditer(_bounded(name), location):
                 if best is None or match.start() > best[0]:
                     best = (match.start(), str(code).strip().lower())
-    if best:
-        return best[1]
 
     tail = location.rsplit(",", 1)[-1].strip()
     states = {str(s).strip().lower() for s in cfg.get("us_states") or []}
@@ -641,9 +657,12 @@ def location_country(location: str, cfg: dict) -> str | None:
     if code_match:
         token = code_match.group(1)
         if token in states and token not in codes:
+            # Rule 4: a tail that independently says "us" outranks
+            # whatever rule 1 found earlier in the string.
             return "us"
-        return None
-
-    if tail in state_names and tail not in ambiguous_names:
+    elif tail in state_names and tail not in ambiguous_names:
         return "us"
+
+    if best:
+        return best[1]
     return None

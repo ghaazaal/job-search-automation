@@ -20,6 +20,7 @@ _LOC_CFG = {
         "gb": ["uk", "united kingdom", "britain", "england"],
         "ge": ["georgia"],
         "in": ["india"],
+        "nl": ["netherlands", "holland"],
     },
     "us_states": ["ny", "wa", "ga", "tx", "in"],
     "us_state_names": ["georgia", "texas", "new york"],
@@ -137,6 +138,19 @@ def test_an_ambiguous_state_code_is_silent_even_in_city_code_form():
 
 
 def test_substring_matching_would_be_wrong():
-    """Mutation killers: phrase matching must stay word-bounded."""
-    assert work_mode("we operate remote-firstly here.", _MODE_CFG) is None
+    """Mutation killers: phrase matching must stay word-bounded.
+
+    has_term("remote position", "...remote positions open.") is False:
+    the lookahead after "position" sees "s", so the bounded pattern does
+    not match "remote positions" — a substring-matching mutant would
+    wrongly match and return "remote"."""
+    assert work_mode("we have 3 remote positions open.", _MODE_CFG) is None
     assert location_country("Indiaville", _LOC_CFG) is None
+
+
+def test_a_us_city_named_after_a_country_is_us():
+    """'Holland, MI' is Michigan, not the Netherlands — when the tail
+    independently says us, it outranks a country-name match earlier in
+    the string."""
+    assert location_country("Holland, NY", _LOC_CFG) == "us"
+    assert location_country("Georgia, US", _LOC_CFG) == "us"
