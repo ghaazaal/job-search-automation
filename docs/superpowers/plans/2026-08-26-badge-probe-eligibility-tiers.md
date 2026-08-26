@@ -596,6 +596,32 @@ git commit -m "feat: the badge and local evidence reach the ladder and the score
 
 ---
 
+> **Corrections found during Task 6 quality review** (reproduced against
+> real scrapers and replayed on the 712-row corpus — the shipped code is
+> the authority):
+> - **Probes and the local lane never fall back.** LinkedIn's empty-result
+>   legacy retry turned an empty probe into a REMOTE search, fabricating
+>   hybrid badges that dropped legitimate remote jobs (reproduced). Both
+>   scrapers gained `allow_fallback: bool = True`; probes and the local
+>   lane pass False — silence stays silent.
+> - **Contested probe membership claims nothing** (both probes naming one
+>   URL → sentinel → treated as no badge).
+> - **`local_evidence` cannot verify past a stated restriction** — the
+>   tier and the sentence must agree (`geo_verdict` restricted/excluded
+>   blocks it).
+> - **`badge_hits` counts only badge-filled-silence**; `search.probes`
+>   config gate added (missing → enabled).
+> - The review's disjointness concern ("probe and candidate sets cannot
+>   overlap — one badge, same filter both sides") is REBUTTED by field
+>   evidence and recorded here so it is not re-raised: the probe's target
+>   is the LEAK set — postings LinkedIn's remote filter returns despite a
+>   hybrid/onsite badge (~19% of returned "remote" results by our own
+>   run-2 measurement). Leaks are dual-members by definition, and the
+>   motivating Salford/Anaplan posting was empirically observed in BOTH a
+>   remote-filtered scrape (run 3) and a hybrid-filtered diagnostic. The
+>   mechanism aims at leaks and provably reaches them; expected yield is
+>   the leak rate within the probe window, not zero.
+
 ### Task 7: verified-first company ranking
 
 **Files:**
