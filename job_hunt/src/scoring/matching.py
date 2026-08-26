@@ -510,3 +510,60 @@ def geo_verdict(body: str, user_country: str,
                 maybe_more=maybe_more))
 
     return ("unknown", None)
+
+
+def work_mode(body: str, cfg: dict) -> str | None:
+    """How a posting says the role is worked, if it says so at all.
+
+    Phrase lists come from vocabulary.yaml — phrases only, never bare
+    words, because bare "hybrid" fires on "hybrid cloud" and bare
+    "remote" on "remote teams". Exactly one category matching yields its
+    mode; zero or conflicting evidence ("remote or hybrid") yields None,
+    the same no-claim discipline geo_verdict follows. A title tag like
+    "(Hybrid)" with no body phrase is an accepted miss — bare-word
+    matching is the greater evil.
+    """
+    body = (body or "").lower()
+    cfg = cfg or {}
+    found = [mode for mode, key in (("remote", "remote_phrases"),
+                                    ("hybrid", "hybrid_phrases"),
+                                    ("onsite", "onsite_phrases"))
+             if any(has_term(str(p).strip().lower(), body)
+                    for p in cfg.get(key) or [] if str(p).strip())]
+    return found[0] if len(found) == 1 else None
+
+
+def location_country(location: str, cfg: dict) -> str | None:
+    """The country a stored location string names, if it names one.
+
+    Country names are matched word-bounded and the RIGHTMOST match wins —
+    locations end with the country ("Georgia, US" is the state,
+    "Tbilisi, Georgia" the country). Bare "us" is allowed here: a
+    location string is not prose, so the pronoun hazard geo_verdict
+    guards against does not apply. With no country name, any token that
+    is a 2-letter code in `us_states` resolves to "us" — UNLESS that token
+    is also a country ISO code ("Chennai, IN" abbreviates India, "Gary,
+    IN" Indiana; the token cannot tell them apart, so it claims nothing).
+    Anything else — including "Remote" — is None: no claim.
+    """
+    location = (location or "").lower()
+    if not location:
+        return None
+    cfg = cfg or {}
+    best: tuple[int, str] | None = None
+    for code, names in (cfg.get("countries") or {}).items():
+        for name in names or []:
+            name = str(name).strip().lower()
+            if not name:
+                continue
+            for match in re.finditer(_bounded(name), location):
+                if best is None or match.start() > best[0]:
+                    best = (match.start(), str(code).strip().lower())
+    if best:
+        return best[1]
+    states = {str(s).strip().lower() for s in cfg.get("us_states") or []}
+    codes = {str(c).strip().lower() for c in cfg.get("countries") or {}}
+    for token in re.findall(r"(?<![a-z])[a-z]{2}(?![a-z])", location):
+        if token in states and token not in codes:
+            return "us"
+    return None
