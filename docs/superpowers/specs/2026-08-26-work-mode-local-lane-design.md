@@ -38,6 +38,15 @@ Field data from run 2 (post-Ship-4, user in Yerevan, remote-only profile,
 - **Unparseable location → flag, not drop.** Without knowing where the
   job is, a silent drop cannot be justified; the posting stays with a
   penalty and a stated reason.
+- **Drops are recorded and visible** (hardened after review replayed the
+  ladder on 549 real postings: 30 drops, 29 correct, 1 wrong): the run
+  row keeps a `dropped` count and the progress screen says "N hidden
+  (on-site elsewhere)". A word-bounded `remote` token anywhere in the
+  location field vetoes the mode claim ("Remote, US" is Indeed's
+  placeholder); the profile's own city in the job location keeps it
+  local without a country parse; "location: remote" counts as remote
+  evidence so a perks-list "hybrid work options" resolves as conflict,
+  not a drop.
 - **No mode word → no claim.** Same discipline as geography.
 - **Add the local lane.** Each run searches every role twice per source:
   the worldwide-remote cast (unchanged) plus the profile's location with

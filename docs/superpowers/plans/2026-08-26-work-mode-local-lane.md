@@ -801,6 +801,31 @@ Note `dropped_total` is assigned inside `execute` before `report` is ever called
 Run: `python -m pytest tests/test_run_core_execute.py -v`
 Expected: all 20 PASS.
 
+> **Correction found during Task 5 quality review** (the review replayed
+> the ladder over all 549 real stored postings: 30 drops, 29 correct, one
+> real wrong deletion — the shipped code is the authority over the inline
+> block above):
+> - **The veto matches a word-bounded `remote` token in the location**,
+>   not exact equality — "Remote, US" is Indeed's own we-don't-know
+>   placeholder and was landing on the drop side for non-US users.
+> - **The user's own city keeps a job local without a country parse**:
+>   "Toronto, ON" has no parseable country, but it IS Toronto — the
+>   profile's first comma-segment, word-bounded in the job location,
+>   keeps the job clean (also pre-solves the province-code gap before
+>   Task 6's local lane).
+> - **"location: remote" joined remote_phrases** — rescues the reviewed
+>   real wrong drop (perks-list "hybrid work options" on a
+>   "Location: Remote" posting) via conflict→None.
+> - **Drops are recorded and visible**: `run.dropped` column (folded into
+>   the unreleased v4 migration), `finish_run`/`persist_run` carry it,
+>   and the searching page's note shows "N hidden (on-site elsewhere)".
+>   A silent, unrecorded deletion was the review's one unacceptable.
+> - The ladder runs BEFORE the enrich hook (dropped jobs must not cost
+>   LLM lookups), and its `user_modes` falls back to ["remote"] exactly
+>   like the scrape does.
+> - Five regression tests + a migration and a searching-page assertion
+>   were added; test counts in the steps above predate them.
+
 - [ ] **Step 5: Mutation-check the drop boundary**
 
 1. In the ladder, change `place != user_country` to `True` (drop whenever a foreign OR local place parses).
