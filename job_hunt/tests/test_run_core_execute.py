@@ -405,3 +405,30 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
     assert len(seen[0]["steps"]) == 2
+
+
+def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
+    config = {**_CONFIG,
+              "search": {**_CONFIG["search"], "sources": {"indeed": False}}}
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        return []
+
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, config, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    sources = {s["source"] for s in seen[0]["steps"]}
+    assert sources == {"LinkedIn"}
+
+
+def test_a_missing_sources_key_enables_everything(conn, user, resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+    assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}

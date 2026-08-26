@@ -121,7 +121,13 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     country    = profile.get("country") or "us"
     work_modes = profile.get("work_modes") or ["remote"]
 
-    steps = plan_steps(titles,
+    # A source can be switched off in config.yaml (search.sources).
+    # Missing key means enabled, so existing configs keep working.
+    gates = (config.get("search", {}) or {}).get("sources") or {}
+    sources = tuple(entry for entry in SOURCES
+                    if gates.get(entry[0].lower(), True))
+
+    steps = plan_steps(titles, sources=sources,
                       local=bool((profile.get("location") or "").strip()))
     scraped_total = 0
     dropped_total = 0
@@ -140,7 +146,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
         name = step["source"]
         actor_key, actor_default = next(
-            (key, default) for source, key, default in SOURCES
+            (key, default) for source, key, default in sources
             if source == name)
         if step["lane"] == "local":
             lane_location = (profile.get("location") or "").strip()
