@@ -25,7 +25,8 @@ from .store.ingest import ensure_user
 from .store.profile import (create_resume, delete_resume, get_profile,
                             get_resume, list_resumes, resume_by_sha,
                             set_profile, unique_label, update_resume)
-from .store.queries import activity_board, map_sections, mark_seen
+from .store.queries import (activity_board, eligibility_counts,
+                            map_sections, mark_seen)
 from .store.runs import (active_run, clear_running, fail_run, get_run,
                          is_stale, latest_ok_run)
 from .store.schema import init_db
@@ -120,12 +121,14 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                     hidden = latest_run.get("dropped") or 0
                     offtopic = latest_run.get("offtopic") or 0
 
+            counts = eligibility_counts(conn, user_id)
+
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden, "offtopic": offtopic},
+                      "hidden": hidden, "offtopic": offtopic, **counts},
                 running_run_id=in_flight["id"] if in_flight else None)
 
             if latest:

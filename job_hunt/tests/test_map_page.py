@@ -254,3 +254,23 @@ def test_no_mode_means_no_chip():
     html = render([_map()])
     assert "HYBRID" not in html and "ONSITE" not in html
     assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0})
+
+
+def test_the_header_states_what_was_set_aside():
+    """Listing only open roles is a deliberate narrowing of
+    flag-never-hide, so the header carries the whole account."""
+    html = render([], meta={"companies": 0, "roles": 0,
+                            "open": 2, "closed": 66, "unverified": 316,
+                            "offtopic": 124})
+    assert "2 OPEN" in html
+    assert "66 NOT OPEN" in html
+    assert "316 UNVERIFIED" in html
+    assert "124 OFF-TOPIC" in html
+
+
+def test_an_empty_map_reads_as_checked_not_broken():
+    """Zero open roles is an answer. It must not render as a blank page."""
+    html = render([], meta={"companies": 0, "roles": 0,
+                            "open": 0, "closed": 87, "unverified": 297})
+    assert "0 OPEN" in html
+    assert "87 NOT OPEN" in html

@@ -100,13 +100,31 @@ def _scrapers(linkedin_jobs=None, remote_boards_jobs=None,
 
 
 def test_scraped_jobs_are_scored_and_stored(conn, user, resume):
+    """The map lists roles proven open, so reaching it takes a board row
+    whose published reach names somewhere the user can work."""
+    job = {**_job("https://x/1"), "source_board": "himalayas",
+           "location": "Anywhere in the World"}
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_scrapers(remote_boards_jobs=[_job("https://x/1")]))
+                     scrapers=_scrapers(remote_boards_jobs=[job]))
 
     assert result.kept == 1
     sections = map_sections(conn, user, 7)
     assert sections["new"], "the stored role should appear on the map"
+
+
+def test_an_unverified_role_is_stored_but_not_listed(conn, user, resume):
+    """A LinkedIn row has a place, not a reach statement. It is kept and
+    counted, and it does not claim to be somewhere the user can work."""
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(linkedin_jobs=[_job("https://x/2")]))
+
+    assert result.kept == 1
+    assert not map_sections(conn, user, 7)["new"]
+    row = conn.execute("SELECT location_scope FROM role WHERE url = ?",
+                       ("https://x/2",)).fetchone()
+    assert row["location_scope"] is None
 
 
 def test_the_run_finishes_ok(conn, user, resume):

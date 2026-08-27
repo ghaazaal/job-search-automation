@@ -15,7 +15,10 @@ def _job(url, title="Analytics Engineer"):
             "date": "2026-08-08", "description": "dbt",
             "description_captured": True, "match_score": 9,
             "band": "STRONG FIT", "reason": "matches dbt",
-            "matched": ["dbt"], "gaps": []}
+            "matched": ["dbt"], "gaps": [],
+            # The map lists only roles proven open to the user, so this is
+            # what "a role that reaches the screen" means now.
+            "location_scope": "open"}
 
 
 def _finish_setup(conn, user_id):
