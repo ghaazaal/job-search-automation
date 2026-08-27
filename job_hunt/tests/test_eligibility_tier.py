@@ -79,13 +79,3 @@ def test_a_stated_restriction_beats_local_evidence():
     assert e["eligibility_verified"] is False
     assert "restricted to UK" in e["reason"]
 
-
-def test_local_evidence_silences_the_board_flag():
-    """A job verified as local needs no 'found via the US board' warning —
-    positive evidence beats board uncertainty, and the card must not rank
-    verified while its sentence claims otherwise."""
-    e = _scorer().score_job("BI Developer", _JD, _RESUME,
-                            scraped_under="us", local_evidence=True)
-    assert e["eligibility_verified"] is True
-    assert "US board" not in e["reason"]
-    assert "open to your location" in e["reason"]

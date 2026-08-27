@@ -262,22 +262,6 @@ def test_a_foreign_restriction_reaches_the_stored_reason(conn, user, resume):
     assert "restricted to UK" in result.scored_jobs[0]["reason"]
 
 
-def test_the_fallback_tag_becomes_a_flag_and_never_reaches_the_store(conn, user, resume):
-    # Location must be unplaceable, not the fixture's default "Toronto,
-    # ON" — that verifies locally now (Task 6) and local evidence beats
-    # board uncertainty, silencing the very flag this test checks for.
-    tagged = {**_job("https://x/8"), "_scraped_under": "us",
-             "location": "Remote"}
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_scrapers(remote_boards_jobs=[tagged]))
-    evidence = result.scored_jobs[0]
-    assert "not verified for your country" in evidence["reason"]
-    # Popped, not read: the transient key must be gone from what the
-    # LLM/Excel steps and persist_run receive.
-    assert "_scraped_under" not in evidence
-
-
 def test_a_foreign_onsite_job_is_dropped_not_stored(conn, user, resume):
     job = _job("https://x/20")
     job["location"] = "Bengaluru, Karnataka, India"

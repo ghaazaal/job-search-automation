@@ -424,17 +424,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                     user_modes=user_modes)
     scored_jobs = []
     for job in new_jobs:
-        # Set by the Indeed scraper when its us-board fallback fired.
-        # Popped — not read — so the transient key can never reach
-        # persist_run, the store, or the terminal path's later steps.
-        scraped_under = job.pop("_scraped_under", None)
         mode_mismatch = job.pop("_mode_mismatch", None)
         local_ok = job.pop("_local_ok", False)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
-                                        scraped_under=scraped_under,
                                         mode_mismatch=mode_mismatch,
                                         local_evidence=local_ok)})
 
