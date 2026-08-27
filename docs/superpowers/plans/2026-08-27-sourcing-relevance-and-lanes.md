@@ -44,7 +44,7 @@ be measured against anything real.
 - `job_hunt/src/run_core.py` — delete probes, add the relevance gate, add mode lanes, register the fourth source.
 - `job_hunt/src/scrapers/linkedin.py` — delete the dead `remote` parameter.
 - `job_hunt/src/scrapers/indeed.py` — swap to the `kaix` payload and field shape.
-- `job_hunt/src/store/schema.py` — migration v6 for the new columns.
+- `job_hunt/src/store/schema.py` — migration v6 (run.offtopic, Task 3) and v7 (role columns, Task 9).
 - `job_hunt/config.yaml` — actor ids, drop `search.probes`.
 
 **Delete:**
@@ -477,6 +477,36 @@ work-mode policy comment block, insert:
 Note: `vocab` is loaded a few lines below this point today. Move the
 three lines that load it (`with open(VOCABULARY_PATH...)` through
 `loc_cfg = ...`) to just above this block so `vocab` is defined here.
+
+- [ ] **Step 5b: Persist the count durably**
+
+The spec requires the count to live "on the run row so the drop is
+visible, never silent." The progress payload is transient — after the
+run finishes it is gone. `dropped` already has a durable path; follow it
+exactly rather than inventing a parallel mechanism:
+
+```
+dropped_total -> persist_run(dropped=...) -> finish_run -> run.dropped
+              -> get_run() -> app.py:119 -> "N HIDDEN (ON-SITE ELSEWHERE)"
+```
+
+1. Add an `offtopic` column to the `run` table in
+   `job_hunt/src/store/schema.py` as **migration v6**, mirroring
+   `dropped` (`INTEGER NOT NULL DEFAULT 0`), and add it to the
+   `CREATE TABLE` the way `dropped` appears in both.
+2. Give `finish_run` (`job_hunt/src/store/runs.py`) and `persist_run`
+   (`job_hunt/src/pipeline_store.py`) an `offtopic` parameter, and pass
+   `offtopic=offtopic_total` from `run_core.py`.
+3. Have `get_run()` return it alongside `dropped`.
+4. Surface it in `app.py` next to the existing hidden-count note. Read
+   `DESIGN.md` and the existing note first and follow the established
+   pattern — the two counts must read as distinct: `dropped` is "right
+   kind of job, wrong place", `offtopic` is "not this job at all".
+
+Test each layer: the migration adds the column and defaults existing
+rows to 0; `finish_run` writes it; `get_run` reads it back; the app
+surfaces it. Follow `test_store_migration.py`, `test_store_runs.py` and
+`test_app.py`.
 
 - [ ] **Step 6: Return the count**
 
@@ -1505,7 +1535,7 @@ git commit -m "feat: register remote boards as the fourth source"
 
 ---
 
-### Task 9: Schema migration v6
+### Task 9: Schema migration v7
 
 The new sources supply a country code and a reach field that today have nowhere to live.
 
@@ -1519,28 +1549,28 @@ The new sources supply a country code and a reach field that today have nowhere 
 Add to `job_hunt/tests/test_store_migration.py`:
 
 ```python
-def test_v6_adds_country_and_scope(v5_database):
+def test_v7_adds_country_and_scope(v6_database):
     from src.store.schema import ensure_schema
-    ensure_schema(v5_database)
-    cols = {row[1] for row in v5_database.execute("PRAGMA table_info(role)")}
+    ensure_schema(v6_database)
+    cols = {row[1] for row in v6_database.execute("PRAGMA table_info(role)")}
     assert {"country", "location_scope", "source_board"} <= cols
 
 
-def test_v6_defaults_are_null_on_existing_rows(v5_database):
+def test_v7_defaults_are_null_on_existing_rows(v6_database):
     from src.store.schema import ensure_schema
-    ensure_schema(v5_database)
-    row = v5_database.execute(
+    ensure_schema(v6_database)
+    row = v6_database.execute(
         "SELECT country, location_scope FROM role LIMIT 1").fetchone()
     assert row is None or (row[0] is None and row[1] is None)
 ```
 
-If no `v5_database` fixture exists, build it the way the existing tests
+If no `v6_database` fixture exists, build it the way the existing tests
 in `test_store_migration.py` build their older-version fixtures — do not
 invent a new one.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd job_hunt && python -m pytest tests/test_store_migration.py -k v6 -v`
+Run: `cd job_hunt && python -m pytest tests/test_store_migration.py -k v7 -v`
 Expected: FAIL — column `country` does not exist.
 
 - [ ] **Step 3: Add the migration**
@@ -1548,7 +1578,7 @@ Expected: FAIL — column `country` does not exist.
 In `job_hunt/src/store/schema.py`, add to `_MIGRATIONS`:
 
 ```python
-    6: (
+    7: (
         # kaix supplies a structured country code, so Indeed rows never
         # need `location_country`'s ambiguity cases ("Chennai, IN" vs
         # "Gary, IN", which both stay silent).
@@ -1586,7 +1616,7 @@ Expected: PASS.
 
 ```bash
 git add job_hunt/src/store/schema.py job_hunt/src/store/ingest.py job_hunt/tests/test_store_migration.py
-git commit -m "feat: schema v6 - country, location_scope, source_board"
+git commit -m "feat: schema v7 - country, location_scope, source_board"
 ```
 
 ---
