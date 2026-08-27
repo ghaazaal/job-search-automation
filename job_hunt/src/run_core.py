@@ -75,6 +75,98 @@ def _default_scrapers() -> dict:
     return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape}
 
 
+def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
+                 work_modes) -> tuple[list[dict], int, int]:
+    """Everything that decides whether a scraped job is worth scoring.
+
+    Two independent gates, in order of cheapness. The relevance gate
+    asks whether this is the job at all, and rejects ~41% of what the
+    actors return. The work-mode/geo policy then asks whether this user
+    could take it, which needs the vocabulary and the profile country.
+
+    Returns (kept, offtopic_count, dropped_count). Both counts are
+    reported and persisted — nothing here disappears silently.
+    """
+    from .scoring.matching import has_term, location_country, work_mode
+    from .scoring.relevance import is_target_role
+
+    # Relevance gate. 41% of what these actors return is not a data role
+    # at all — Nurse Practitioner, Travel Advisor, Fleet Parking
+    # Specialist. The scorer rates them 1-4 and they were stored anyway.
+    # Rejecting here means an off-target role costs no enrichment lookup
+    # and no scoring pass. Counted, never silent.
+    role_cfg = vocab.get("roles") or {}
+    on_topic = [job for job in new_jobs
+               if is_target_role(job.get("title"), role_cfg)]
+    offtopic_total = len(new_jobs) - len(on_topic)
+    new_jobs = on_topic
+
+    # Work-mode policy. The one user-approved exception to flag-never-
+    # hide: a posting that states a mode the user did not search for,
+    # located in a country that is not theirs, is dropped — bounded by
+    # requiring BOTH the explicit phrase AND a confidently-parsed
+    # country. Local ones are workable in person and kept clean;
+    # unplaceable ones are flagged, because a silent drop cannot be
+    # justified without knowing where the job is. Runs before `enrich`
+    # so a dropped job never costs a company-enrichment lookup.
+    mode_cfg = vocab.get("work_mode") or {}
+    loc_cfg = vocab.get("eligibility") or {}
+    # Same fallback the scrape itself uses (see `work_modes` above) — an
+    # empty profile silently disabling the policy would also leave the
+    # scorer's own "remote" fallback dead code.
+    user_modes = tuple(str(m).strip().lower()
+                       for m in work_modes if str(m).strip())
+    user_country = (profile.get("country") or "").strip().lower()
+    profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
+
+    dropped_total = 0
+    kept_jobs = []
+    for job in new_jobs:
+        mode = work_mode(f"{job.get('title') or ''}\n"
+                         f"{job.get('description') or ''}", mode_cfg)
+        if mode:
+            job["work_mode"] = mode
+
+        raw_location = (job.get("location") or "").strip().lower()
+        place = location_country(job.get("location") or "", loc_cfg)
+        local_ok = bool(
+            (profile_city and has_term(profile_city, raw_location))
+            or (place and user_country and place == user_country))
+        if local_ok:
+            # Positive evidence the job is in the user's own place —
+            # popped before scoring, handed to the scorer explicitly.
+            job["_local_ok"] = True
+
+        if mode and user_modes and mode not in user_modes:
+            if has_term("remote", raw_location):
+                # The location field carrying "remote" anywhere is the
+                # actor's own tag on where the job is — it beats a stray
+                # prose phrase, whatever the actor appended after it
+                # ("Remote, US" is Indeed's own placeholder, "Remote -
+                # Canada", "Toronto, ON (Remote)"). Conflicting evidence
+                # claims nothing: no drop, no flag, no stored mode.
+                job.pop("work_mode", None)
+                kept_jobs.append(job)
+                continue
+            if local_ok:
+                # The user's own city named in the job's location, or a
+                # parsed country matching the user's, is local — workable
+                # in person whatever the country parser thinks otherwise
+                # ("Toronto, ON" has no country to parse, but it IS
+                # Toronto).
+                kept_jobs.append(job)
+                continue
+            if place and user_country and place != user_country:
+                dropped_total += 1
+                continue
+            if not (place and user_country):
+                job["_mode_mismatch"] = mode
+        kept_jobs.append(job)
+    new_jobs = kept_jobs
+
+    return new_jobs, offtopic_total, dropped_total
+
+
 def execute(conn, user_id: int, run_id: int, config: dict,
             resumes: list[dict], profile: dict,
             on_progress=None, scrapers=None, enrich=None) -> RunResult:
@@ -97,8 +189,6 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     import yaml
 
     from .pipeline_store import persist_run
-    from .scoring.matching import has_term, location_country, work_mode
-    from .scoring.relevance import is_target_role
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
@@ -192,78 +282,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     with open(VOCABULARY_PATH, encoding="utf-8") as handle:
         vocab = yaml.safe_load(handle)
 
-    # Relevance gate. 41% of what these actors return is not a data role
-    # at all — Nurse Practitioner, Travel Advisor, Fleet Parking
-    # Specialist. The scorer rates them 1-4 and they were stored anyway.
-    # Rejecting here means an off-target role costs no enrichment lookup
-    # and no scoring pass. Counted, never silent.
-    role_cfg = vocab.get("roles") or {}
-    on_topic = [job for job in new_jobs
-               if is_target_role(job.get("title"), role_cfg)]
-    offtopic_total = len(new_jobs) - len(on_topic)
-    new_jobs = on_topic
+    new_jobs, offtopic_total, dropped_total = _apply_gates(
+        new_jobs, vocab, profile, work_modes)
 
-    # Work-mode policy. The one user-approved exception to flag-never-
-    # hide: a posting that states a mode the user did not search for,
-    # located in a country that is not theirs, is dropped — bounded by
-    # requiring BOTH the explicit phrase AND a confidently-parsed
-    # country. Local ones are workable in person and kept clean;
-    # unplaceable ones are flagged, because a silent drop cannot be
-    # justified without knowing where the job is. Runs before `enrich`
-    # so a dropped job never costs a company-enrichment lookup.
-    mode_cfg = vocab.get("work_mode") or {}
-    loc_cfg = vocab.get("eligibility") or {}
-    # Same fallback the scrape itself uses (see `work_modes` above) — an
-    # empty profile silently disabling the policy would also leave the
-    # scorer's own "remote" fallback dead code.
+    # `user_modes` is also needed below, for the Scorer.
     user_modes = tuple(str(m).strip().lower()
                        for m in work_modes if str(m).strip())
-    user_country = (profile.get("country") or "").strip().lower()
-    profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
-
-    kept_jobs = []
-    for job in new_jobs:
-        mode = work_mode(f"{job.get('title') or ''}\n"
-                         f"{job.get('description') or ''}", mode_cfg)
-        if mode:
-            job["work_mode"] = mode
-
-        raw_location = (job.get("location") or "").strip().lower()
-        place = location_country(job.get("location") or "", loc_cfg)
-        local_ok = bool(
-            (profile_city and has_term(profile_city, raw_location))
-            or (place and user_country and place == user_country))
-        if local_ok:
-            # Positive evidence the job is in the user's own place —
-            # popped before scoring, handed to the scorer explicitly.
-            job["_local_ok"] = True
-
-        if mode and user_modes and mode not in user_modes:
-            if has_term("remote", raw_location):
-                # The location field carrying "remote" anywhere is the
-                # actor's own tag on where the job is — it beats a stray
-                # prose phrase, whatever the actor appended after it
-                # ("Remote, US" is Indeed's own placeholder, "Remote -
-                # Canada", "Toronto, ON (Remote)"). Conflicting evidence
-                # claims nothing: no drop, no flag, no stored mode.
-                job.pop("work_mode", None)
-                kept_jobs.append(job)
-                continue
-            if local_ok:
-                # The user's own city named in the job's location, or a
-                # parsed country matching the user's, is local — workable
-                # in person whatever the country parser thinks otherwise
-                # ("Toronto, ON" has no country to parse, but it IS
-                # Toronto).
-                kept_jobs.append(job)
-                continue
-            if place and user_country and place != user_country:
-                dropped_total += 1
-                continue
-            if not (place and user_country):
-                job["_mode_mismatch"] = mode
-        kept_jobs.append(job)
-    new_jobs = kept_jobs
 
     if enrich is not None:
         new_jobs = enrich(new_jobs)

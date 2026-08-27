@@ -5,7 +5,7 @@ into the store is exactly what this is for.
 """
 import pytest
 
-from src.run_core import execute
+from src.run_core import _apply_gates, execute
 from src.store.db import connect
 from src.store.ingest import ensure_user
 from src.store.queries import map_sections
@@ -20,6 +20,21 @@ _CONFIG = {
 
 _PROFILE = {"location": "Toronto, ON", "country": "ca",
             "work_modes": ["remote"], "setup_complete": 1}
+
+# A minimal vocabulary — just enough for _apply_gates' two gates, not the
+# full vocabulary.yaml — so these tests don't depend on real-world phrase
+# lists changing underneath them.
+_GATE_VOCAB = {
+    "roles": {"include": ["data analyst", "bi developer"],
+              "exclude": ["nurse"]},
+    "work_mode": {
+        "remote_phrases": ["fully remote", "work from home"],
+        "hybrid_phrases": ["hybrid work"],
+        "onsite_phrases": ["onsite role", "on-site required"],
+    },
+    "eligibility": {"countries": {"ca": ["canada"], "in": ["india"],
+                                  "us": ["us", "usa", "united states"]}},
+}
 
 
 def _job(url, title="BI Developer", company="Acme"):
@@ -529,3 +544,45 @@ def test_the_local_lane_never_falls_back(conn, user, resume):
                                for c in local_calls)
     assert worldwide_calls and all(c["allow_fallback"] is not False
                                    for c in worldwide_calls)
+
+
+# --- _apply_gates: direct tests, no db/run/scrapers needed -----------------
+
+def test_apply_gates_relevance_gate_rejects_offtopic_titles():
+    jobs = [_job("https://x/g1", title="BI Developer"),
+           _job("https://x/g2", title="Nurse Practitioner")]
+    kept, offtopic, dropped = _apply_gates(
+        jobs, _GATE_VOCAB, _PROFILE, ["remote"])
+    assert [j["url"] for j in kept] == ["https://x/g1"]
+    assert offtopic == 1
+    assert dropped == 0
+
+
+def test_apply_gates_work_mode_policy_drops_a_foreign_onsite_job():
+    job = _job("https://x/g3")
+    job["location"] = "Bengaluru, India"
+    job["description"] += " Onsite role, 5 days in office."
+    kept, offtopic, dropped = _apply_gates(
+        [job], _GATE_VOCAB, _PROFILE, ["remote"])
+    assert kept == []
+    assert offtopic == 0
+    assert dropped == 1
+
+
+def test_apply_gates_counts_stay_separate():
+    """One offtopic title, one foreign onsite mismatch, one clean survivor
+    — the two counts must track only their own gate, and the survivor must
+    be the one job neither gate touched."""
+    offtopic_job = _job("https://x/g4", title="Nurse Practitioner")
+    dropped_job = _job("https://x/g5")
+    dropped_job["location"] = "Bengaluru, India"
+    dropped_job["description"] += " Onsite role, 5 days in office."
+    survivor = _job("https://x/g6")
+
+    kept, offtopic, dropped = _apply_gates(
+        [offtopic_job, dropped_job, survivor],
+        _GATE_VOCAB, _PROFILE, ["remote"])
+
+    assert [j["url"] for j in kept] == ["https://x/g6"]
+    assert offtopic == 1
+    assert dropped == 1
