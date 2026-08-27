@@ -379,3 +379,68 @@ roles:
     - "data protection"
     - "clinical data"
     - "flight data"
+
+# Remote boards publish reach as a FIELD rather than burying it in
+# prose. These are the shapes measured on a live run:
+#   "Anywhere in the World" / "Europe, North America, Latin America,
+#   APAC" / "Time zone: CET (+/- 3 hours)" / "United States"
+# `location_scope.py` reads this section for the region and timezone
+# tables; the bare-country-name fallback reuses `eligibility.countries`
+# above so there is exactly one spelling of every country in the
+# product.
+location_scope:
+  worldwide:
+    - "anywhere in the world"
+    - "worldwide"
+    - "work from anywhere"
+    - "anywhere"
+  # Region name -> ISO-2 country codes that belong to it. Only the
+  # regions the boards actually emit. Deliberately partial: a region we
+  # do not list claims nothing rather than guessing at its membership.
+  regions:
+    apac: [am, au, nz, jp, kr, cn, in, sg, my, th, vn, ph, id, ge, az]
+    emea: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr, ae, za]
+    europe: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr]
+    "north america": [us, ca, mx]
+    "latin america": [br, ar, cl, co, pe, mx, uy]
+    latam: [br, ar, cl, co, pe, mx, uy]
+    americas: [us, ca, mx, br, ar, cl, co, pe, uy]
+  # Anchor zone -> UTC offset, for "CET (+/- 3 hours)" style bands.
+  timezone_anchors:
+    cet: 1
+    cest: 2
+    utc: 0
+    gmt: 0
+    est: -5
+    pst: -8
+  # UTC offset per country, for the timezone-band check. Only countries
+  # a user can select today plus the common remote markets.
+  #
+  # These are STANDARD-TIME offsets, and several countries here observe
+  # DST for part of the year (the US, Canada, the EU countries, Turkey
+  # does not currently but has flip-flopped). This table does not track
+  # that, so a country mid-DST is read at its standard offset, off by an
+  # hour for part of the year. A timezone band this parser checks is a
+  # wide "+/- N hours" span (commonly 3 or more), so a single hour of
+  # drift rarely moves a posting across the open/closed line — but it
+  # is a real, accepted limitation, not a rounding error we can promise
+  # away.
+  country_utc_offset:
+    am: 4
+    ge: 4
+    us: -5
+    ca: -5
+    gb: 0
+    de: 1
+    fr: 1
+    es: 1
+    pl: 1
+    ua: 2
+    tr: 3
+    ae: 4
+    in: 5
+    sg: 8
+    au: 10
+    br: -3
+    mx: -6
+    za: 2
