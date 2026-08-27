@@ -26,20 +26,35 @@ def scope_verdict(text: str, user_country: str,
     """Read a board's location field for one user.
 
     `cfg` is vocabulary.yaml's `location_scope`; `geo_cfg` is its
-    `eligibility` section, which owns the country name and code tables.
-    Both are needed: there must be one spelling of every country in the
-    product, and it lives under `eligibility`.
+    `eligibility` section, which owns the country name and code tables
+    AND the region table. Both are needed: there must be one spelling
+    of every country and one definition of every region in the
+    product, and both live under `eligibility` — `eligibility.regions`
+    already encodes a reviewed judgment call (the Caucasus and Turkey
+    are deliberately excluded from "Europe" but included in "EMEA");
+    this parser must defer to that, not keep a second, conflicting copy.
 
     Checked in order: worldwide wins outright; then a timezone band,
     because "CET (+/- 3 hours)" also contains no country name and would
     otherwise fall through to unknown; then named regions; then country
     names and codes. Anything unrecognised claims nothing.
+
+    Region membership is eligible-only evidence, same discipline as
+    `geo_verdict`: a region the field names but that does not list the
+    user's country stays "unknown", not "closed" — `eligibility.regions`
+    documents itself as non-exhaustive (a region can genuinely include a
+    country it doesn't enumerate), so absence from a partial list is not
+    evidence of exclusion. "closed" is reserved for the bare-country-name
+    path below, where the field names one specific country and resolving
+    it against the user's own is a confident, positive comparison rather
+    than an argument from silence.
     """
     text = (text or "").strip().lower()
     user = (user_country or "").strip().lower()
     if not text or not user:
         return "unknown"
     cfg = cfg or {}
+    geo_cfg = geo_cfg or {}
 
     for phrase in cfg.get("worldwide") or []:
         if re.search(bounded(str(phrase).strip().lower()), text):
@@ -58,16 +73,21 @@ def scope_verdict(text: str, user_country: str,
                     else "closed")
         return "unknown"
 
-    regions = {str(k).lower(): [str(c).lower() for c in (v or [])]
-               for k, v in (cfg.get("regions") or {}).items()}
-    named = [name for name in regions if re.search(bounded(name), text)]
-    if named:
-        return ("open" if any(user in regions[name] for name in named)
-                else "closed")
+    for region in geo_cfg.get("regions") or []:
+        names = [str(n).strip().lower() for n in (region.get("names") or [])]
+        if not any(re.search(bounded(n), text) for n in names if n):
+            continue
+        codes = {str(c).strip().lower() for c in (region.get("codes") or [])}
+        if user in codes:
+            return "open"
+    # A named region matched but did not list the user, or no region
+    # matched at all — both fall through to the country-name check
+    # rather than returning here, since region absence never claims
+    # exclusion on its own (see docstring).
 
     # A bare country name or code. Reuse the eligibility country tables
     # so there is one spelling of every country in the product.
-    place = location_country(text, geo_cfg or {})
+    place = location_country(text, geo_cfg)
     if place:
         return "open" if place == user else "closed"
     return "unknown"

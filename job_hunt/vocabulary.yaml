@@ -384,27 +384,22 @@ roles:
 # prose. These are the shapes measured on a live run:
 #   "Anywhere in the World" / "Europe, North America, Latin America,
 #   APAC" / "Time zone: CET (+/- 3 hours)" / "United States"
-# `location_scope.py` reads this section for the region and timezone
-# tables; the bare-country-name fallback reuses `eligibility.countries`
-# above so there is exactly one spelling of every country in the
-# product.
+# `location_scope.py` reads this section for worldwide phrases and the
+# timezone tables. Region membership is NOT duplicated here — it reads
+# `eligibility.regions` above instead, because that table already
+# encodes a considered, reviewed judgment call (e.g. the Caucasus and
+# Turkey are deliberately left out of "Europe" but included in "EMEA" —
+# see its comment) and a second, differently-shaped region table in
+# this section previously reversed that call by accident. One
+# canonical region table, one place to edit it. The bare-country-name
+# fallback also reuses `eligibility.countries`, so there is exactly one
+# spelling of every country in the product.
 location_scope:
   worldwide:
     - "anywhere in the world"
     - "worldwide"
     - "work from anywhere"
     - "anywhere"
-  # Region name -> ISO-2 country codes that belong to it. Only the
-  # regions the boards actually emit. Deliberately partial: a region we
-  # do not list claims nothing rather than guessing at its membership.
-  regions:
-    apac: [am, au, nz, jp, kr, cn, in, sg, my, th, vn, ph, id, ge, az]
-    emea: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr, ae, za]
-    europe: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr]
-    "north america": [us, ca, mx]
-    "latin america": [br, ar, cl, co, pe, mx, uy]
-    latam: [br, ar, cl, co, pe, mx, uy]
-    americas: [us, ca, mx, br, ar, cl, co, pe, uy]
   # Anchor zone -> UTC offset, for "CET (+/- 3 hours)" style bands.
   timezone_anchors:
     cet: 1
@@ -425,6 +420,20 @@ location_scope:
   # drift rarely moves a posting across the open/closed line — but it
   # is a real, accepted limitation, not a rounding error we can promise
   # away.
+  #
+  # A SEPARATE and coarser limitation: a country spanning multiple real
+  # UTC offsets is collapsed here to ONE representative number, not a
+  # range — `us: -5` is Eastern time only, but the US actually runs from
+  # UTC-5 to UTC-10; `ca: -5` is similarly just its eastmost zone against
+  # a real range of -3.5 to -8; `au: 10` ignores Western Australia's
+  # UTC+8; `br: -3` ignores Amazonas/Acre further west; `mx: -6` ignores
+  # its Pacific states. A user physically in a different zone within one
+  # of these countries is compared against the wrong number, potentially
+  # by several hours — enough on a narrow "+/- N hour" band to flip a
+  # verdict in either direction, not just round it. Accepted for now
+  # because there is no per-region signal to disambiguate against in
+  # this field; a future fix would need the user's zone, not just their
+  # country.
   country_utc_offset:
     am: 4
     ge: 4
