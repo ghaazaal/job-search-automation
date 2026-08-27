@@ -45,6 +45,19 @@ def extract_description(item: dict) -> str:
     return ""
 
 
+def _redact(text: str, token: str) -> str:
+    """The token, wherever it turns up in text we are about to log.
+
+    Belt and braces. Sending it as a header (below) keeps it out of the
+    request URL, which is where it used to leak from — but a token can
+    still reach an exception message by other routes: a redirect Location,
+    a proxying error, a future caller that builds its own URL. Everything
+    logged from here goes through this, so a new leak path has to get past
+    two mistakes rather than one.
+    """
+    return text.replace(token, "***") if token else text
+
+
 def call_actor(actor_id: str, payload: dict, label: str,
                timeout: int = 120) -> list[dict]:
     """POST to Apify run-sync endpoint, return raw items list.
@@ -57,19 +70,24 @@ def call_actor(actor_id: str, payload: dict, label: str,
         return []
 
     url = APIFY_BASE.format(actor=actor_id)
-    params = {"token": token, "timeout": timeout}
     try:
         resp = requests.post(
             url, json=payload,
-            headers={"Content-Type": "application/json"},
-            params=params, timeout=timeout + 30,
+            # Bearer, not `?token=`. `requests` embeds the full request URL
+            # in its exception messages, and those messages were logged
+            # verbatim — so a query-string credential was written to every
+            # log sink the run had, once per failed actor call.
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {token}"},
+            params={"timeout": timeout}, timeout=timeout + 30,
         )
         resp.raise_for_status()
         return resp.json()
-    except requests.exceptions.Timeout:
-        logger.warning("Timeout for %s", label)
+    except requests.exceptions.Timeout as e:
+        logger.warning("Timeout for %s: %s", label, _redact(str(e), token))
     except requests.exceptions.RequestException as e:
-        logger.warning("Request error for %s: %s", label, e)
+        logger.warning("Request error for %s: %s", label,
+                       _redact(str(e), token))
     except json.JSONDecodeError:
         logger.warning("Could not parse response for %s", label)
     return []
