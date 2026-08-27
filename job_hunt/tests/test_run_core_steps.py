@@ -69,3 +69,29 @@ def test_plan_steps_emits_no_probe_lanes():
 def test_plan_steps_takes_no_probes_argument():
     import inspect
     assert "probes" not in inspect.signature(plan_steps).parameters
+
+
+def test_mode_lanes_follow_the_users_selection():
+    steps = plan_steps(["Data Analyst"], mode_lanes=("remote", "hybrid"))
+    lanes = [s["lane"] for s in steps if s["lane"].startswith("mode")]
+    assert lanes == ["mode remote", "mode hybrid"]
+    assert all(s["source"] == "LinkedIn"
+               for s in steps if s["lane"].startswith("mode"))
+
+
+def test_onsite_never_gets_a_lane():
+    """Measured 1/3 precision - postings rarely say "this is on-site"."""
+    steps = plan_steps(["Data Analyst"], mode_lanes=("onsite",))
+    assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_no_mode_lanes_when_none_selected():
+    steps = plan_steps(["Data Analyst"], mode_lanes=())
+    assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_no_mode_lanes_when_linkedin_is_not_a_source():
+    indeed_only = (("Indeed", "indeed_actor", "valig~indeed-jobs-scraper"),)
+    steps = plan_steps(["Data Analyst"], sources=indeed_only,
+                       mode_lanes=("remote", "hybrid"))
+    assert not any(s["lane"].startswith("mode") for s in steps)

@@ -19,6 +19,16 @@ SOURCES = (
     ("LinkedIn", "linkedin_actor", "valig~linkedin-jobs-scraper"),
 )
 
+# The only modes a keyword lane can express. On-site has no lane:
+# measured 1/3 precision, because postings advertise "remote" and
+# "hybrid" as selling points but rarely state on-site at all. It is
+# inferred by elimination and served by the local lane.
+LANE_MODES = ("remote", "hybrid")
+
+# A mode lane asks a worldwide question - "remote data analyst", not
+# "remote data analyst in Yerevan".
+_LANE_WORLDWIDE = "Worldwide"
+
 
 def search_titles(resumes: list[dict]) -> list[str]:
     """Every distinct target role across the active resumes, in order.
@@ -38,21 +48,46 @@ def search_titles(resumes: list[dict]) -> list[str]:
     return titles
 
 
-def plan_steps(titles: list[str], sources=SOURCES,
-               local: bool = False) -> list[dict]:
+def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
+               mode_lanes: tuple = ()) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
     actually run in. The local lane searches the profile's actual place
     with every work mode — it exists so target-country on-site/hybrid
     jobs arrive at all instead of by accident.
+
+    Mode lanes are the LinkedIn-only mechanism for recovering workplace
+    type, which LinkedIn hides from logged-out clients and whose actor
+    ignores every filter parameter we tried: a `remote`/`onsite` filter
+    argument, and a `f_WT` URL parameter, both returned the same 9-of-25
+    overlapping job IDs regardless of which value was sent. Only the
+    search *words* reach LinkedIn's relevance matcher — searching
+    "remote <title>" versus "hybrid <title>" returned 0 overlapping job
+    IDs out of 25 each. So a mode lane is an extra LinkedIn search per
+    (title, mode) with the mode word prefixed onto the query — one step
+    per title for each mode in `mode_lanes` that is also in `LANE_MODES`.
+    There is no on-site lane: measured 1/3 precision, because postings
+    advertise "remote" and "hybrid" as selling points but rarely state
+    on-site at all, so on-site is inferred by elimination and served by
+    the local lane instead. A lane is relevance, not a filter — a
+    posting that merely mentions the word can land in the lane — so
+    lane membership only ever fills silence in `_apply_gates`, never
+    overrides a mode stated in the posting's own text.
     """
     lanes = ("worldwide",) + (("local",) if local else ())
-    return [{"source": name, "role": title, "lane": lane,
+    steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
             for title in titles
             for lane in lanes
             for name, _, _ in sources]
+    if any(name == "LinkedIn" for name, _, _ in sources):
+        steps += [{"source": "LinkedIn", "role": title,
+                   "lane": f"mode {mode}", "state": "pending", "found": 0}
+                  for title in titles
+                  for mode in mode_lanes
+                  if mode in LANE_MODES]
+    return steps
 
 
 VOCABULARY_PATH = Path(__file__).resolve().parent.parent / "vocabulary.yaml"
@@ -122,8 +157,18 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     dropped_total = 0
     kept_jobs = []
     for job in new_jobs:
-        mode = work_mode(f"{job.get('title') or ''}\n"
-                         f"{job.get('description') or ''}", mode_cfg)
+        text_mode = work_mode(f"{job.get('title') or ''}\n"
+                              f"{job.get('description') or ''}", mode_cfg)
+        lane_mode = job.pop("_lane_mode", None)
+        if text_mode and lane_mode and text_mode != lane_mode:
+            # A lane is LinkedIn matching words, not a filter - a posting
+            # that merely mentions "remote" lands in the remote lane.
+            # Disagreement claims nothing, as every other conflict does.
+            mode = None
+        elif lane_mode and not text_mode:
+            mode = lane_mode
+        else:
+            mode = text_mode
         if mode:
             job["work_mode"] = mode
 
@@ -219,8 +264,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     sources = tuple(entry for entry in SOURCES
                     if gates.get(entry[0].lower(), True))
 
+    mode_lanes = tuple(m for m in
+                       (str(x).strip().lower() for x in work_modes)
+                       if m in LANE_MODES)
     steps = plan_steps(titles, sources=sources,
-                      local=bool((profile.get("location") or "").strip()))
+                      local=bool((profile.get("location") or "").strip()),
+                      mode_lanes=mode_lanes)
     scraped_total = 0
     dropped_total = 0
     offtopic_total = 0
@@ -243,7 +292,14 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             (key, default) for source, key, default in sources
             if source == name)
 
-        if step["lane"] == "local":
+        lane_title = step["role"]
+        if step["lane"].startswith("mode "):
+            lane_mode = step["lane"].split(" ", 1)[1]
+            lane_title = f"{lane_mode} {step['role']}"
+            lane_location = _LANE_WORLDWIDE
+            lane_modes = (lane_mode,)
+            lane_kwargs = {"allow_fallback": False}
+        elif step["lane"] == "local":
             lane_location = (profile.get("location") or "").strip()
             lane_modes = ("remote", "hybrid", "onsite")
             # allow_fallback=False: a Yerevan search that comes back empty
@@ -258,7 +314,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             lane_kwargs = {}
         try:
             jobs = scrapers[name](
-                step["role"], step["role"],
+                step["role"], lane_title,
                 apify_cfg.get(actor_key, actor_default),
                 days_posted, jobs_per_cat, run_timeout,
                 location=lane_location, country=country,
@@ -271,6 +327,10 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         else:
             step["state"] = "done"
             step["found"] = len(jobs)
+            if step["lane"].startswith("mode "):
+                for job in jobs:
+                    # Transient. Popped in _apply_gates, never stored.
+                    job["_lane_mode"] = step["lane"].split(" ", 1)[1]
             all_scraped.extend(jobs)
             scraped_total += len(jobs)
         report("scraping")
