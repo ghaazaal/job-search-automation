@@ -166,3 +166,24 @@ def test_offtopic_defaults_to_zero_when_not_given(conn, user):
     runs.finish_run(conn, run_id, scraped=1, kept=1)
 
     assert runs.get_run(conn, run_id)["offtopic"] == 0
+
+
+def test_the_stale_window_clears_a_realistic_run():
+    """A live run marked stale invites a SECOND concurrent scrape.
+
+    STALE_AFTER_MINUTES and the scrapers' timeouts are coupled, and
+    nothing checked the relationship: Ship 7 added a source needing a
+    420s floor and left the window at 15 minutes, so a healthy run would
+    have been declared dead partway through. The existing staleness
+    tests derive their fixture from the constant, so they passed either
+    way. This one pins the invariant instead.
+    """
+    from src.scrapers.remote_boards import _MIN_TIMEOUT
+
+    # Four target roles is an ordinary profile. Remote boards alone can
+    # spend four full timeouts, and the other sources run alongside it,
+    # so this is a floor on the worst case rather than the worst case.
+    slowest_single_source = _MIN_TIMEOUT * 4
+    assert runs.STALE_AFTER_MINUTES * 60 > slowest_single_source, (
+        "a run can legitimately outlive the staleness window - raise "
+        "STALE_AFTER_MINUTES or lower a scraper's timeout floor")

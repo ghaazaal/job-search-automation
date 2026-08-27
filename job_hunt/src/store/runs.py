@@ -10,10 +10,22 @@ from datetime import datetime, timedelta, timezone
 from .db import transaction
 
 # A RUNNING run older than this is presumed abandoned. The worker writes no
-# heartbeat, so age is the only evidence available. Long enough that a genuine
-# slow scrape is never mistaken for a dead one: four Apify calls at a 120
-# second timeout is eight minutes worst case.
-STALE_AFTER_MINUTES = 15
+# heartbeat, so age is the only evidence available, and the threshold has to
+# clear the slowest run that is still genuinely alive.
+#
+# This was 15 minutes, sized against "four Apify calls at a 120 second
+# timeout". Ship 7 invalidated that arithmetic: it added a third source whose
+# actor sweeps ten boards serially and needs a 420 second floor (see
+# scrapers/remote_boards.py), and mode lanes that add a search per role. Four
+# roles now plan twelve calls, and if every one hit its own timeout the run
+# would still be alive at roughly 68 minutes.
+#
+# Marking a live run stale is the worse failure of the two: the user is not
+# locked out, they are invited to start a SECOND concurrent scrape over the
+# same titles - double cost, duplicate rows, two workers writing at once. A
+# genuinely dead run is cleaned by boot recovery the moment the server next
+# starts, so the only case this window governs is a dead run with no restart.
+STALE_AFTER_MINUTES = 90
 
 # The error column is display text, not a log. Keep it short enough to render.
 _MAX_ERROR = 500
