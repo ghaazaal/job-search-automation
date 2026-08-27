@@ -204,7 +204,7 @@ Create `job_hunt/tests/test_relevance.py`:
 import pytest
 import yaml
 
-from src.scoring.relevance import is_relevant
+from src.scoring.relevance import is_target_role
 
 CFG = yaml.safe_load(
     open("vocabulary.yaml", encoding="utf-8"))["roles"]
@@ -220,7 +220,7 @@ CFG = yaml.safe_load(
     "Senior Power BI Data Analyst - Remote Work",
 ])
 def test_real_roles_pass(title):
-    assert is_relevant(title, CFG) is True
+    assert is_target_role(title, CFG) is True
 
 
 @pytest.mark.parametrize("title", [
@@ -236,22 +236,22 @@ def test_real_roles_pass(title):
     "Territory Sales Manager",
 ])
 def test_traps_are_rejected(title):
-    assert is_relevant(title, CFG) is False
+    assert is_target_role(title, CFG) is False
 
 
 def test_exclusion_beats_inclusion():
     """A data-centre job is a data-centre job however it is titled."""
-    assert is_relevant("Data Engineer, Data Center Operations", CFG) is False
+    assert is_target_role("Data Engineer, Data Center Operations", CFG) is False
 
 
 def test_empty_title_is_not_relevant():
-    assert is_relevant("", CFG) is False
-    assert is_relevant(None, CFG) is False
+    assert is_target_role("", CFG) is False
+    assert is_target_role(None, CFG) is False
 
 
 def test_no_include_list_accepts_everything_not_excluded():
     """An unconfigured gate must not silently reject the whole run."""
-    assert is_relevant("Anything At All", {"include": [], "exclude": []}) is True
+    assert is_target_role("Anything At All", {"include": [], "exclude": []}) is True
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -335,7 +335,7 @@ def _phrases(cfg: dict, key: str) -> tuple[str, ...]:
                          for p in cfg.get(key) or [] if str(p).strip()}))
 
 
-def is_relevant(title: str, cfg: dict) -> bool:
+def is_target_role(title: str, cfg: dict) -> bool:
     """True when the title names a searched-for role and no trap phrase.
 
     Exclusions are checked first and win outright: "Data Engineer, Data
@@ -456,7 +456,7 @@ In `job_hunt/src/run_core.py`, add `relevance` to the local imports near
 the top of `execute`:
 
 ```python
-    from .scoring.relevance import is_relevant
+    from .scoring.relevance import is_target_role
 ```
 
 Immediately after the `new_jobs = dedupe(...)` line and before the
@@ -469,7 +469,7 @@ work-mode policy comment block, insert:
     # Rejecting here means an off-target role costs no enrichment lookup
     # and no scoring pass. Counted, never silent.
     role_cfg = vocab.get("roles") or {}
-    on_topic = [job for job in new_jobs if is_relevant(job.get("title"), role_cfg)]
+    on_topic = [job for job in new_jobs if is_target_role(job.get("title"), role_cfg)]
     offtopic_total = len(new_jobs) - len(on_topic)
     new_jobs = on_topic
 ```
