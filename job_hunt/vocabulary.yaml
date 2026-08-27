@@ -106,7 +106,6 @@ penalties:
   opt:          20
   exec_penalty: 10
   geo_restricted: 30   # a stated country restriction is the same class of blocker as clearance
-  wrong_board:    10   # softer: results from Indeed's us fallback carry uncertainty, not a stated restriction
   mode_mismatch:  15   # says hybrid/on-site, the user searched remote-only, and the place could not be parsed
 
 # Point values. Kept here rather than in code so the weights can be tuned
