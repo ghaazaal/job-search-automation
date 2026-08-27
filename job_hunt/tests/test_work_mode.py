@@ -167,3 +167,20 @@ def test_jd_header_idioms_are_detected():
     assert work_mode("work setup & shift: onsite. why join us?", cfg) == "onsite"
     assert work_mode("work setup: hybrid, 3 days on site.", cfg) == "hybrid"
     assert work_mode("work setup & shift: remote, night shift.", cfg) == "remote"
+
+
+def test_work_from_home_is_not_remote_evidence():
+    """Verbatim from run 6, and it says the opposite of remote.
+
+    15 hits across 384 live roles: about five genuinely remote, six
+    benefits boilerplate, and four stating the opposite outright.
+    """
+    from pathlib import Path
+
+    import yaml
+    cfg = yaml.safe_load(
+        (Path(__file__).parent.parent / "vocabulary.yaml")
+        .read_text(encoding="utf-8"))["work_mode"]
+    body = ("at least 4 days in the office per week, with the flexibility "
+            "to work from home 1 day a week.")
+    assert work_mode(body, cfg) != "remote"

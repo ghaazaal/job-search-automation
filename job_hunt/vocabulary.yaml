@@ -309,6 +309,11 @@ eligibility:
 # "on-site only" / "onsite only" (…gym access, …parking — amenity noise,
 # not a role-mode claim).
 work_mode:
+  # "work from home" is deliberately absent. Measured on 384 live roles it
+  # fires 15 times: about five genuinely remote, six benefits boilerplate
+  # ("reimbursement for work from home equipment"), and four saying the
+  # opposite outright ("at least 4 days in the office per week, with the
+  # flexibility to work from home 1 day a week").
   remote_phrases:
     - "fully remote"
     - "100% remote"
@@ -317,7 +322,6 @@ work_mode:
     - "remote-first"
     - "remote-only"
     - "work remotely"
-    - "work from home"
     - "work from anywhere"
     - "telecommute"
     - "location: remote"  # JD header line; rescues perks-list "hybrid work options" via conflict→None
