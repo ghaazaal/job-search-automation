@@ -424,7 +424,7 @@ def render(maps: list[dict], meta: dict | None = None,
     # clause rather than folding into the count above.
     offtopic = meta.get("offtopic") or 0
     if offtopic:
-        meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A DATA ROLE)"
+        meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A TARGET ROLE)"
 
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")

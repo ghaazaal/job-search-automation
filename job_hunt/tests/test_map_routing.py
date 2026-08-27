@@ -174,4 +174,4 @@ def test_the_map_reports_what_the_last_run_rejected_as_offtopic(tmp_path):
         conn.close()
 
     body = _client(path, tmp_path).get("/").get_data(as_text=True)
-    assert "OFF-TOPIC (NOT A DATA ROLE)" in body
+    assert "OFF-TOPIC (NOT A TARGET ROLE)" in body

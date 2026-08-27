@@ -224,7 +224,7 @@ def test_no_hidden_word_appears_when_nothing_was_dropped():
 
 def test_offtopic_titles_are_announced_in_the_meta_line():
     html = render([], meta={"companies": 0, "roles": 0, "offtopic": 5})
-    assert "5 OFF-TOPIC (NOT A DATA ROLE)" in html
+    assert "5 OFF-TOPIC (NOT A TARGET ROLE)" in html
 
 
 def test_no_offtopic_word_appears_when_nothing_was_rejected():
@@ -238,7 +238,7 @@ def test_hidden_and_offtopic_read_as_distinct_clauses():
     html = render([], meta={"companies": 0, "roles": 0,
                             "hidden": 3, "offtopic": 5})
     assert "3 HIDDEN (ON-SITE ELSEWHERE)" in html
-    assert "5 OFF-TOPIC (NOT A DATA ROLE)" in html
+    assert "5 OFF-TOPIC (NOT A TARGET ROLE)" in html
 
 
 # ── Work mode leads the meta line ─────────────────────────────────────────────

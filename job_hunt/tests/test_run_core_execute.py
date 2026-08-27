@@ -489,6 +489,22 @@ def test_offtopic_count_reaches_the_progress_payload(conn, user, resume):
     assert seen[-1]["offtopic"] == 1
 
 
+def test_offtopic_jobs_never_reach_the_enrich_hook(conn, user, resume):
+    handed = []
+
+    def enrich(jobs):
+        handed.extend(j["url"] for j in jobs)
+        return jobs
+
+    offtopic_job = _job("https://x/43", title="Nurse Practitioner",
+                        company="Med")
+    survivor = _job("https://x/44", company="Widgets Inc")
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE, enrich=enrich,
+            scrapers=_scrapers(indeed_jobs=[offtopic_job, survivor]))
+    assert handed == ["https://x/44"]
+
+
 def test_the_local_lane_never_falls_back(conn, user, resume):
     """The local lane finding nothing must stay silent, not retry with the
     legacy Worldwide/remote-us payload — that re-fetches the worldwide
