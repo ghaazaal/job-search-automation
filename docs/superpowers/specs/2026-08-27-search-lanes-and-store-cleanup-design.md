@@ -49,13 +49,20 @@ produced any.
 
 ### 2. Replace with keyword lanes
 
-Per role, run two LinkedIn searches instead of one, with the mode in the
-search words:
+Per role, run a LinkedIn search per selected work mode, with the mode in
+the search words. A user may tick any subset of remote/hybrid/onsite at
+setup (`profile.WORK_MODES`), so lanes are derived, never hardcoded:
 
-| Lane | `keywords` | Meaning of membership |
-|---|---|---|
-| remote | `"remote <role>"` | posting is remote |
-| hybrid | `"hybrid <role>"` | posting is hybrid |
+```
+lanes = [m for m in profile.work_modes if m in ("remote", "hybrid")]
+```
+
+| User ticked | Keyword lanes run |
+|---|---|
+| remote | `"remote <role>"` |
+| remote + hybrid | `"remote <role>"`, `"hybrid <role>"` |
+| hybrid + onsite | `"hybrid <role>"` |
+| onsite only | *none* — local lane only |
 
 **No on-site lane.** Measured precision:
 
@@ -72,7 +79,9 @@ hybrid lane on 3 of 23 IDs, while remote/hybrid overlapped on 0.
 
 On-site is inferred by elimination: a role in neither lane, in the user's
 own country, is treated as on-site-or-unknown and follows the existing
-flag path.
+flag path. A user who ticks on-site is served entirely by the local lane,
+which already searches their actual place with every work mode — that is
+what it was built for and it is unchanged.
 
 Lane membership is **evidence, not proof**. LinkedIn is matching text, so
 a posting that merely mentions "remote" can land in the remote lane —
@@ -147,33 +156,67 @@ before trusting the number.
 
 ### 5. Re-evaluate and drop stored roles
 
-The store holds 800 roles for a user in Yerevan, Armenia who searches
-**remote only**. It contains 115 roles in India, 60 in the UK, 55 in
-Singapore, 14 in Australia, 11 in Brazil.
+The store holds 800 roles. It contains 115 roles in India, 60 in the UK,
+55 in Singapore, 14 in Australia, 11 in Brazil — none of them reachable
+by the user they were stored for.
 
-Run as a one-off migration, **in this order** — step 2 must follow step 1,
-because the widened phrase list will reclassify some roles as remote and
-save them from being dropped:
+This runs per user, against that user's own country and selected work
+modes. It is a one-off migration for existing rows; new rows are filtered
+at scrape time by the lanes in part 2.
+
+Run **in this order** — step 3 must follow step 1, because the widened
+phrase list will reclassify some roles as remote and save them from being
+dropped:
 
 1. Re-run `work_mode()` over every stored description with the widened
    list; update `role.work_mode`.
 2. Re-run `location_country()` over every stored location.
-3. Apply the drop rules below.
+3. Apply the keep test below.
 
-| Rule | Condition | Drops |
+The rule is stated as a **keep** test, evaluated against the user's own
+selected modes — never against a hardcoded "remote". A foreign role is
+reachable only if it is remote, because nobody commutes across a border.
+
+```
+keep(role, user):
+    country = location_country(role.location)
+    if country == user.country:            return True   # home country, any mode
+    if country is None and not literal_remote(role):
+                                           return True   # unknown -> keep + flag
+    if literal_remote(role) or role.work_mode == "remote":
+        return "remote" in user.work_modes
+    return False                                          # foreign, not remote
+```
+
+Counts for the current profile (Armenia, remote only):
+
+| Outcome | Roles |
+|---|---|
+| foreign, not remote → **drop** | **404** |
+| remote role, user wants remote → keep | 303 |
+| home country → keep | 51 |
+| country unknown → keep + flag | 42 |
+
+The same rule under other selections, same 800 rows:
+
+| User ticks | Keep | Drop |
 |---|---|---|
-| A | states hybrid/onsite **and** foreign country | 3 |
-| B | foreign country parsed **and** mode unstated | 404 |
-| — | country not parseable, mode unstated | 38 (kept) |
+| remote | 396 | 404 |
+| remote + hybrid + onsite | 396 | 404 |
+| hybrid + onsite | 93 | 707 |
+| onsite only | 93 | 707 |
 
-Rule A alone is not worth running. **A + B drops 407 of 800.**
+The hybrid/onsite figures are not a bug: the store was filled by
+remote-oriented searches, so a user wanting only local work legitimately
+has almost nothing in it. Their first run after this ship refills it via
+the local lane.
 
-Rule B is a deliberate change to the flag-never-hide discipline: it drops
-roles that never stated a work mode, purely because they sit in a
-confidently-parsed foreign country. The justification is that a Chennai
-posting silent on work mode is, for a Yerevan-based user searching remote
-only, almost certainly not applicable. This is the user's explicit
-product call, recorded here.
+The third branch is a deliberate change to the flag-never-hide
+discipline: it drops roles that never stated a work mode, purely because
+they sit in a confidently-parsed foreign country. The justification is
+that a Chennai posting silent on work mode is not reachable from Yerevan
+by any mode the user selected. This is the user's explicit product call,
+recorded here.
 
 Guard rails:
 - Roles with any `application` row are never dropped, whatever the rule
@@ -198,9 +241,12 @@ Guard rails:
   trap most likely to be reintroduced later.
 - **Phrase additions**: one test per new phrase, plus false-positive
   guards (`hybrid cloud`, `remote teams`, `hybrid approach`).
-- **Migration**: fixture store exercising each rule, the
+- **Migration**: fixture store exercising each branch of `keep()`, the
   application-row guard, the unparseable-country keep, and ordering
-  (a role rescued by the widened list is not dropped).
+  (a role rescued by the widened list is not dropped). Parameterised
+  over all seven non-empty work-mode selections, asserting that a
+  foreign non-remote role is dropped for every one of them and that a
+  foreign remote role survives exactly when `remote` is ticked.
 - **Live check after merge**: rerun; confirm probe steps are gone, both
   keyword lanes appear, and the map's kept-count matches the migration's
   reported keep.
@@ -214,10 +260,12 @@ Guard rails:
   Robotics). The reduced-confidence tier carries them. Trigger to
   revisit: if hybrid-lane roles with silent descriptions exceed ~30% of
   the lane, demote the lane to evidence-only.
-- **Rule B is unverified against ground truth.** We have not confirmed
-  that the 404 dropped roles are genuinely inapplicable. Trigger: spot-
-  check 20 of them against the live postings; if more than 2 are
-  genuinely remote, Rule B moves to the flag path instead of dropping.
+- **The foreign-and-not-remote drop is unverified against ground truth.**
+  We have not confirmed that the 404 dropped roles are genuinely
+  unreachable. Trigger: spot-check 20 of them against the live postings;
+  if more than 2 are genuinely remote, that branch moves to the flag path
+  instead of dropping. Run this check *after* the widened phrase list,
+  since some will reclassify to remote and never reach the branch.
 - **`"United States"` as LinkedIn's nationwide-remote location shape** is
   inferred from 16/25 vs 0/25, not documented behaviour. Not relied on
   in any rule here, noted for future use.
