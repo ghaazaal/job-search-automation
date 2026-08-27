@@ -5,9 +5,20 @@ Career opportunity mapping product for job-seeking data professionals
 (Analytics Engineer, Data Engineer, Data Analyst, Product Analyst).
 Ghazal is both the author and a user — build for multiple users, not just her.
 
-Scrapes Indeed + LinkedIn via Apify, scores listings against the job
-description, and presents company-centred opportunity maps rather than a
-flat job list. AI layer: resume parsing, tailoring, cover letters.
+Built for a specific person: **a data professional living in a country
+the big job boards do not serve, who needs roles they can actually be
+hired into from there.** Not "someone who wants remote work" — someone
+for whom remote work is the only category that exists.
+
+Scrapes LinkedIn and ten remote job boards via Apify, scores listings
+against the job description, and presents company-centred opportunity
+maps rather than a flat job list. AI layer: resume parsing, tailoring,
+cover letters.
+
+Indeed was removed in Ship 8: it is organised one site per country, 22 of
+the 66 countries this product supports have no Indeed site, and run 6
+returned HTTP 400 on every call for an Armenian user. See
+`docs/superpowers/specs/2026-08-28-eligibility-from-measurement-design.md`.
 
 Dev environment: Windows 11, Python + PowerShell.
 
@@ -45,14 +56,26 @@ the authority, including their correction notes and accepted residuals):
 
 - Every claim needs evidence; silence is the default. Phrase rules are
   word-bounded and phrase-only; conflicting evidence claims nothing.
-- Flag-never-hide, with ONE user-approved exception: a posting stating a
-  work mode the user did not search for, in a confidently-parsed foreign
-  country, is dropped — counted on the run row and stated on the map
-  ("N HIDDEN (ON-SITE ELSEWHERE)"), never silent.
-- LinkedIn's workplace badge is guest-invisible; probe searches (hybrid/
-  onsite-filtered, evidence-only, never stored) recover it as URL set
-  membership. Probes and the local lane never use the scrapers' legacy
-  fallback — silence stays silent.
+- Flag-never-hide, with TWO user-approved exceptions. Both are counted
+  and both are stated on the map — hidden, never silent:
+  1. A posting stating a work mode the user did not search for, in a
+     confidently-parsed foreign country, is dropped — stated as
+     "N HIDDEN (ON-SITE ELSEWHERE)".
+  2. The map lists only roles whose published reach proves them open to
+     the user. Everything else is counted in the header as NOT OPEN or
+     UNVERIFIED. Run 6 measured why: of 384 stored roles 2 were provably
+     open, and rendering all 384 told the reader there were 384 worth
+     opening. Unverified is neither eligible nor ineligible — it is every
+     LinkedIn row, whose location is a place, not a reach statement.
+- LinkedIn's workplace badge is guest-invisible. Ship 7 deleted the probe
+  mechanism (it never filtered anything) and replaced it with keyword mode
+  lanes; Ship 8 dropped LinkedIn's plain worldwide lane, since the mode
+  lanes ask the same question better. Its local lane stays — a hybrid role
+  in the user's own city is one they can work. The local and mode lanes
+  never use the scrapers' legacy fallback — silence stays silent.
+- Eligibility evidence comes from a published reach field, not from prose.
+  Measured over 384 live roles: prose mining found 0 real matches and
+  manufactured 3; the reach field found 2 and manufactured none.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name
