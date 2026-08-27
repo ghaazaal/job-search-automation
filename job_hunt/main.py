@@ -192,7 +192,8 @@ def run_pipeline(config: dict) -> None:
         print("  PowerShell:  $env:APIFY_TOKEN = 'apify_api_xxx'")
         sys.exit(1)
 
-    print(f"\n[2/7] Scraping Indeed + LinkedIn (last {days_posted} days)...")
+    print(f"\n[2/7] Scraping Indeed + LinkedIn + remote boards "
+          f"(last {days_posted} days)...")
 
     # Company enrichment is disabled by default; the block below — unchanged
     # from before this refactor — only runs when config turns it on. It sits

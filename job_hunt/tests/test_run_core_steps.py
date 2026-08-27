@@ -39,22 +39,28 @@ def test_steps_start_pending_with_nothing_found():
 
 
 def test_steps_are_grouped_by_role_so_the_screen_reads_in_order():
-    """A reader follows one role across both sources, then the next role."""
+    """A reader follows one role across every source, then the next role."""
     steps = plan_steps(["BI Developer", "Data Analyst"])
+    # 3 sources, worldwide-only (no local lane requested): each role
+    # appears 3 times in a row before the next role starts.
     assert [s["role"] for s in steps] == [
-        "BI Developer", "BI Developer", "Data Analyst", "Data Analyst"]
+        "BI Developer", "BI Developer", "BI Developer",
+        "Data Analyst", "Data Analyst", "Data Analyst"]
 
 
 def test_a_location_doubles_the_plan_with_a_local_lane():
+    # 3 sources worldwide, but Remote boards has no local lane (it's
+    # worldwide-only): 3 worldwide + 2 local = 5.
     steps = plan_steps(["BI Developer"], local=True)
-    assert len(steps) == 4
+    assert len(steps) == 5
     assert [s["lane"] for s in steps] == ["worldwide", "worldwide",
-                                          "local", "local"]
+                                          "worldwide", "local", "local"]
 
 
 def test_without_a_location_the_plan_is_worldwide_only():
+    # One worldwide step per source: 3.
     steps = plan_steps(["BI Developer"])
-    assert len(steps) == 2
+    assert len(steps) == 3
     assert all(s["lane"] == "worldwide" for s in steps)
 
 
@@ -95,3 +101,22 @@ def test_no_mode_lanes_when_linkedin_is_not_a_source():
     steps = plan_steps(["Data Analyst"], sources=indeed_only,
                        mode_lanes=("remote", "hybrid"))
     assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_remote_boards_is_a_source():
+    steps = plan_steps(["Data Analyst"])
+    assert "Remote boards" in {s["source"] for s in steps}
+
+
+def test_remote_boards_gets_no_local_lane():
+    """A borderless board has no local; asking it for Yerevan is noise."""
+    steps = plan_steps(["Data Analyst"], local=True)
+    local = {s["source"] for s in steps if s["lane"] == "local"}
+    assert "Remote boards" not in local
+
+
+def test_a_source_can_be_switched_off_in_config():
+    from src.run_core import SOURCES
+    only_indeed = tuple(s for s in SOURCES if s[0] == "Indeed")
+    steps = plan_steps(["Data Analyst"], sources=only_indeed)
+    assert {s["source"] for s in steps} == {"Indeed"}

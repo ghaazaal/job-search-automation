@@ -71,14 +71,18 @@ def resume(conn, user):
     return list_resumes(conn, user, active_only=True)[0]
 
 
-def _scrapers(indeed_jobs=None, linkedin_jobs=None, fail=(),
-             linkedin_mode_jobs=None):
+def _scrapers(indeed_jobs=None, linkedin_jobs=None, remote_boards_jobs=None,
+             fail=(), linkedin_mode_jobs=None):
     """Fake scrapers. `fail` names sources that raise instead of returning.
 
     `linkedin_mode_jobs`, if given, maps a mode word ("remote"/"hybrid") to
     the jobs returned only for the LinkedIn call whose search title carries
     that mode lane's prefix (e.g. "remote BI Developer") — every other
     LinkedIn call still gets `linkedin_jobs`.
+
+    Remote boards always gets an entry here (default: no jobs) so tests
+    that don't care about the fourth source don't pick up a spurious
+    "failed" step from a missing dict key.
     """
     def make(name, jobs):
         def scrape(category, title, actor_id, *args, **kwargs):
@@ -91,7 +95,8 @@ def _scrapers(indeed_jobs=None, linkedin_jobs=None, fail=(),
             return list(jobs or [])
         return scrape
     return {"Indeed": make("Indeed", indeed_jobs),
-            "LinkedIn": make("LinkedIn", linkedin_jobs)}
+            "LinkedIn": make("LinkedIn", linkedin_jobs),
+            "Remote boards": make("Remote boards", remote_boards_jobs)}
 
 
 def test_scraped_jobs_are_scored_and_stored(conn, user, resume):
@@ -131,9 +136,10 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    # two sources x (worldwide + local) = 4, plus one LinkedIn-only mode
-    # lane ("remote", the profile's own work mode) = 5.
-    assert len(seen[0]["steps"]) == 5
+    # 3 sources worldwide (Indeed, LinkedIn, Remote boards) + 2 local
+    # (Indeed, LinkedIn — Remote boards has no local lane) + 1 LinkedIn-only
+    # mode lane ("remote", the profile's own work mode) = 3 + 2 + 1 = 6.
+    assert len(seen[0]["steps"]) == 6
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -141,6 +147,19 @@ def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         fail=("LinkedIn",)))
+
+    assert result.kept == 1
+    assert get_run(conn, run_id)["status"] == "OK"
+
+
+def test_remote_boards_failing_does_not_lose_the_others(conn, user, resume):
+    """Remote boards is allowed to fail (young actor, no ratings) — its own
+    scrape swallows errors and returns [], but the run loop's try/except
+    must also survive an actor raising outright, same as any other source."""
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[_job("https://x/rb1")],
+                                        fail=("Remote boards",)))
 
     assert result.kept == 1
     assert get_run(conn, run_id)["status"] == "OK"
@@ -156,7 +175,8 @@ def test_a_failed_source_is_marked_on_its_step(conn, user, resume):
 
     final = seen[-1]["steps"]
     states = {step["source"]: step["state"] for step in final}
-    assert states == {"Indeed": "done", "LinkedIn": "failed"}
+    assert states == {"Indeed": "done", "LinkedIn": "failed",
+                      "Remote boards": "done"}
 
 
 def test_finding_nothing_is_a_successful_run(conn, user, resume):
@@ -438,10 +458,10 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
-    # Two sources x worldwide-only (no local lane), plus one LinkedIn-only
+    # 3 sources worldwide-only (no local lane), plus one LinkedIn-only
     # mode lane ("remote") — the mode lane doesn't need a location, so an
-    # empty profile location still yields it: 2 + 1 = 3.
-    assert len(seen[0]["steps"]) == 3
+    # empty profile location still yields it: 3 + 1 = 4.
+    assert len(seen[0]["steps"]) == 4
 
 
 def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
@@ -460,7 +480,7 @@ def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
             scrapers={"Indeed": spy, "LinkedIn": spy})
 
     sources = {s["source"] for s in seen[0]["steps"]}
-    assert sources == {"LinkedIn"}
+    assert sources == {"LinkedIn", "Remote boards"}
 
 
 def test_a_missing_sources_key_enables_everything(conn, user, resume):
@@ -468,7 +488,8 @@ def test_a_missing_sources_key_enables_everything(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
-    assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}
+    assert {s["source"] for s in seen[0]["steps"]} == {
+        "Indeed", "LinkedIn", "Remote boards"}
 
 
 def test_local_country_verifies_eligibility(conn, user, resume):

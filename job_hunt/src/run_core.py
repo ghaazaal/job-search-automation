@@ -15,9 +15,15 @@ logger = logging.getLogger(__name__)
 
 # (display name, config key for the actor id, default actor id)
 SOURCES = (
-    ("Indeed",   "indeed_actor",   "kaix~indeed-scraper"),
-    ("LinkedIn", "linkedin_actor", "valig~linkedin-jobs-scraper"),
+    ("Indeed",        "indeed_actor",        "kaix~indeed-scraper"),
+    ("LinkedIn",      "linkedin_actor",      "valig~linkedin-jobs-scraper"),
+    ("Remote boards", "remote_boards_actor",
+     "flash_scraper~remote-job-aggregator"),
 )
+
+# Sources with no meaningful local lane. A borderless board has no
+# "near Yerevan" to search — asking costs money and returns noise.
+_WORLDWIDE_ONLY = ("Remote boards",)
 
 # The only modes a keyword lane can express. On-site has no lane:
 # measured 1/3 precision, because postings advertise "remote" and
@@ -84,7 +90,8 @@ def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
              "state": "pending", "found": 0}
             for title in titles
             for lane in lanes
-            for name, _, _ in sources]
+            for name, _, _ in sources
+            if not (lane == "local" and name in _WORLDWIDE_ONLY)]
     if any(name == "LinkedIn" for name, _, _ in sources):
         steps += [{"source": "LinkedIn", "role": title,
                    "lane": f"mode {mode}", "state": "pending", "found": 0}
@@ -110,8 +117,9 @@ class RunResult:
 
 
 def _default_scrapers() -> dict:
-    from .scrapers import indeed, linkedin
-    return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape}
+    from .scrapers import indeed, linkedin, remote_boards
+    return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape,
+            "Remote boards": remote_boards.scrape}
 
 
 def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
