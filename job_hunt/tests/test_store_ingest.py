@@ -202,6 +202,59 @@ def test_a_job_without_eligibility_verification_stores_zero(conn):
     assert stored == 0
 
 
+def test_country_round_trips(conn):
+    """kaix's structured `location.country` is written and read back
+    unchanged — Indeed's live producer for this column."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/country", country="in")])
+    stored = conn.execute(
+        "SELECT country FROM role WHERE url = ?",
+        ("https://x/country",)).fetchone()["country"]
+    assert stored == "in"
+
+
+def test_a_job_without_a_country_stores_null(conn):
+    """A posting from a source with no structured country must not be
+    guessed at — NULL."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-country")])
+    stored = conn.execute(
+        "SELECT country FROM role WHERE url = ?",
+        ("https://x/no-country",)).fetchone()["country"]
+    assert stored is None
+
+
+def test_location_scope_and_source_board_round_trip(conn):
+    """Neither has a producer yet — `scope_verdict` is uncalled and remote
+    boards don't set `source_board` on the job dict — but the column must
+    already be wired for whichever ship calls them next."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id,
+                [_job(url="https://x/scope", location_scope="open",
+                      source_board="remoteok")])
+    row = conn.execute(
+        "SELECT location_scope, source_board FROM role WHERE url = ?",
+        ("https://x/scope",)).fetchone()
+    assert row["location_scope"] == "open"
+    assert row["source_board"] == "remoteok"
+
+
+def test_a_job_without_scope_or_board_stores_null(conn):
+    """Today's real ingest path: nothing sets either key, so both must
+    land as NULL, not a fabricated default."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-scope")])
+    row = conn.execute(
+        "SELECT location_scope, source_board FROM role WHERE url = ?",
+        ("https://x/no-scope",)).fetchone()
+    assert row["location_scope"] is None
+    assert row["source_board"] is None
+
+
 def test_re_running_a_scrape_updates_the_attribution(conn):
     """A second resume can win a posting the first one won last week."""
     user_id = ensure_user(conn, "G")

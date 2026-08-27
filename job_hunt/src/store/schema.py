@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -82,6 +82,9 @@ CREATE TABLE IF NOT EXISTS role (
     platform             TEXT,
     posted_date          TEXT,
     work_mode            TEXT,
+    country              TEXT,
+    location_scope       TEXT CHECK (location_scope IN ('open','closed','unknown')),
+    source_board         TEXT,
     eligibility_verified INTEGER NOT NULL DEFAULT 0,
     description          TEXT,
     description_captured INTEGER NOT NULL DEFAULT 0,
@@ -169,6 +172,21 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
     6: (
         ("run", "offtopic",
          "ALTER TABLE run ADD COLUMN offtopic INTEGER NOT NULL DEFAULT 0"),
+    ),
+    7: (
+        # kaix supplies a structured country code, so Indeed rows never
+        # need `location_country`'s ambiguity cases ("Chennai, IN" vs
+        # "Gary, IN", which both stay silent).
+        ("role", "country", "ALTER TABLE role ADD COLUMN country TEXT"),
+        # What the remote boards publish about reach: open / closed /
+        # unknown for this user. Null on every pre-existing row, and
+        # until something calls `scope_verdict`, on every new one too.
+        ("role", "location_scope",
+         "ALTER TABLE role ADD COLUMN location_scope TEXT "
+         "CHECK (location_scope IN ('open','closed','unknown'))"),
+        # Which board a remote-board row came from, so the card can say.
+        ("role", "source_board",
+         "ALTER TABLE role ADD COLUMN source_board TEXT"),
     ),
 }
 

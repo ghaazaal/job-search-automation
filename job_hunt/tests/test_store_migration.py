@@ -4,6 +4,10 @@
 a column to a table that already exists. These tests exist because the first
 person to run the new code will have a database full of rows.
 """
+import sqlite3
+
+import pytest
+
 from src.store.db import connect
 from src.store.schema import SCHEMA_VERSION, init_db
 
@@ -217,3 +221,32 @@ def test_version_six_adds_offtopic_and_old_runs_default_to_zero(tmp_path):
     assert "offtopic" in _columns(conn, "run")
     assert conn.execute(
         "SELECT offtopic FROM run").fetchone()["offtopic"] == 0
+
+
+def test_version_seven_adds_country_scope_and_source_board(tmp_path):
+    """kaix's country code, the remote-board reach verdict, and which board
+    a row came from all land on `role` — none had anywhere to live before."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    assert {"country", "location_scope", "source_board"} <= _columns(conn, "role")
+
+
+def test_version_seven_defaults_are_null_on_existing_rows(tmp_path):
+    """Old rows were scraped before any of the three had a producer —
+    NULL, never a guessed backfill."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    row = conn.execute(
+        "SELECT country, location_scope, source_board FROM role").fetchone()
+    assert row["country"] is None
+    assert row["location_scope"] is None
+    assert row["source_board"] is None
+
+
+def test_location_scope_rejects_values_outside_the_verdict_set(tmp_path):
+    """Same discipline as `band`: a typo in the verdict must not silently
+    land in the database."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE role SET location_scope = 'sideways'")
