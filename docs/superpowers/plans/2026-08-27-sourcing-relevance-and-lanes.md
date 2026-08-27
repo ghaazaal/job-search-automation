@@ -1140,8 +1140,19 @@ def test_your_own_country_is_open():
 
 def test_a_region_list_is_checked_for_membership():
     text = "Europe, North America, Latin America, APAC"
-    assert scope_verdict(text, "am", CFG, GEO) == "open"    # Armenia is in APAC
-    assert scope_verdict(text, "za", CFG, GEO) == "closed"  # South Africa is not
+    # GB is genuinely in eligibility's Europe list.
+    assert scope_verdict(text, "gb", CFG, GEO) == "open"
+    # Armenia is in NONE of eligibility's regions - deliberately, since
+    # whether the Caucasus is Europe depends on who is writing. Absence
+    # is silence, never a denial.
+    assert scope_verdict(text, "am", CFG, GEO) == "unknown"
+
+
+def test_a_region_not_naming_the_user_is_unknown_not_closed():
+    """The region tables are admittedly non-exhaustive, so absence from
+    one cannot support a confident "closed" - that would deny a job the
+    employer actually offers."""
+    assert scope_verdict("EMEA", "in", CFG, GEO) == "unknown"
 
 
 def test_timezone_band_is_computed_not_skipped():
@@ -1178,17 +1189,19 @@ location_scope:
     - "worldwide"
     - "work from anywhere"
     - "anywhere"
-  # Region name -> ISO-2 country codes that belong to it. Only the
-  # regions the boards actually emit. Partial by design: a region we do
-  # not list claims nothing rather than guessing.
-  regions:
-    apac: [am, au, nz, jp, kr, cn, in, sg, my, th, vn, ph, id, ge, az]
-    emea: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr, ae, za]
-    europe: [gb, ie, de, fr, es, it, nl, be, pl, pt, se, no, dk, fi, am, ge, tr]
-    "north america": [us, ca, mx]
-    "latin america": [br, ar, cl, co, pe, mx, uy]
-    latam: [br, ar, cl, co, pe, mx, uy]
-    americas: [us, ca, mx, br, ar, cl, co, pe, uy]
+  # NO regions table here. `eligibility.regions` already answers "which
+  # countries does EMEA/Europe/APAC mean", and it answers it carefully:
+  # it deliberately excludes the Caucasus and Turkey from Europe, with
+  # the note "whether the Caucasus or Turkey is Europe depends on the
+  # writer. Silence beats a wrong eligibility claim."
+  #
+  # An earlier draft of this plan duplicated the table here and put
+  # Armenia in both APAC and Europe, reversing that decision 130 lines
+  # away in the same file. For this product's own user, that turns
+  # "open to APAC" into a false OPEN — telling a job-seeker to apply
+  # somewhere that will reject them, which is the exact harm this ship
+  # exists to prevent. `scope_verdict` reads `eligibility.regions`
+  # through its `geo_cfg` argument instead.
   # Anchor zone -> UTC offset, for "CET (+/- 3 hours)" style bands.
   timezone_anchors:
     cet: 1
@@ -1306,7 +1319,7 @@ def scope_verdict(text: str, user_country: str,
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd job_hunt && python -m pytest tests/test_location_scope.py -v`
-Expected: PASS, 9 tests.
+Expected: PASS, 11 tests.
 
 - [ ] **Step 6: Commit**
 
