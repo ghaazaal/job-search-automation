@@ -8,6 +8,18 @@
 
 **Tech Stack:** Python 3.13, pytest, SQLite, Apify actors via `requests`.
 
+**Test conventions — read before the first task.** This project's tests
+run from the `job_hunt/` directory, not the repo root:
+
+- Run them as `cd job_hunt && python -m pytest tests/ -q`. From the repo
+  root, `test_work_mode.py` fails on a relative `open("vocabulary.yaml")`.
+- Import as `from src.run_core import ...`, never `from job_hunt.src...`.
+- Open the vocabulary as `open("vocabulary.yaml", encoding="utf-8")`.
+- `git add` paths in the commit steps are repo-root relative, so run git
+  commands from the repo root.
+
+Baseline before any work: **669 passed** from `job_hunt/`.
+
 **Scope:** This is Ship 7, covering parts 1–5 of
 `docs/superpowers/specs/2026-08-27-search-lanes-and-store-cleanup-design.md`.
 Parts 6–9 (eligibility rules, unused LinkedIn fields, work-mode phrase
@@ -70,7 +82,7 @@ def test_plan_steps_takes_no_probes_argument():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_steps.py -k probe -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_steps.py -k probe -v`
 Expected: FAIL — `plan_steps` still accepts `probes` and emits probe lanes.
 
 - [ ] **Step 3: Remove probes from `plan_steps`**
@@ -162,7 +174,7 @@ Remove any test in `job_hunt/tests/test_eligibility_tier.py` and `job_hunt/tests
 
 - [ ] **Step 10: Run the whole suite**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS. If a test fails on `badge_hits` or a probe lane, it is one the previous step should have removed.
 
 - [ ] **Step 11: Commit**
@@ -192,10 +204,10 @@ Create `job_hunt/tests/test_relevance.py`:
 import pytest
 import yaml
 
-from job_hunt.src.scoring.relevance import is_relevant
+from src.scoring.relevance import is_relevant
 
 CFG = yaml.safe_load(
-    open("job_hunt/vocabulary.yaml", encoding="utf-8"))["roles"]
+    open("vocabulary.yaml", encoding="utf-8"))["roles"]
 
 
 @pytest.mark.parametrize("title", [
@@ -244,8 +256,8 @@ def test_no_include_list_accepts_everything_not_excluded():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_relevance.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'job_hunt.src.scoring.relevance'`
+Run: `cd job_hunt && python -m pytest tests/test_relevance.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'src.scoring.relevance'`
 
 - [ ] **Step 3: Add the vocabulary section**
 
@@ -351,7 +363,7 @@ def is_relevant(title: str, cfg: dict) -> bool:
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python -m pytest job_hunt/tests/test_relevance.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_relevance.py -v`
 Expected: PASS, 21 tests.
 
 - [ ] **Step 6: Commit**
@@ -410,7 +422,7 @@ harness.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_execute.py -k offtopic -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_execute.py -k offtopic -v`
 Expected: FAIL — `RunResult` has no attribute `offtopic`.
 
 - [ ] **Step 3: Add the counter to `RunResult`**
@@ -478,12 +490,12 @@ In `job_hunt/src/run_core.py`, change the return to:
 
 - [ ] **Step 7: Run tests**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_execute.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_execute.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Run the whole suite**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 9: Commit**
@@ -529,7 +541,7 @@ def test_no_mode_lanes_when_none_selected():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_steps.py -k mode_lane -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_steps.py -k mode_lane -v`
 Expected: FAIL — `plan_steps` got an unexpected keyword argument `mode_lanes`.
 
 - [ ] **Step 3: Add mode lanes to `plan_steps`**
@@ -579,7 +591,7 @@ def plan_steps(titles: list[str], sources=SOURCES,
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_steps.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_steps.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Write the failing test for lane execution**
@@ -612,7 +624,7 @@ def test_mode_lane_membership_fills_silence_only(tmp_store, fake_scrapers):
 
 - [ ] **Step 6: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_execute.py -k mode_lane -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_execute.py -k mode_lane -v`
 Expected: FAIL — no mode lane runs.
 
 - [ ] **Step 7: Execute the mode lanes**
@@ -695,7 +707,7 @@ In `job_hunt/src/run_core.py`, replace the mode block inside `for job in new_job
 
 - [ ] **Step 10: Run tests**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 11: Commit**
@@ -721,7 +733,7 @@ Today's payload puts the mode in the location box, and Indeed returns the string
 Add to `job_hunt/tests/test_scrapers.py`:
 
 ```python
-from job_hunt.src.scrapers import indeed
+from src.scrapers import indeed
 
 
 def test_indeed_never_puts_remote_in_the_location_box(monkeypatch):
@@ -786,7 +798,7 @@ def test_indeed_drops_expired_postings(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_scrapers.py -k indeed -v`
+Run: `cd job_hunt && python -m pytest tests/test_scrapers.py -k indeed -v`
 Expected: FAIL — `indeed` has no attribute `_keyword`; payload uses `query`/`location`.
 
 - [ ] **Step 3: Rewrite the Indeed scraper**
@@ -945,7 +957,7 @@ In `job_hunt/config.yaml`, change:
 
 - [ ] **Step 5: Run tests**
 
-Run: `python -m pytest job_hunt/tests/test_scrapers.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_scrapers.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Honour a scraper-supplied work mode**
@@ -964,7 +976,7 @@ that block with:
 
 - [ ] **Step 7: Run the whole suite**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -994,9 +1006,9 @@ Create `job_hunt/tests/test_location_scope.py`:
 import pytest
 import yaml
 
-from job_hunt.src.scoring.location_scope import scope_verdict
+from src.scoring.location_scope import scope_verdict
 
-VOCAB = yaml.safe_load(open("job_hunt/vocabulary.yaml", encoding="utf-8"))
+VOCAB = yaml.safe_load(open("vocabulary.yaml", encoding="utf-8"))
 CFG = VOCAB["location_scope"]
 # `location_country` needs the eligibility country tables, not this
 # section's, so the parser takes both.
@@ -1044,7 +1056,7 @@ def test_unset_user_country_claims_nothing():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_location_scope.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_location_scope.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Add the vocabulary section**
@@ -1187,7 +1199,7 @@ def scope_verdict(text: str, user_country: str,
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python -m pytest job_hunt/tests/test_location_scope.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_location_scope.py -v`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 6: Commit**
@@ -1213,7 +1225,7 @@ Create `job_hunt/tests/test_remote_boards.py`:
 
 ```python
 """Fixtures are rows from a live flash_scraper~remote-job-aggregator run."""
-from job_hunt.src.scrapers import remote_boards
+from src.scrapers import remote_boards
 
 
 def test_search_terms_are_the_role_titles(monkeypatch):
@@ -1274,7 +1286,7 @@ def test_a_failing_actor_returns_nothing_rather_than_raising(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_remote_boards.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_remote_boards.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Write the scraper**
@@ -1386,7 +1398,7 @@ def scrape(category: str, title: str,
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `python -m pytest job_hunt/tests/test_remote_boards.py -v`
+Run: `cd job_hunt && python -m pytest tests/test_remote_boards.py -v`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
@@ -1423,7 +1435,7 @@ def test_remote_boards_gets_no_local_lane():
 
 
 def test_a_source_can_be_switched_off_in_config():
-    from job_hunt.src.run_core import SOURCES
+    from src.run_core import SOURCES
     only_indeed = tuple(s for s in SOURCES if s[0] == "Indeed")
     steps = plan_steps(["Data Analyst"], sources=only_indeed)
     assert {s["source"] for s in steps} == {"Indeed"}
@@ -1431,7 +1443,7 @@ def test_a_source_can_be_switched_off_in_config():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_run_core_steps.py -k remote_boards -v`
+Run: `cd job_hunt && python -m pytest tests/test_run_core_steps.py -k remote_boards -v`
 Expected: FAIL — "Remote boards" not in sources.
 
 - [ ] **Step 3: Add the source**
@@ -1481,7 +1493,7 @@ In `job_hunt/config.yaml`, under `apify:`, add:
 
 - [ ] **Step 6: Run tests**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -1508,14 +1520,14 @@ Add to `job_hunt/tests/test_store_migration.py`:
 
 ```python
 def test_v6_adds_country_and_scope(v5_database):
-    from job_hunt.src.store.schema import ensure_schema
+    from src.store.schema import ensure_schema
     ensure_schema(v5_database)
     cols = {row[1] for row in v5_database.execute("PRAGMA table_info(role)")}
     assert {"country", "location_scope", "source_board"} <= cols
 
 
 def test_v6_defaults_are_null_on_existing_rows(v5_database):
-    from job_hunt.src.store.schema import ensure_schema
+    from src.store.schema import ensure_schema
     ensure_schema(v5_database)
     row = v5_database.execute(
         "SELECT country, location_scope FROM role LIMIT 1").fetchone()
@@ -1528,7 +1540,7 @@ invent a new one.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest job_hunt/tests/test_store_migration.py -k v6 -v`
+Run: `cd job_hunt && python -m pytest tests/test_store_migration.py -k v6 -v`
 Expected: FAIL — column `country` does not exist.
 
 - [ ] **Step 3: Add the migration**
@@ -1567,7 +1579,7 @@ In `job_hunt/src/store/ingest.py`, find the INSERT that writes a role and add th
 
 - [ ] **Step 6: Run tests**
 
-Run: `python -m pytest job_hunt/tests/ -q`
+Run: `cd job_hunt && python -m pytest tests/ -q`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
