@@ -158,6 +158,10 @@ def scrape(category: str, title: str,
             "company":  row.get("company") or "",
             "location": row.get("location") or "",
             "platform": _BOARDS.get(board, board or "Remote board"),
+            # The raw slug, not the display name above — devitjobs_us and
+            # devitjobs_uk both render as "DevITjobs" in `platform`, so the
+            # slug is the only thing that still tells them apart.
+            "source_board": board,
             "date":     normalize_date(row.get("posted_at") or today),
             "url":      url,
             "salary":   _salary(row),

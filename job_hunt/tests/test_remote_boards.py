@@ -33,6 +33,28 @@ def test_maps_a_worldwide_row(monkeypatch):
     assert job["work_mode"] == "remote"
     assert job["location"] == "Anywhere in the World"
     assert "276,000" in job["salary"] or "276000" in job["salary"]
+    assert job["source_board"] == "weworkremotely"
+
+
+def test_source_board_survives_when_platform_names_collide(monkeypatch):
+    """devitjobs_us and devitjobs_uk both render as 'DevITjobs' in
+    `platform` — `source_board` is the only field that still tells them
+    apart, so it must carry the raw slug, not the display name."""
+    rows = [
+        {"title": "Data Engineer", "company": "A",
+         "location": "United States",
+         "url": "https://devitjobs.com/us/1",
+         "source_board": "devitjobs_us"},
+        {"title": "Data Engineer", "company": "B",
+         "location": "United Kingdom",
+         "url": "https://devitjobs.com/uk/1",
+         "source_board": "devitjobs_uk"},
+    ]
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: rows)
+    jobs = remote_boards.scrape("Data Engineer", "Data Engineer", "actor")
+    assert len(jobs) == 2
+    assert jobs[0]["platform"] == jobs[1]["platform"] == "DevITjobs"
+    assert {j["source_board"] for j in jobs} == {"devitjobs_us", "devitjobs_uk"}
 
 
 def test_every_row_is_remote(monkeypatch):

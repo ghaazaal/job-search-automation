@@ -83,6 +83,9 @@ CREATE TABLE IF NOT EXISTS role (
     posted_date          TEXT,
     work_mode            TEXT,
     country              TEXT,
+    -- Populated by a later ship: `scope_verdict` (src/scoring/location_scope.py)
+    -- exists but nothing calls it yet, so this column is NULL for every row
+    -- until that ship decides where the call belongs. Not a bug.
     location_scope       TEXT CHECK (location_scope IN ('open','closed','unknown')),
     source_board         TEXT,
     eligibility_verified INTEGER NOT NULL DEFAULT 0,

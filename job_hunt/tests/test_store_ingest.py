@@ -226,33 +226,57 @@ def test_a_job_without_a_country_stores_null(conn):
     assert stored is None
 
 
-def test_location_scope_and_source_board_round_trip(conn):
-    """Neither has a producer yet — `scope_verdict` is uncalled and remote
-    boards don't set `source_board` on the job dict — but the column must
-    already be wired for whichever ship calls them next."""
+def test_source_board_round_trips(conn):
+    """remote_boards.py now sets job["source_board"] to the raw slug
+    (e.g. "devitjobs_us") alongside the display name it puts in
+    `platform` — this is a live producer, not a synthetic value."""
     u = ensure_user(conn, "Ghazal")
     run_id = start_run(conn, u)
     upsert_jobs(conn, u, run_id,
-                [_job(url="https://x/scope", location_scope="open",
-                      source_board="remoteok")])
+                [_job(url="https://x/board", platform="DevITjobs",
+                      source_board="devitjobs_us")])
     row = conn.execute(
-        "SELECT location_scope, source_board FROM role WHERE url = ?",
-        ("https://x/scope",)).fetchone()
-    assert row["location_scope"] == "open"
-    assert row["source_board"] == "remoteok"
+        "SELECT platform, source_board FROM role WHERE url = ?",
+        ("https://x/board",)).fetchone()
+    assert row["platform"] == "DevITjobs"
+    assert row["source_board"] == "devitjobs_us"
 
 
-def test_a_job_without_scope_or_board_stores_null(conn):
-    """Today's real ingest path: nothing sets either key, so both must
-    land as NULL, not a fabricated default."""
+def test_a_job_without_a_source_board_stores_null(conn):
+    """Indeed and LinkedIn rows never set this key — NULL, not a guess."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-board")])
+    stored = conn.execute(
+        "SELECT source_board FROM role WHERE url = ?",
+        ("https://x/no-board",)).fetchone()["source_board"]
+    assert stored is None
+
+
+def test_location_scope_is_wired_but_has_no_producer_yet(conn):
+    """`scope_verdict` (src/scoring/location_scope.py) is uncalled by
+    anything today, so this is still a synthetic value — it only proves
+    the column is wired for whichever ship calls it next."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id,
+                [_job(url="https://x/scope", location_scope="open")])
+    stored = conn.execute(
+        "SELECT location_scope FROM role WHERE url = ?",
+        ("https://x/scope",)).fetchone()["location_scope"]
+    assert stored == "open"
+
+
+def test_a_job_without_a_location_scope_stores_null(conn):
+    """Today's real ingest path: nothing sets this key, so it must land
+    as NULL, not a fabricated default."""
     u = ensure_user(conn, "Ghazal")
     run_id = start_run(conn, u)
     upsert_jobs(conn, u, run_id, [_job(url="https://x/no-scope")])
-    row = conn.execute(
-        "SELECT location_scope, source_board FROM role WHERE url = ?",
-        ("https://x/no-scope",)).fetchone()
-    assert row["location_scope"] is None
-    assert row["source_board"] is None
+    stored = conn.execute(
+        "SELECT location_scope FROM role WHERE url = ?",
+        ("https://x/no-scope",)).fetchone()["location_scope"]
+    assert stored is None
 
 
 def test_re_running_a_scrape_updates_the_attribution(conn):
