@@ -42,6 +42,12 @@ def test_exclusion_beats_inclusion():
     assert is_relevant("Data Engineer, Data Center Operations", CFG) is False
 
 
+def test_exclusion_catches_the_plural_form():
+    """Both data-centre titles in the live store were plural, and the
+    word-bounded singular phrase does not match a trailing "s"."""
+    assert is_relevant("Data Engineer, Data Centers Operations", CFG) is False
+
+
 def test_empty_title_is_not_relevant():
     assert is_relevant("", CFG) is False
     assert is_relevant(None, CFG) is False

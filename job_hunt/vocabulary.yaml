@@ -366,8 +366,15 @@ roles:
     - "data platform"
   exclude:
     # Traps that pass an include phrase but are not the job.
+    # Plural forms listed explicitly, same as everywhere else in this
+    # file (see work_mode's "on-site role" / "onsite role") — word-
+    # bounded matching does not stem, so the singular alone misses
+    # "Data Centers", which is the more common form in the wild (both
+    # live-store data-centre titles pulled were plural).
     - "data center"
+    - "data centers"
     - "data centre"
+    - "data centres"
     - "data entry"
     - "data protection"
     - "clinical data"
