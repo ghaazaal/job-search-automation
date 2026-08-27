@@ -136,10 +136,11 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    # 3 sources worldwide (Indeed, LinkedIn, Remote boards) + 2 local
-    # (Indeed, LinkedIn — Remote boards has no local lane) + 1 LinkedIn-only
-    # mode lane ("remote", the profile's own work mode) = 3 + 2 + 1 = 6.
-    assert len(seen[0]["steps"]) == 6
+    # 2 sources worldwide (LinkedIn, Remote boards — Indeed is country-
+    # scoped and has no worldwide lane) + 2 local (Indeed, LinkedIn —
+    # Remote boards has no local lane) + 1 LinkedIn-only mode lane
+    # ("remote", the profile's own work mode) = 2 + 2 + 1 = 5.
+    assert len(seen[0]["steps"]) == 5
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -207,9 +208,9 @@ def test_duplicates_within_one_scrape_collapse(conn, user, resume):
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         linkedin_jobs=[_job("https://x/1")]))
 
-    # Indeed's 2 lanes (worldwide + local) plus LinkedIn's 3 (worldwide +
-    # local + the "remote" mode lane), each finding the same job: 2 + 3 = 5.
-    assert result.scraped == 5
+    # Indeed's 1 lane (local only) plus LinkedIn's 3 (worldwide + local +
+    # the "remote" mode lane), each finding the same job: 1 + 3 = 4.
+    assert result.scraped == 4
     assert result.kept == 1
 
 
@@ -458,10 +459,11 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
-    # 3 sources worldwide-only (no local lane), plus one LinkedIn-only
-    # mode lane ("remote") — the mode lane doesn't need a location, so an
-    # empty profile location still yields it: 3 + 1 = 4.
-    assert len(seen[0]["steps"]) == 4
+    # 2 sources on the worldwide lane (LinkedIn and Remote boards; Indeed
+    # is local-only and so drops out entirely when there is no location),
+    # plus one LinkedIn-only mode lane ("remote") — the mode lane doesn't
+    # need a location, so an empty profile location still yields it: 2 + 1.
+    assert len(seen[0]["steps"]) == 3
 
 
 def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
@@ -583,27 +585,27 @@ def test_the_local_lane_never_falls_back(conn, user, resume):
     calls = []
 
     def spy(category, title, actor_id, *args, **kwargs):
-        calls.append({"location": kwargs.get("location"),
+        calls.append({"title": title,
+                      "location": kwargs.get("location"),
                       "work_modes": tuple(kwargs.get("work_modes") or ()),
                       "allow_fallback": kwargs.get("allow_fallback")})
         return []
 
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-            scrapers={"Indeed": spy, "LinkedIn": spy})
+            scrapers={"Indeed": spy, "LinkedIn": spy, "Remote boards": spy})
 
+    # The local lane is the only one that names the profile's own place;
+    # the other two both search Worldwide and are told apart by their
+    # search words, since a mode lane prefixes the mode onto the title.
     local_calls = [c for c in calls
-                  if c["work_modes"] == ("remote", "hybrid", "onsite")]
-    # Excludes the LinkedIn "remote" mode lane, which also searches with
-    # work_modes == ("remote",) but against a worldwide location, not the
-    # profile's own place — that lane's allow_fallback=False is covered
-    # separately below.
+                  if c["location"] == _PROFILE["location"]]
     worldwide_calls = [c for c in calls
-                       if c["work_modes"] == tuple(_PROFILE["work_modes"])
-                       and c["location"] == _PROFILE["location"]]
+                       if c["location"] != _PROFILE["location"]
+                       and c["title"] == "BI Developer"]
     mode_lane_calls = [c for c in calls
-                      if c["work_modes"] == tuple(_PROFILE["work_modes"])
-                      and c["location"] != _PROFILE["location"]]
+                      if c["location"] != _PROFILE["location"]
+                      and c["title"] != "BI Developer"]
 
     assert local_calls and all(c["allow_fallback"] is False
                                for c in local_calls)
@@ -756,3 +758,36 @@ def test_apply_gates_a_stated_mode_beats_lane_and_text():
 
     assert kept[0]["work_mode"] == "remote"
     assert "_lane_mode" not in kept[0]
+
+
+def test_the_worldwide_lane_searches_worldwide_not_the_users_own_city(
+        conn, user, resume):
+    """The lane is named worldwide; it has to search there.
+
+    It was passing the profile's location, which made its payload
+    identical to the local lane's — LinkedIn stopped reading work_modes
+    when `_filters_for` was deleted, so the two lanes differed in nothing
+    at all. Two billed searches, one question, and no reach past the
+    user's own country.
+    """
+    linkedin, indeed = [], []
+
+    def li(category, title, actor_id, *args, **kwargs):
+        linkedin.append({"title": title, "location": kwargs.get("location")})
+        return []
+
+    def ind(category, title, actor_id, *args, **kwargs):
+        indeed.append({"title": title, "location": kwargs.get("location")})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": ind, "LinkedIn": li,
+                      "Remote boards": lambda *a, **k: []})
+
+    # LinkedIn's two plain lanes, in order: worldwide, then the profile's
+    # own place. The mode lane carries a prefixed title and is excluded.
+    plain = [c["location"] for c in linkedin if c["title"] == "BI Developer"]
+    assert plain == ["Worldwide", _PROFILE["location"]]
+    # Indeed is country-scoped, so it only ever runs the local lane.
+    assert [c["location"] for c in indeed] == [_PROFILE["location"]]

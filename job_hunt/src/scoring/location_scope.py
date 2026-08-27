@@ -34,10 +34,12 @@ def scope_verdict(text: str, user_country: str,
     are deliberately excluded from "Europe" but included in "EMEA");
     this parser must defer to that, not keep a second, conflicting copy.
 
-    Checked in order: worldwide wins outright; then a timezone band,
-    because "CET (+/- 3 hours)" also contains no country name and would
-    otherwise fall through to unknown; then named regions; then country
-    names and codes. Anything unrecognised claims nothing.
+    Checked in order: an unambiguous worldwide phrase wins outright; then
+    a timezone band, because "CET (+/- 3 hours)" also contains no country
+    name and would otherwise fall through to unknown; then named regions;
+    then country names and codes; and last of all the bare word
+    "anywhere", which is worldwide only when nothing above claimed the
+    field. Anything unrecognised claims nothing.
 
     Region membership is eligible-only evidence, same discipline as
     `geo_verdict`: a region the field names but that does not list the
@@ -73,10 +75,12 @@ def scope_verdict(text: str, user_country: str,
                     else "closed")
         return "unknown"
 
+    region_named = False
     for region in geo_cfg.get("regions") or []:
         names = [str(n).strip().lower() for n in (region.get("names") or [])]
         if not any(re.search(bounded(n), text) for n in names if n):
             continue
+        region_named = True
         codes = {str(c).strip().lower() for c in (region.get("codes") or [])}
         if user in codes:
             return "open"
@@ -105,6 +109,21 @@ def scope_verdict(text: str, user_country: str,
         return "open"
     if named:
         return "closed"
+
+    # The bare word "anywhere", last of all. It is genuinely worldwide on
+    # Remotive and Jobicy, which publish it alone — but it is also the
+    # first word of "Anywhere in the United States", a live value and
+    # exactly the US-only posting rule 6d exists to exclude. Grouped with
+    # the certain phrases above it matched first and returned open to an
+    # Armenian user. Here it fires only once no country and no region has
+    # claimed the field: a qualified "anywhere" defers to its qualifier,
+    # and "Anywhere in Europe" stays unknown rather than open, because
+    # `eligibility.regions` deliberately leaves the Caucasus out of
+    # "Europe" and region absence never claims exclusion either.
+    if not region_named:
+        for phrase in cfg.get("worldwide_unqualified") or []:
+            if re.search(bounded(str(phrase).strip().lower()), text):
+                return "open"
     return "unknown"
 
 

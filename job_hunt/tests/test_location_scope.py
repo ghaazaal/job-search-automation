@@ -1,10 +1,13 @@
 """Every string here was returned by a live remote-board run."""
+from pathlib import Path
+
 import pytest
 import yaml
 
 from src.scoring.location_scope import scope_verdict
 
-VOCAB = yaml.safe_load(open("vocabulary.yaml", encoding="utf-8"))
+_VOCAB_PATH = Path(__file__).parent.parent / "vocabulary.yaml"
+VOCAB = yaml.safe_load(_VOCAB_PATH.read_text(encoding="utf-8"))
 CFG = VOCAB["location_scope"]
 # `location_country` and region membership both come from eligibility's
 # country and region tables, not this section's, so the parser takes
@@ -94,3 +97,35 @@ def test_a_country_list_without_the_user_is_closed():
 def test_a_single_foreign_country_is_still_closed():
     """The simple case the rightmost rule already got right."""
     assert scope_verdict("United States", "am", CFG, GEO) == "closed"
+
+
+# --- "anywhere", qualified and unqualified -------------------------------
+#
+# The bare word is worldwide only when the field names nowhere else.
+# Listed among the certain worldwide phrases it fired first and returned
+# "open" outright, so "Anywhere in the United States" — a US-only posting,
+# exactly what rule 6d exists to exclude — read as open to an Armenian
+# user.
+
+@pytest.mark.parametrize("text", [
+    "Anywhere in the United States",
+    "Anywhere in the US",
+])
+def test_anywhere_qualified_by_a_country_defers_to_that_country(text):
+    assert scope_verdict(text, "am", CFG, GEO) == "closed"
+
+
+def test_anywhere_qualified_by_a_region_claims_nothing():
+    """`eligibility.regions` deliberately leaves the Caucasus out of
+    "Europe" — so this is unknown, not open and not closed."""
+    assert scope_verdict("Anywhere in Europe", "am", CFG, GEO) == "unknown"
+
+
+def test_anywhere_qualified_by_the_user_own_region_is_open():
+    assert scope_verdict("Anywhere in EMEA", "am", CFG, GEO) == "open"
+
+
+@pytest.mark.parametrize("text", ["Anywhere", "anywhere", "Remote, anywhere"])
+def test_bare_anywhere_naming_nowhere_else_is_open(text):
+    """Remotive and Jobicy both publish the bare word."""
+    assert scope_verdict(text, "am", CFG, GEO) == "open"

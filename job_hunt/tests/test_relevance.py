@@ -1,11 +1,13 @@
 """The title gate. Every trap here reached the live map before it existed."""
+from pathlib import Path
+
 import pytest
 import yaml
 
 from src.scoring.relevance import is_target_role
 
-CFG = yaml.safe_load(
-    open("vocabulary.yaml", encoding="utf-8"))["roles"]
+_VOCAB_PATH = Path(__file__).parent.parent / "vocabulary.yaml"
+CFG = yaml.safe_load(_VOCAB_PATH.read_text(encoding="utf-8"))["roles"]
 
 
 @pytest.mark.parametrize("title", [

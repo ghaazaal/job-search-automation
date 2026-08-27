@@ -41,6 +41,21 @@ def _gate_key(config_key: str) -> str:
 # run for no new data, not merely noise.
 _WORLDWIDE_ONLY = ("Remote boards",)
 
+# The mirror image: sources with no meaningful worldwide lane. kaix is
+# country-scoped by construction — Indeed has no "Worldwide" board, only
+# a per-country one — so a worldwide lane could only ever send the
+# profile's own location, which is precisely what the local lane sends.
+# The two payloads came out byte-identical (same keyword, location,
+# country and fromDays, since `_remote_filter` returns "" for both
+# {remote, hybrid} and {remote, hybrid, onsite}), so every run paid Apify
+# twice per title for one question and counted the rows twice.
+#
+# Nothing is lost by dropping it. For a user in the US the local lane IS
+# the US board; for a user outside it, that board measured zero roles
+# open to them across 800. Worldwide reach comes from the LinkedIn mode
+# lanes and the remote boards, which are the sources that carry it.
+_LOCAL_ONLY = ("Indeed",)
+
 # The only modes a keyword lane can express. On-site has no lane:
 # measured 1/3 precision, because postings advertise "remote" and
 # "hybrid" as selling points but rarely state on-site at all. It is
@@ -107,7 +122,8 @@ def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
             for title in titles
             for lane in lanes
             for name, _, _ in sources
-            if not (lane == "local" and name in _WORLDWIDE_ONLY)]
+            if not (lane == "local" and name in _WORLDWIDE_ONLY)
+            and not (lane == "worldwide" and name in _LOCAL_ONLY)]
     if any(name == "LinkedIn" for name, _, _ in sources):
         steps += [{"source": "LinkedIn", "role": title,
                    "lane": f"mode {mode}", "state": "pending", "found": 0}
@@ -356,7 +372,11 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             # having a local lane at all.
             lane_kwargs = {"allow_fallback": False}
         else:
-            lane_location = location
+            # Worldwide means worldwide. Passing the profile's location
+            # here made this lane's payload identical to the local lane's
+            # — LinkedIn stopped reading work_modes when `_filters_for`
+            # went, so the two differed in nothing at all.
+            lane_location = _LANE_WORLDWIDE
             lane_modes = work_modes
             lane_kwargs = {}
         try:

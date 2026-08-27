@@ -399,6 +399,14 @@ location_scope:
     - "anywhere in the world"
     - "worldwide"
     - "work from anywhere"
+  # The bare word, which is worldwide ONLY when the field names nowhere
+  # else. Remotive and Jobicy publish it alone, so it has to be read —
+  # but listed above with the certain phrases it matched first and won
+  # outright, and "Anywhere in the United States" (a live value, and
+  # exactly the US-only posting rule 6d exists to exclude) came back
+  # open to an Armenian user. Checked last instead, after a named
+  # country or region has had its say.
+  worldwide_unqualified:
     - "anywhere"
   # Anchor zone -> UTC offset, for "CET (+/- 3 hours)" style bands.
   timezone_anchors:
