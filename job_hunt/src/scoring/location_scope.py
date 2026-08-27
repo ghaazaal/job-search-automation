@@ -85,9 +85,43 @@ def scope_verdict(text: str, user_country: str,
     # rather than returning here, since region absence never claims
     # exclusion on its own (see docstring).
 
-    # A bare country name or code. Reuse the eligibility country tables
-    # so there is one spelling of every country in the product.
-    place = location_country(text, geo_cfg)
-    if place:
-        return "open" if place == user else "closed"
+    # Country names. Reuse the eligibility country tables so there is one
+    # spelling of every country in the product — but NOT
+    # `location_country`, which answers a different question.
+    #
+    # `location_country` reads a single job's place and takes the
+    # RIGHTMOST country, because a location string ends with its country
+    # ("Tbilisi, Georgia"). A reach field is an ENUMERATION of the places
+    # an employer will hire from, and the rightmost one is meaningless.
+    # A live run returned "Armenia, Cyprus, Georgia, Kazakhstan, Poland";
+    # rightmost-wins resolved that to Poland and called it closed to an
+    # Armenian user whose country is named in the string. The verdict
+    # even flipped on word order — "Poland, Armenia" came back open.
+    #
+    # So scan for every country the text names and test membership, the
+    # same way the region branch above does.
+    named = _countries_named(text, geo_cfg)
+    if user in named:
+        return "open"
+    if named:
+        return "closed"
     return "unknown"
+
+
+def _countries_named(text: str, geo_cfg: dict) -> set[str]:
+    """Every country code the text names, word-bounded.
+
+    Deliberately does not use the bare "us" alias the eligibility table
+    carries for prose: a reach field is short and enumerative, so a
+    two-letter token is far more likely to be a country code than the
+    pronoun `geo_verdict` has to guard against — but "Ireland" must not
+    match inside "Northern Ireland", so bounded matching still applies.
+    """
+    found: set[str] = set()
+    for code, aliases in (geo_cfg.get("countries") or {}).items():
+        for alias in aliases or ():
+            alias = str(alias).strip().lower()
+            if alias and re.search(bounded(alias), text):
+                found.add(str(code).strip().lower())
+                break
+    return found

@@ -67,3 +67,30 @@ def test_silence_claims_nothing():
 def test_unset_user_country_claims_nothing():
     """Same discipline as geo_verdict - the check cannot run."""
     assert scope_verdict("United States", "", CFG, GEO) == "unknown"
+
+
+def test_a_country_list_naming_the_user_is_open():
+    """Returned verbatim by a live run, and previously marked CLOSED.
+
+    `location_country` takes the rightmost country, which is right for
+    "Tbilisi, Georgia" and wrong for an enumeration - it resolved this
+    to Poland and hid a job that names Armenia outright.
+    """
+    text = "Armenia, Cyprus, Georgia, Kazakhstan, Poland"
+    assert scope_verdict(text, "am", CFG, GEO) == "open"
+
+
+def test_a_country_list_is_read_the_same_whatever_the_order():
+    """The old rightmost-wins rule made the verdict depend on word order."""
+    for text in ("Poland, Armenia", "Armenia, Poland",
+                 "United States, Armenia, Poland"):
+        assert scope_verdict(text, "am", CFG, GEO) == "open", text
+
+
+def test_a_country_list_without_the_user_is_closed():
+    assert scope_verdict("Poland, Germany, Spain", "am", CFG, GEO) == "closed"
+
+
+def test_a_single_foreign_country_is_still_closed():
+    """The simple case the rightmost rule already got right."""
+    assert scope_verdict("United States", "am", CFG, GEO) == "closed"
