@@ -1306,7 +1306,7 @@ def scope_verdict(text: str, user_country: str,
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `cd job_hunt && python -m pytest tests/test_location_scope.py -v`
-Expected: PASS, 11 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 6: Commit**
 
