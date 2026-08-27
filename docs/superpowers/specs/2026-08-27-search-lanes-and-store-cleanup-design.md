@@ -66,8 +66,8 @@ Keyword-in-title is not enough: it matched "Quantitative **Analyst**",
 - Roles failing the gate are not stored at all. They are counted on the
   run row so the drop is visible, never silent.
 
-Both actors also filter server-side, which is cheaper than filtering
-after paying per result:
+All three sources also filter server-side, which is cheaper than
+filtering after paying per result:
 
 - **Indeed**: `title:"Data Analyst"` — **one title per search**. Measured:
   a single title returns 15/15 on-target; combining titles with `or`
@@ -75,6 +75,10 @@ after paying per result:
   So run one Indeed search per role title.
 - **LinkedIn**: valig's `titleInclude` / `titleExclude`, already paid for
   and currently unused.
+- **Remote boards** (part 3): `searchTerms` matches titles by default.
+
+Server-side filtering reduces what we pay for; it does not replace the
+gate. All three still leaked the "Data Center" trap in testing.
 
 ### 2. Fix the Indeed search
 
@@ -107,7 +111,66 @@ this ship rather than the next one. It also brings `signals.isExpired`,
 `dates.validThrough`, 90% salary coverage and structured
 `location.country`, at $0.05/1K versus the current $0.10/1K.
 
-### 3. Delete the probe mechanism
+### 3. Add remote job boards as a fourth source
+
+Indeed and LinkedIn carry almost nothing this user can take. Measured
+against the same profile:
+
+| Source | Jobs | Open to Armenia |
+|---|---|---|
+| LinkedIn + Indeed | 800 | **0** (0%) |
+| Remote boards | 50 | **11** (22%) |
+
+One run of `flash_scraper/remote-job-aggregator` returned more applicable
+roles than four full LinkedIn/Indeed runs produced in total. It sweeps
+ten public boards (RemoteOK, We Work Remotely, Working Nomads, Remotive,
+Jobicy, Himalayas, The Muse, DevITjobs US/UK, HN "Who is hiring?") into
+one deduplicated feed at $0.002/job — cheaper than the current LinkedIn
+actor.
+
+Two properties make it a better fit than either incumbent:
+
+**Eligibility is a published field, not prose.** Observed location values:
+
+```
+"Anywhere in the World"
+"Europe, North America, Latin America, APAC"
+"Time zone: CET (+/- 3 hours)"
+"United States"
+```
+
+These boards state reach as a field because being borderless is their
+product. Most of the phrase-mining in parts 6 and 8 is unnecessary here —
+parse the location field directly, and fall back to text rules only when
+it is empty.
+
+Add a `location_scope` parser recognising: `anywhere in the world` /
+`worldwide` / `any` → open; a region or country list → membership test
+against the user's country; a timezone band (`CET (+/- N hours)`) →
+compare against the user's UTC offset. Yerevan is UTC+4 and CET+3 is
+UTC+4, so the Proxify posting qualifies exactly — timezone bands must be
+computed, not treated as unknown.
+
+**`searchTerms` matches job titles**, so the relevance gate from part 1
+is enforced server-side before we pay per row.
+
+Integration rules:
+- The source is **allowed to fail**. It has 14 users and no ratings, one
+  board (Jobicy) failed mid-run during testing, and a run took 5 minutes
+  versus 20 seconds for valig. If it errors or returns nothing, the run
+  continues on the other sources and the run row records the failure.
+- It does **not** replace LinkedIn or Indeed. Those still carry the 22
+  local Armenian roles and everything hybrid.
+- The relevance gate still applies: 6 of the 50 test rows were the same
+  "Data Center" trap (Mechanical and Electrical Engineers at data
+  centres).
+
+If it proves unreliable, `get_anything/remote-jobs-aggregator` and
+`hyperbach/remote-jobs-feed` cover the same boards;
+`hyperbach` additionally retains postings after they close, which would
+also satisfy rule 6e for non-Indeed sources.
+
+### 4. Delete the probe mechanism
 
 - Remove `probes` from `plan_steps` and the `probe` branch in the run
   loop (`run_core.py`).
@@ -119,7 +182,7 @@ this ship rather than the next one. It also brings `signals.isExpired`,
 Nothing downstream loses information, because the mechanism never
 produced any.
 
-### 4. LinkedIn keyword lanes
+### 5. LinkedIn keyword lanes
 
 A user may tick any subset of remote/hybrid/onsite at setup
 (`profile.WORK_MODES`), so lanes are derived, never hardcoded:
@@ -155,27 +218,27 @@ existing tier system below a stated fact:
 | remote | *silent* | stored, reduced-confidence, ranks below verified |
 | remote | hybrid | conflict — claim nothing, as today |
 
-### 5. Eligibility rules, from hand-reviewed postings
+### 6. Eligibility rules, from hand-reviewed postings
 
 Eleven remote data roles were read by the user. Three were open; eight
 were not. Each rule below traces to a specific one.
 
-**5a. Never treat a location field of "Remote" as evidence.** It is the
+**6a. Never treat a location field of "Remote" as evidence.** It is the
 query reflected back. Admitted jobs 1, 5, 6, 7 — including one reading
 "Remote (United States)". Applies to all 297 stored Indeed rows.
 
-**5b. Remove `"work from home"` from `remote_phrases`.** It fired on 4
+**6b. Remove `"work from home"` from `remote_phrases`.** It fired on 4
 wrong roles and 3 right ones. Job 11 is the clearest failure — standard
 UK flexible-working boilerplate:
 
 > "you may work from home or another suitable location that meets
 > business needs"
 
-**5c. Add `"(from anywhere)"` and `"work from anywhere"` as open
+**6c. Add `"(from anywhere)"` and `"work from anywhere"` as open
 evidence.** Fired on exactly the three roles the user marked OPEN, and
 nothing else.
 
-**5d. Add closed-eligibility phrases**, all observed verbatim:
+**6d. Add closed-eligibility phrases**, all observed verbatim:
 `remote (united states)`, `remote - united states`,
 `remote, united states`, `fully remote / u.s.-based`, `u.s.-based`,
 `us-based`, `remote within the united states`, `u.s.-based only`,
@@ -183,7 +246,7 @@ nothing else.
 `no visa sponsorship`, `not eligible for immigration sponsorship`,
 `must reside in one of the following states`, `w2 only`, `1099/c2c only`.
 
-**5e. Drop closed postings.** Job 4 reads "No longer accepting
+**6e. Drop closed postings.** Job 4 reads "No longer accepting
 applications" and that text is not in our stored description, so it
 cannot be detected today. Indeed via `kaix` supplies `signals.isExpired`
 and `dates.validThrough`. LinkedIn supplies nothing, so a LinkedIn role
@@ -192,7 +255,7 @@ a residual.
 
 All additions remain phrases, never bare words.
 
-### 6. Read the fields already paid for
+### 7. Read the fields already paid for
 
 valig returns 20 fields; `linkedin.py` reads 8.
 
@@ -210,7 +273,7 @@ carries LinkedIn's *job function* — measured values include
 "Information Technology", "Legal", "Health Care Provider".
 `cheap_scraper` has the identical misnaming.
 
-### 7. Widen the work-mode phrase list
+### 8. Widen the work-mode phrase list
 
 Of 479 stored LinkedIn roles with a description but no work mode, 122
 mention a work-mode word: 66 are missed wordings, 53 correctly ignored
@@ -222,7 +285,7 @@ Add to `remote_phrases`: `remote eligible`, `performed remotely`.
 
 The 66 is an upper bound from a broad regex — spot-check 20 first.
 
-### 8. Re-evaluate and drop stored roles
+### 9. Re-evaluate and drop stored roles
 
 Runs per user, against that user's own country and selected modes.
 One-off for existing rows; new rows are filtered at scrape time.
@@ -232,9 +295,9 @@ before anything is dropped:
 
 1. Apply the relevance gate (part 1).
 2. Re-run `work_mode()` with the widened list, ignoring any location
-   field of "Remote" (rule 5a).
+   field of "Remote" (rule 6a).
 3. Re-run `location_country()` and `geo_verdict()` with the new
-   eligibility phrases (rules 5c, 5d).
+   eligibility phrases (rules 6c, 6d).
 4. Apply the keep test.
 
 ```
@@ -268,14 +331,23 @@ Guard rails:
   all accepted.
 - **Indeed payload**: asserts `location` is never the string "remote"
   and that `remote="remote"` is sent instead; one search per title.
-- **Rule 5a**: a role whose only remote evidence is `location == "Remote"`
+- **Rule 6a**: a role whose only remote evidence is `location == "Remote"`
   makes no remote claim.
-- **Rule 5b**: the UK boilerplate sentence yields no work mode.
-- **Rules 5c/5d**: one test per phrase, plus false-positive guards
+- **Rule 6b**: the UK boilerplate sentence yields no work mode.
+- **Rules 6c/6d**: one test per phrase, plus false-positive guards
   (`hybrid cloud`, `remote teams`).
 - **`workType` guard**: a test asserting `workType` never reaches
   `work_mode`, with the real measured values as fixtures. This is the
   trap most likely to be reintroduced.
+- **`location_scope` parser**: the four measured shapes as fixtures —
+  `"Anywhere in the World"` → open; `"United States"` → closed for an
+  `am` user; `"Europe, North America, Latin America, APAC"` → membership
+  test; `"Time zone: CET (+/- 3 hours)"` → open for UTC+4, closed for
+  UTC-5. Empty or unparseable falls through to the text rules and claims
+  nothing on its own.
+- **Fourth source fails safe**: with the aggregator erroring or returning
+  zero rows, the run still completes on the other sources and the run row
+  records the failure.
 - **Probe removal**: `plan_steps` emits only worldwide and local lanes.
 - **Lane construction**: parameterised over all seven non-empty work-mode
   selections.
@@ -288,7 +360,19 @@ Guard rails:
 
 ## Accepted residuals
 
-- **LinkedIn expiry is undetectable.** Rule 5e covers Indeed only.
+- **The aggregator is unproven.** 14 users, no ratings, published days
+  ago, one board failed mid-run, 5 minutes per run against valig's 20
+  seconds. The fail-safe integration carries this. Trigger: two
+  consecutive failed runs, or a run under 10 rows, moves us to
+  `get_anything/remote-jobs-aggregator` or `hyperbach/remote-jobs-feed`.
+- **"Anywhere in the World" is We Work Remotely's tag, not the
+  employer's words.** We have not verified that those nine postings
+  honour it. Trigger: spot-check five against their apply pages before
+  the tier promotes them to verified; until then they are evidence, not
+  proof, and rank with the reduced-confidence tier.
+- **The 22% figure comes from one 50-row run on one day.** It could as
+  easily be 10% or 35%. Re-measure after the first scheduled run.
+- **LinkedIn expiry is undetectable.** Rule 6e covers Indeed only.
   Detecting a closed LinkedIn posting needs a per-job re-fetch. Trigger:
   if users report applying to closed roles, add the fetch.
 - **Lane precision is measured on one search, one location, one day** —
@@ -311,18 +395,26 @@ Guard rails:
   `cheap_scraper`'s own documentation, and valig and `cheap_scraper`
   returning an identical four-field set. No vendor can sell this.
 
-## The question this ship does not answer
+## The finding underneath all of this
 
-Even with every rule above, the honest count of Armenia-eligible roles in
-800 scraped jobs may be closer to 10 than 300. The three that were open
-were all BairesDev — a Latin American outsourcing firm hiring globally,
-whose stored locations read "São Paulo", "Lima", "Veracruz" because that
-is the recruiter's office, not the job's.
+The rules above are worth having, but they were never the binding
+constraint. The source was.
 
-If that pattern holds, the supply for a remote-seeking user outside the
-US and EU is not on the Indeed and LinkedIn boards we search, and the
-product should say so plainly rather than show a map of roles that will
-not hire them. Decide after the first clean run produces a real number.
+Of 800 roles scraped from Indeed and LinkedIn, **zero** prove they will
+hire from Armenia. The only three the user judged open were all
+BairesDev — one Latin American outsourcing firm hiring globally, whose
+stored locations read "São Paulo", "Lima", "Veracruz" because that is the
+recruiter's office, not the job's. Three jobs, one employer, is not a job
+market.
+
+One 50-row run against the remote boards returned 11. Same user, same
+titles, same day.
+
+That is why part 3 exists, and why it matters more than parts 6–9. No
+amount of phrase-tuning extracts eligible roles from a source that does
+not carry them. Expect the map to be small either way: a realistic count
+for this profile is tens of roles, not hundreds, and the product should
+say so plainly rather than pad the map with roles that will not hire.
 
 ## Out of scope
 
@@ -332,5 +424,5 @@ not hire them. Decide after the first clean run produces a real number.
   third-party AI-inferred work arrangement (`fantastic-jobs`).
 - `skipJobId` to avoid re-scraping stored postings. Real saving,
   independent of this work.
-- Adding job boards that serve non-US remote supply. Raised by the
-  section above; needs its own investigation.
+- Wellfound, Arc.dev and other boards not covered by the aggregator.
+  Evaluate only if part 3's eleven boards prove too thin.
