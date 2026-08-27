@@ -81,17 +81,29 @@ Running `geo_verdict` over the 297 stored LinkedIn descriptions:
 | restricted | 8 |
 | eligible | 3 |
 
-All three "eligible" roles are false positives, from the **already-
-shipped** `anywhere_words` window rule:
+All three "eligible" roles are false positives, from
+`eligibility.eligible_phrases` — the **standalone** list, whose members
+return eligible on a bare `has_term` with no window and no corroboration:
 
 ```
-"work from anywhere in the world for up to 4 weeks per year"     — holiday perk
-"embrace the freedom to work from anywhere ... for up to 30 days" — holiday perk
-"work together in real time from anywhere in the world"           — Figma's marketing copy
+"work from anywhere in the world for up to 4 weeks per year"      — holiday perk
+"embrace the freedom to work from anywhere ... for up to 30 days"  — holiday perk
+"work together in real time from anywhere in the world"            — Figma's marketing copy
 ```
 
 The third is not about employment at all; it is a sentence about the
 product the company sells. LinkedIn's true count is **0 of 297**.
+
+Two distinct faults, and the code's own comment on that list names the
+rule both break — *"Only phrases a following country cannot grammatically
+narrow belong in this list."*
+
+- `anywhere in the world` is in the list **bare**, so it fires inside any
+  sentence containing those five words, whatever the sentence is about.
+  That is the Figma case.
+- `work from anywhere in the world` is specific enough to belong, but is
+  narrowed by a following **duration** rather than a following country —
+  a case the comment did not anticipate.
 
 `unknown` means unmeasured, not ineligible — many genuinely remote-first
 employers never state reach in prose. But unverifiable is what the
@@ -185,34 +197,46 @@ and mode lanes are constructed separately, so they are unaffected.
 Run shape: 24 steps → **16**. Remote boards worldwide (4), LinkedIn local
 (4), LinkedIn mode (8).
 
-### 3. Fix the shipped `anywhere_words` false positives
+### 3. Fix the shipped `eligible_phrases` false positives
 
-This is a live bug, not a rejected proposal. `geo_verdict`'s
-anywhere-word window rule produced all three of LinkedIn's false
-"eligible" verdicts.
+A live bug, not a rejected proposal. Two changes, one per fault.
 
-Both failing families share one shape — the phrase is followed directly
-by something that takes the claim back:
+**3a. Remove the bare `"anywhere in the world"` from
+`eligible_phrases`.** It is not a statement, it is five words; it fires
+inside any sentence that happens to contain them. `"candidates from
+anywhere in the world"` is already in the list and carries the actual
+claim, so nothing is lost.
 
-- a place — `work from anywhere **in the united states**`
-- a duration — `**for up to 4 weeks per year**`, `**for up to 30 days a
-  year**`
+Measured on the three live false positives plus three genuine phrasings:
 
-So: an anywhere-word or eligibility phrase followed directly by a country
-or region name, or by a duration expression, claims **nothing**. Not
-closed — nothing. Phrase-shaped, matching the compound (`<phrase> in
-<place>`, `<phrase> for up to <n> <unit>`) rather than scanning N
-characters ahead, so the rule stays as inspectable as the phrase lists it
-guards.
+| Body | Now | After 3a |
+|---|---|---|
+| `work together in real time from anywhere in the world` | eligible | **unknown** |
+| `open to candidates worldwide` | eligible | eligible |
+| `we hire candidates from anywhere in the world` | eligible | eligible |
+
+**3b. A duration qualifier takes the claim back.** `work from anywhere in
+the world` is specific enough to belong in the list, but the two holiday
+perks narrow it with a duration rather than a country:
+
+```
+work from anywhere in the world **for up to 4 weeks per year**
+work from anywhere in the world **for up to 30 days a year**
+```
+
+So: an eligible phrase followed directly by a duration expression claims
+**nothing**. Not closed — nothing. Phrase-shaped, matching the compound
+(`<phrase> for up to <n> <unit>`) rather than scanning N characters
+ahead, so the rule stays as inspectable as the phrase list it guards.
 
 This is the same fix already applied to bare `"anywhere"` in
 `location_scope` during the Ship 7 review, where `Anywhere in the United
-States` read as open. The same trap, in prose instead of a field.
+States` read as open. The same trap, in prose instead of a field — and
+the code's own comment on `eligible_phrases` already states the principle
+both faults break.
 
-The Figma case (`work together in real time from anywhere in the world`)
-is **not** caught by this guard and is recorded as a residual. It is
-marketing copy about a product, and no phrase rule separates it from an
-eligibility statement.
+Together 3a and 3b clear all three live false positives, and the Figma
+case is fixed rather than accepted.
 
 ### 4. Eligibility phrases, re-derived
 
@@ -361,13 +385,15 @@ Part 9 never moves forward.
   LinkedIn-mode steps only.
 - **Lane shape**: 4 titles, remote+hybrid → 16 steps, and no LinkedIn
   step on the plain worldwide lane.
-- **Part 3 guard**: the three measured live false positives —
-  `work from anywhere in the world for up to 4 weeks per year`,
-  `embrace the freedom to work from anywhere in the world for up to 30
-  days a year`, `work from anywhere in the united states for most
-  positions` — each yields no eligibility claim. Fixtures verbatim from
-  run 6. Plus a guard-is-not-a-mute-button case: `remote (work from
-  anywhere)` still claims what it claimed before.
+- **Part 3a**: `work together in real time from anywhere in the world`
+  claims nothing, while `open to candidates worldwide` and `we hire
+  candidates from anywhere in the world` still claim eligible. The bare
+  phrase goes; the statements stay.
+- **Part 3b**: `work from anywhere in the world for up to 4 weeks per
+  year` and `embrace the freedom to work from anywhere in the world for
+  up to 30 days a year` each claim nothing. Fixtures verbatim from run 6.
+  Plus a guard-is-not-a-mute-button case: `work from anywhere in the
+  world` with no duration after it still claims eligible.
 - **Rule 6b**: `at least 4 days in the office per week, with the
   flexibility to work from home 1 day a week` yields no remote claim.
 - **`scope_verdict` wiring**: a board row with reach `Armenia, Cyprus,
@@ -399,12 +425,14 @@ Part 9 never moves forward.
   honest answer for this profile and this source set, and part 6 is the
   response — but the product must read as "we checked and found two", not
   as broken. The empty state carries this and is explicitly tested.
-- **Marketing copy is indistinguishable from eligibility prose.** The
-  Figma sentence (`work together in real time from anywhere in the
-  world`) defeats the part-3 guard and any phrase rule we could write.
-  Prose mining is now a supporting mechanism rather than the primary one,
-  which bounds the damage. Trigger: if a false `open` reaches the map,
-  drop prose-derived eligibility to evidence-only.
+- **Marketing copy can still read as eligibility prose.** Part 3a fixes
+  the one live instance (Figma's `work together in real time from
+  anywhere in the world`) by removing the bare phrase that matched it,
+  but the general problem stands: a sentence about a product the company
+  sells can use the same words as a sentence about who it hires. Prose
+  mining is now a supporting mechanism rather than the primary one, which
+  bounds the damage. Trigger: if a false `open` reaches the map, drop
+  prose-derived eligibility to evidence-only.
 - **`unknown` is unmeasured, not ineligible.** 286 LinkedIn roles are set
   aside on the strength of what they do not say. Some are certainly open.
   The product's answer is that it will not claim what it cannot show, and
