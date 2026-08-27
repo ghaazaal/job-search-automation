@@ -36,8 +36,27 @@ seniority band, penalties that fired, location/work-mode fit.
 
 Scoring input comes from the user's active resumes in the store, not from a
 keyword file. `vocabulary.yaml` holds only language and market facts —
-seniority wording, known tools, employment constraints, point values. Nothing
-in it may describe a particular person.
+seniority wording, known tools, employment constraints, geography and
+work-mode phrasings, point values. Nothing in it may describe a particular
+person.
+
+Geography and work mode (Ships 4–6; specs in `docs/superpowers/specs/` are
+the authority, including their correction notes and accepted residuals):
+
+- Every claim needs evidence; silence is the default. Phrase rules are
+  word-bounded and phrase-only; conflicting evidence claims nothing.
+- Flag-never-hide, with ONE user-approved exception: a posting stating a
+  work mode the user did not search for, in a confidently-parsed foreign
+  country, is dropped — counted on the run row and stated on the map
+  ("N HIDDEN (ON-SITE ELSEWHERE)"), never silent.
+- LinkedIn's workplace badge is guest-invisible; probe searches (hybrid/
+  onsite-filtered, evidence-only, never stored) recover it as URL set
+  membership. Probes and the local lane never use the scrapers' legacy
+  fallback — silence stays silent.
+- Every role stores `eligibility_verified`; unverified cards say
+  "location eligibility not verified" and rank below verified ones.
+- The first alias in a `vocabulary.yaml` country list IS the display name
+  rendered in reason sentences — reordering it is a product change.
 
 ## Design System
 Always read `DESIGN.md` before making any visual or UI decisions.
