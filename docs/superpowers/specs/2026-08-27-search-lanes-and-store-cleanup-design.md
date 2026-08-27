@@ -386,6 +386,17 @@ Guard rails:
   They are additive and phrase-bounded, so a wrong one under-claims
   rather than over-claims, but they need re-checking against a larger
   sample after the first clean run.
+- **`role.country` and `role.location` are two country signals with no
+  stated precedence.** Ship 7 added `role.country` (structured, lowercase
+  ISO, from kaix's `location.country`). `location_country()` still
+  derives its own guess from the free-text `location` and nothing yet
+  says which wins when both exist. This matters directly to part 9's
+  cleanup, whose `keep()` test calls `location_country(role.location)` —
+  it should prefer `role.country` where present, since that is the
+  publisher's structured answer and the text parse is a heuristic that
+  cannot tell "Chennai, IN" from "Gary, IN". Decide the precedence
+  explicitly in Ship 8 rather than leaving two sources of truth.
+
 - **The relevance gate is a fixed data-professional list, not per-user.**
   `vocabulary.yaml`'s `roles.include` names the market's data-role titles.
   That satisfies the vocabulary rule (market facts, not a person), and the
