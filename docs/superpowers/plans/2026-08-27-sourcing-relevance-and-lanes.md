@@ -1502,6 +1502,29 @@ def scrape(category: str, title: str,
     return jobs[:jobs_per_category]
 ```
 
+- [ ] **Step 3b: Make silent parse-loss loud — in BOTH scrapers**
+
+Added after Task 5's review. A wrong actor id, or an actor changing its
+output shape, produces rows we cannot read — and every row is then
+skipped, yielding zero jobs with no error. That is indistinguishable
+from a genuinely empty search, which is exactly the failure mode that
+cost Ship 6 its probe mechanism.
+
+Task 5 added this guard to `indeed.py`. Add the equivalent to the new
+`remote_boards.py` **and** retrofit it to `linkedin.py`, which does the
+same alternate-key shape-guessing (`item.get("jobUrl") or
+item.get("applyUrl") or ...`) and has the same exposure.
+
+In each scraper, after the parse loop, when the actor returned rows but
+none survived, log a warning naming the row count, the category and the
+actor id. Distinguish deliberate skips (an expired posting) from
+unusable ones (no url, unreadable shape) — only the second is a shape
+problem, and warning on the first cries wolf.
+
+Follow whatever `indeed.py` settled on so all three read alike. Test it
+in each: feed a wrong-shaped item, assert zero jobs AND that the warning
+fired, using `caplog`.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd job_hunt && python -m pytest tests/test_remote_boards.py -v`
