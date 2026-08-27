@@ -445,6 +445,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             scraped_total += len(jobs)
         report("scraping")
 
+    # The aggregator advertises ten boards and returned four in run 6.
+    # Recorded per run so a board going quiet is visible; the row count is
+    # not the signal, because 133 rows arrived from those four.
+    boards_seen = sorted({str(job["source_board"]) for job in all_scraped
+                          if job.get("source_board")})
+
     known_urls, known_rows = known_listings(conn, user_id)
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
@@ -480,7 +486,8 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
-               dropped=dropped_total, offtopic=offtopic_total)
+               dropped=dropped_total, offtopic=offtopic_total,
+               boards=boards_seen)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total, offtopic=offtopic_total,

@@ -830,3 +830,16 @@ def test_the_scope_reaches_the_store(conn, user, resume):
         "SELECT location_scope FROM role WHERE url = ?",
         ("https://x/scope1",)).fetchone()
     assert row["location_scope"] == "open"
+
+
+def test_the_run_row_records_which_boards_returned_rows(conn, user, resume):
+    """Four of the aggregator's ten boards answered in run 6 and nothing
+    noticed, because 133 rows arrived from those four."""
+    rows = [{**_job("https://x/b1"), "source_board": "himalayas"},
+            {**_job("https://x/b2", company="Other"),
+             "source_board": "jobicy"}]
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(remote_boards_jobs=rows))
+
+    assert get_run(conn, run_id)["boards"] == ["himalayas", "jobicy"]

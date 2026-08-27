@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS run (
     kept        INTEGER NOT NULL DEFAULT 0,
     dropped     INTEGER NOT NULL DEFAULT 0,
     offtopic    INTEGER NOT NULL DEFAULT 0,
+    boards      TEXT NOT NULL DEFAULT '[]',
     stage       TEXT,
     progress    TEXT NOT NULL DEFAULT '{}',
     error       TEXT
@@ -190,6 +191,14 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         # Which board a remote-board row came from, so the card can say.
         ("role", "source_board",
          "ALTER TABLE role ADD COLUMN source_board TEXT"),
+    ),
+    8: (
+        # Which of the aggregator's ten boards actually returned rows.
+        # Run 6 got four and nothing noticed, because Ship 7's residual
+        # watched row count and 133 rows arrived. A board silent across
+        # two consecutive runs is the signal; the row count is not.
+        ("run", "boards",
+         "ALTER TABLE run ADD COLUMN boards TEXT NOT NULL DEFAULT '[]'"),
     ),
 }
 
