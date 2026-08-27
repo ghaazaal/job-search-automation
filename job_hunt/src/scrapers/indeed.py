@@ -88,13 +88,15 @@ def scrape(category: str, title: str,
 
     raw = call_actor(actor_id, payload, f"Indeed/{category}", run_timeout)
 
-    # The actor's input schema is undocumented. A rejected payload comes back
-    # as an empty list, indistinguishable from a genuinely empty search, so
-    # the only safe response is to retry once with the values known to work.
-    # But the local lane asked a narrow, deliberate question — remote/us
-    # answers a different one entirely, and would re-fetch the worldwide
-    # lane's own results. A search that found nothing there must stay
-    # silent rather than fabricate.
+    # kaix documents its parameters (see the remote/fromDays note above),
+    # but not what happens when `location` doesn't resolve to a place it
+    # recognizes — that comes back as an empty list, indistinguishable
+    # from a genuinely empty search there, so the only safe response is
+    # to retry once with the values known to work. But the local lane
+    # asked a narrow, deliberate question — remote/us answers a
+    # different one entirely, and would re-fetch the worldwide lane's
+    # own results. A search that found nothing there must stay silent
+    # rather than fabricate.
     fellback = False
     legacy = {**payload, "location": _LEGACY_LOCATION,
               "country": _LEGACY_COUNTRY.upper()}
@@ -109,14 +111,21 @@ def scrape(category: str, title: str,
 
     today = date.today().isoformat()
     jobs: list[dict] = []
+    expired_count = 0
+    unusable_count = 0
+    stated_mode_count = 0
     for item in raw:
         if _get(item, "signals.isExpired") is True:
             # A closed posting wastes the user's time. kaix is the only
-            # source that tells us; LinkedIn does not.
+            # source that tells us; LinkedIn does not. Counted
+            # separately from unusable rows below — an all-expired batch
+            # is a legitimate outcome, not a parsing failure.
+            expired_count += 1
             continue
         url = (_get(item, "urls.indeed") or _get(item, "urls.apply")
                or _get(item, "urls.external") or "")
         if not url:
+            unusable_count += 1
             continue
 
         job = {
@@ -139,6 +148,7 @@ def scrape(category: str, title: str,
                 "in-person": "onsite"}.get(stated)
         if mode:
             job["work_mode"] = mode
+            stated_mode_count += 1
         country_code = (_get(item, "location.country") or "").strip().lower()
         if country_code:
             # Structured, so `location_country`'s ambiguity cases
@@ -146,16 +156,35 @@ def scrape(category: str, title: str,
             job["country"] = country_code
         jobs.append(job)
 
-    if raw and not jobs:
-        # Rows came back and none survived parsing - almost always a
-        # shape mismatch (wrong actor id, or the actor changed its
-        # output). An empty search and an unparseable response are
-        # different facts and must not look the same in the log: the
-        # former means the job market has nothing, the latter means
-        # this scraper is silently reading zero jobs from every run.
+    if expired_count:
+        # Not a warning — a closed posting is routine, but a run that
+        # quietly discards a lot of them is worth surfacing.
+        logger.info("Indeed dropped %d expired posting(s) for %s",
+                   expired_count, category)
+
+    if unusable_count and not jobs:
+        # Every non-expired row failed to yield a usable job — almost
+        # always a shape mismatch (wrong actor id, or the actor changed
+        # its output), not a genuinely empty search. Gated on
+        # unusable_count specifically, not just "raw and not jobs": an
+        # all-expired batch parsed perfectly and must not trip this.
         logger.warning(
-            "Indeed returned %d rows for %s but none could be parsed - "
-            "check the actor id is %s", len(raw), category, actor_id)
+            "Indeed returned %d unusable row(s) for %s but none could be "
+            "parsed — check the actor id is %s",
+            unusable_count, category, actor_id)
+
+    if jobs and not stated_mode_count:
+        # Measured 20/20 and 15/15 live rows carrying a stated mode, so
+        # a whole batch with none is unlikely — though not impossible,
+        # this is a signal to check for shape drift, not an error.
+        # workArrangement.locationType is the field this entire ship
+        # exists to trust over text inference; if it silently moved,
+        # every job here quietly reverted to the old guesswork with no
+        # other sign of it.
+        logger.warning(
+            "Indeed parsed %d job(s) for %s with no stated work mode — "
+            "check workArrangement.locationType is still the field name",
+            len(jobs), category)
 
     jobs = jobs[:jobs_per_category]
 

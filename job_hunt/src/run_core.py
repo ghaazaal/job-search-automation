@@ -161,9 +161,13 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     dropped_total = 0
     kept_jobs = []
     for job in new_jobs:
-        # Three kinds of work-mode evidence, strongest first. Popping
-        # `_lane_mode` happens unconditionally either way - it is
-        # transient regardless of whether it ends up used.
+        # A publisher-stated field outranks everything and overrides
+        # outright. Below that there is no second-strongest: text and
+        # lane corroborate each other when they agree, nullify each
+        # other when they conflict (see the branch below), and either
+        # one alone fills the other's silence. Popping `_lane_mode`
+        # happens unconditionally either way - it is transient
+        # regardless of whether it ends up used.
         stated_mode = job.get("work_mode")
         lane_mode = job.pop("_lane_mode", None)
         if stated_mode:

@@ -37,36 +37,32 @@ _KAIX_MINIMAL = {
 }
 
 
-@pytest.mark.parametrize("module", [linkedin])
-def test_description_is_captured(module, monkeypatch):
-    job = _scrape(module, monkeypatch,
+def test_linkedin_description_is_captured(monkeypatch):
+    job = _scrape(linkedin, monkeypatch,
                   {**_MINIMAL, "description": "We run dbt and Airflow."})
     assert job["description"] == "We run dbt and Airflow."
 
 
-@pytest.mark.parametrize("module", [linkedin])
 @pytest.mark.parametrize("key", ["descriptionText", "jobDescription",
                                  "descriptionHtml"])
-def test_description_alternate_keys(module, key, monkeypatch):
+def test_linkedin_description_alternate_keys(key, monkeypatch):
     """Apify actors disagree on the field name — accept the common variants."""
-    job = _scrape(module, monkeypatch, {**_MINIMAL, key: "Airflow required."})
+    job = _scrape(linkedin, monkeypatch, {**_MINIMAL, key: "Airflow required."})
     assert job["description"] == "Airflow required."
 
 
-@pytest.mark.parametrize("module", [linkedin])
-def test_html_description_is_flattened(module, monkeypatch):
+def test_linkedin_html_description_is_flattened(monkeypatch):
     """HTML bodies must become plain text so keyword matching works."""
     html = "<p>We use <strong>dbt</strong> and Airflow.</p><ul><li>SQL</li></ul>"
-    job = _scrape(module, monkeypatch, {**_MINIMAL, "description": html})
+    job = _scrape(linkedin, monkeypatch, {**_MINIMAL, "description": html})
     assert "<" not in job["description"]
     assert "dbt" in job["description"]
     assert "SQL" in job["description"]
 
 
-@pytest.mark.parametrize("module", [linkedin])
-def test_missing_description_is_empty_string(module, monkeypatch):
+def test_linkedin_missing_description_is_empty_string(monkeypatch):
     """No description available must not crash or yield None."""
-    job = _scrape(module, monkeypatch, _MINIMAL)
+    job = _scrape(linkedin, monkeypatch, _MINIMAL)
     assert job["description"] == ""
 
 
@@ -156,7 +152,10 @@ def test_indeed_maps_the_kaix_field_shape(monkeypatch):
     assert "SQL and Python" in job["description"]
 
 
-def test_indeed_drops_expired_postings(monkeypatch):
+def test_indeed_drops_expired_postings(monkeypatch, caplog):
+    """An all-expired batch parsed every row correctly - it must not
+    trip the unparseable-shape warning, which exists to flag the
+    opposite situation (rows that could not be read at all)."""
     item = {
         "title": {"text": "Data Analyst"},
         "company": {"name": "Acme"},
@@ -166,7 +165,10 @@ def test_indeed_drops_expired_postings(monkeypatch):
         "signals": {"isExpired": True},
     }
     monkeypatch.setattr(indeed, "call_actor", lambda *a, **k: [item])
-    assert indeed.scrape("Data Analyst", "Data Analyst", "x") == []
+    with caplog.at_level("WARNING", logger="src.scrapers.indeed"):
+        jobs = indeed.scrape("Data Analyst", "Data Analyst", "x")
+    assert jobs == []
+    assert not any("could be parsed" in r.message for r in caplog.records)
 
 
 def test_indeed_warns_when_rows_come_back_but_none_parse(monkeypatch, caplog):
@@ -186,6 +188,42 @@ def test_indeed_warns_when_rows_come_back_but_none_parse(monkeypatch, caplog):
                             "valig~indeed-jobs-scraper")
     assert jobs == []
     assert any("none could be parsed" in r.message for r in caplog.records)
+
+
+def test_indeed_warns_when_no_row_carries_a_stated_mode(monkeypatch, caplog):
+    """workArrangement.locationType was measured at 20/20 and 15/15 on
+    live rows. A batch that parses fine but carries none at all is the
+    signature of the field having moved or been renamed upstream — the
+    exact silent regression this ship exists to prevent."""
+    item = {
+        "title": {"text": "Data Analyst"},
+        "company": {"name": "Acme"},
+        "location": {"formatted": "Nashville, TN"},
+        "urls": {"indeed": "https://indeed.com/viewjob?jk=abc"},
+        "description": {"text": "SQL"},
+        # No "workArrangement" at all - as if the field moved.
+    }
+    monkeypatch.setattr(indeed, "call_actor", lambda *a, **k: [item])
+    with caplog.at_level("WARNING", logger="src.scrapers.indeed"):
+        jobs = indeed.scrape("Data Analyst", "Data Analyst", "x")
+    assert len(jobs) == 1
+    assert any("no stated work mode" in r.message for r in caplog.records)
+
+
+def test_indeed_does_not_warn_when_a_stated_mode_is_present(monkeypatch, caplog):
+    item = {
+        "title": {"text": "Data Analyst"},
+        "company": {"name": "Acme"},
+        "location": {"formatted": "Nashville, TN"},
+        "urls": {"indeed": "https://indeed.com/viewjob?jk=abc"},
+        "description": {"text": "SQL"},
+        "workArrangement": {"locationType": "Remote"},
+    }
+    monkeypatch.setattr(indeed, "call_actor", lambda *a, **k: [item])
+    with caplog.at_level("WARNING", logger="src.scrapers.indeed"):
+        jobs = indeed.scrape("Data Analyst", "Data Analyst", "x")
+    assert len(jobs) == 1
+    assert not any("no stated work mode" in r.message for r in caplog.records)
 
 
 def test_indeed_prefers_html_over_pre_flattened_text(monkeypatch):
@@ -364,21 +402,19 @@ def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
     assert linkedin_seen[0]["location"] == "Worldwide"
 
 
-@pytest.mark.parametrize("module", [linkedin])
-def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
+def test_linkedin_overshoot_is_truncated_to_the_cap(monkeypatch):
     """The cap is enforced at the client boundary regardless of actor
     behavior. See test_indeed_overshoot_is_truncated_to_the_cap for
     Indeed's kaix-shaped equivalent."""
     items = [{**_MINIMAL, "jobUrl": f"https://example.com/j{i}"}
              for i in range(100)]
-    _patch(monkeypatch, module, items)
-    jobs = module.scrape("Data Analyst", "Data Analyst", "actor~id",
-                         jobs_per_category=50)
+    _patch(monkeypatch, linkedin, items)
+    jobs = linkedin.scrape("Data Analyst", "Data Analyst", "actor~id",
+                          jobs_per_category=50)
     assert len(jobs) == 50
 
 
-@pytest.mark.parametrize("module", [linkedin])
-def test_html_is_preferred_over_a_prefused_plain_field(module, monkeypatch):
+def test_linkedin_prefers_html_over_a_prefused_plain_field(monkeypatch):
     """valig's plain `description` arrives pre-flattened with NO
     separators ("…RemoteTravel Required…"), defeating word-boundary
     matching. The html sibling has real structure, and tag-flattening
@@ -389,6 +425,6 @@ def test_html_is_preferred_over_a_prefused_plain_field(module, monkeypatch):
             "description": "Location: RemoteTravel Required: 2-5 Weeks",
             "descriptionHtml": "<p>Location: Remote</p>"
                                "<p>Travel Required: 2-5 Weeks</p>"}
-    job = _scrape(module, monkeypatch, item)
+    job = _scrape(linkedin, monkeypatch, item)
     assert "RemoteTravel" not in job["description"]
     assert "Location: Remote" in job["description"]

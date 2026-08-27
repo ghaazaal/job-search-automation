@@ -34,10 +34,13 @@ def extract_description(item: dict) -> str:
     for key in _DESCRIPTION_KEYS:
         raw = item.get(key)
         if isinstance(raw, dict):
-            # valig~indeed-jobs-scraper nests the body under
-            # description: {"text": ..., "html": ...} instead of putting
-            # a string directly on the top-level key. Prefer html: the
-            # text sibling arrives pre-flattened with no separators.
+            # Some actors nest the body as description: {"text": ...,
+            # "html": ...} instead of putting a string directly on the
+            # top-level key (the now-retired valig~indeed-jobs-scraper
+            # did this; the current indeed.py pre-flattens before ever
+            # reaching here, but the branch stays in case another actor
+            # is shaped this way). Prefer html: the text sibling arrives
+            # pre-flattened with no separators.
             raw = raw.get("html") or raw.get("text")
         if isinstance(raw, str) and raw.strip():
             text = html.unescape(_TAG_RE.sub(" ", raw))
