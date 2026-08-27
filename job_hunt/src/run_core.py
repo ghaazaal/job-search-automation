@@ -280,6 +280,40 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     return new_jobs, offtopic_total, dropped_total
 
 
+def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
+    """Judge each remote-board row's published reach, in place.
+
+    Remote boards state who they will hire as a FIELD, because being
+    borderless is their product. Run 6 measured what that is worth: across
+    384 roles, mining prose for eligibility found nothing and manufactured
+    three claims, while reading this field found two and manufactured
+    none. It is the only mechanism in this product that has ever proved a
+    role open to a user outside the big markets.
+
+    Board rows only. A LinkedIn `location` is a place, not a reach
+    statement — feeding it to a reach parser would manufacture exactly the
+    fake evidence rule 6a exists to stop. Rows without a `source_board`
+    are left untouched, and an untouched row stores NULL, which the map
+    reads as unverified rather than as closed.
+
+    Lives here rather than in `store/ingest.py`, which the spec suggested:
+    ingest is a pure writer with neither the vocabulary nor the user's
+    profile, and giving it both so it can fill one column would be a worse
+    trade than this. `run_core` holds both already and annotates jobs in
+    exactly this way (`_local_ok`, `_mode_mismatch`).
+    """
+    from .scoring.location_scope import scope_verdict
+
+    country = (profile.get("country") or "").strip().lower()
+    scope_cfg = vocab.get("location_scope") or {}
+    geo_cfg = vocab.get("eligibility") or {}
+    for job in jobs:
+        if not job.get("source_board"):
+            continue
+        job["location_scope"] = scope_verdict(
+            job.get("location") or "", country, scope_cfg, geo_cfg)
+
+
 def execute(conn, user_id: int, run_id: int, config: dict,
             resumes: list[dict], profile: dict,
             on_progress=None, scrapers=None, enrich=None) -> RunResult:
@@ -420,6 +454,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     new_jobs, offtopic_total, dropped_total = _apply_gates(
         new_jobs, vocab, profile, work_modes)
+    _apply_scope(new_jobs, vocab, profile)
 
     # `user_modes` is also needed below, for the Scorer.
     user_modes = tuple(str(m).strip().lower()

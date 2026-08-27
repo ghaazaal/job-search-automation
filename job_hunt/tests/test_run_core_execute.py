@@ -789,3 +789,44 @@ def test_an_onsite_only_profile_never_calls_the_remote_boards(conn, user,
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             scrapers={"LinkedIn": lambda *a, **k: [], "Remote boards": boards})
     assert called == []
+
+
+def test_a_board_row_gets_its_reach_judged():
+    """The reach field is the only eligibility evidence that has ever
+    worked. Verbatim from run 6, on a profile whose country is in it."""
+    from src.run_core import _apply_scope
+
+    vocab = {
+        "location_scope": {"worldwide": ["anywhere in the world"]},
+        "eligibility": {"countries": {"am": ["armenia"], "pl": ["poland"]},
+                        "regions": []},
+    }
+    jobs = [
+        {"title": "Analytics Engineer", "source_board": "himalayas",
+         "location": "Armenia, Cyprus, Georgia, Kazakhstan, Poland"},
+        {"title": "Data Analyst", "source_board": "jobicy",
+         "location": "Poland"},
+        {"title": "Data Engineer", "platform": "LinkedIn",
+         "location": "Yerevan, Armenia"},
+    ]
+    _apply_scope(jobs, vocab, {"country": "am"})
+
+    assert jobs[0]["location_scope"] == "open"
+    assert jobs[1]["location_scope"] == "closed"
+    # A LinkedIn location is a place, not a reach statement. Judging it
+    # would manufacture the fake evidence rule 6a exists to stop.
+    assert "location_scope" not in jobs[2]
+
+
+def test_the_scope_reaches_the_store(conn, user, resume):
+    board_job = {**_job("https://x/scope1"), "platform": "Himalayas",
+                 "source_board": "himalayas",
+                 "location": "Anywhere in the World"}
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(remote_boards_jobs=[board_job]))
+
+    row = conn.execute(
+        "SELECT location_scope FROM role WHERE url = ?",
+        ("https://x/scope1",)).fetchone()
+    assert row["location_scope"] == "open"
