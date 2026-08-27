@@ -336,3 +336,39 @@ work_mode:
     - "onsite work required"
     - "work setup & shift: onsite"  # BPO JD-header idiom
     - "work setup: onsite"  # BPO JD-header idiom
+
+# Which titles name a data role at all. Title-only, phrases only, never
+# bare words: a bare "data" matched "Data Center & Edge Infrastructure
+# Lead" and "Urban Data Platforms"; a bare "analyst" matched
+# "Quantitative Analyst". All three reached the live map.
+#
+# These are market facts — the names these roles go by. Nothing here
+# describes a particular person; which of them a given user searches for
+# comes from their resumes.
+roles:
+  include:
+    - "data analyst"
+    - "data engineer"
+    - "data analytics"
+    - "data scientist"
+    - "analytics engineer"
+    - "business intelligence"
+    - "bi developer"
+    - "bi analyst"
+    - "bi engineer"
+    - "power bi"
+    - "product analyst"
+    - "analytics manager"
+    - "data warehouse"
+    - "etl developer"
+    - "reporting analyst"
+    - "insights analyst"
+    - "data platform"
+  exclude:
+    # Traps that pass an include phrase but are not the job.
+    - "data center"
+    - "data centre"
+    - "data entry"
+    - "data protection"
+    - "clinical data"
+    - "flight data"
