@@ -58,15 +58,14 @@ def test_without_a_location_the_plan_is_worldwide_only():
     assert all(s["lane"] == "worldwide" for s in steps)
 
 
-def test_probes_append_two_linkedin_steps_per_role():
-    steps = plan_steps(["BI Developer"], probes=True)
-    lanes = [(s["source"], s["lane"]) for s in steps]
-    assert lanes == [("Indeed", "worldwide"), ("LinkedIn", "worldwide"),
-                     ("LinkedIn", "probe hybrid"),
-                     ("LinkedIn", "probe onsite")]
+def test_plan_steps_emits_no_probe_lanes():
+    """Probes never filtered anything - valig has no `remote` parameter."""
+    steps = plan_steps(["Data Analyst"], local=True)
+    lanes = {step["lane"] for step in steps}
+    assert lanes == {"worldwide", "local"}
+    assert not any(step["lane"].startswith("probe") for step in steps)
 
 
-def test_probes_require_linkedin_to_be_enabled():
-    indeed_only = tuple(s for s in SOURCES if s[0] == "Indeed")
-    steps = plan_steps(["BI Developer"], sources=indeed_only, probes=True)
-    assert all(not s["lane"].startswith("probe") for s in steps)
+def test_plan_steps_takes_no_probes_argument():
+    import inspect
+    assert "probes" not in inspect.signature(plan_steps).parameters
