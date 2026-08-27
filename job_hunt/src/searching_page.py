@@ -70,7 +70,7 @@ _HTML = """<!doctype html>
 <div class="hatch"></div>
 <div class="head"><div class="head-in">
 <div class="title">searching</div>
-<div class="sub">Reading Indeed, LinkedIn, and Remote boards for the roles on your resumes.</div>
+<div class="sub">Reading LinkedIn and Remote boards for the roles on your resumes.</div>
 </div></div>
 <div class="wrap"><div class="col">
 <div class="steps" id="steps"></div>
