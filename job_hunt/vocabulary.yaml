@@ -254,12 +254,20 @@ eligibility:
   # settle eligibility: they say where the company operates, not who it
   # will hire, and each has been seen sitting right next to a stated
   # restriction ("... worldwide remote company. US citizens only.").
+  # Standalone worldwide statements. A member of this list returns
+  # eligible on a bare match - no window, no corroboration - so only
+  # phrases that ARE a claim belong here.
+  #
+  # "anywhere in the world" was in this list bare and is not a claim, it
+  # is five words: it fired inside "work together in real time from
+  # anywhere in the world", a live LinkedIn row where the sentence is
+  # about the product the company sells. "candidates from anywhere in
+  # the world" below carries the claim it was standing in for.
   eligible_phrases:
     - "open to candidates worldwide"
     - "open to applicants worldwide"
     - "candidates from anywhere in the world"
     - "work from anywhere in the world"
-    - "anywhere in the world"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.
