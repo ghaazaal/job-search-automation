@@ -59,21 +59,25 @@ def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
 
     Mode lanes are the LinkedIn-only mechanism for recovering workplace
     type, which LinkedIn hides from logged-out clients and whose actor
-    ignores every filter parameter we tried: a `remote`/`onsite` filter
-    argument, and a `f_WT` URL parameter, both returned the same 9-of-25
-    overlapping job IDs regardless of which value was sent. Only the
-    search *words* reach LinkedIn's relevance matcher — searching
-    "remote <title>" versus "hybrid <title>" returned 0 overlapping job
-    IDs out of 25 each. So a mode lane is an extra LinkedIn search per
-    (title, mode) with the mode word prefixed onto the query — one step
-    per title for each mode in `mode_lanes` that is also in `LANE_MODES`.
-    There is no on-site lane: measured 1/3 precision, because postings
-    advertise "remote" and "hybrid" as selling points but rarely state
-    on-site at all, so on-site is inferred by elimination and served by
-    the local lane instead. A lane is relevance, not a filter — a
-    posting that merely mentions the word can land in the lane — so
-    lane membership only ever fills silence in `_apply_gates`, never
-    overrides a mode stated in the posting's own text.
+    ignores every filter parameter we tried, and the two broken
+    mechanisms failed differently. The `remote` argument left 9 of 23
+    job IDs in BOTH the hybrid-filtered and onsite-filtered result sets,
+    where a working filter yields zero overlap — a job has exactly one
+    workplace type. The `f_WT` URL parameter was worse: four different
+    values collapsed to two identical result lists, item for item
+    (`f_WT=3` ≡ `f_WT=2`, `f_WT=1` ≡ `f_WT=1,3`). Only the search
+    *words* reach LinkedIn's relevance matcher — searching "remote
+    <title>" versus "hybrid <title>" shared 0 of 23 job IDs. So a mode
+    lane is an extra LinkedIn search per (title, mode) with the mode
+    word prefixed onto the query — one step per title for each mode in
+    `mode_lanes` that is also in `LANE_MODES`. There is no on-site lane:
+    measured 1/3 precision, because postings advertise "remote" and
+    "hybrid" as selling points but rarely state on-site at all, so
+    on-site is inferred by elimination and served by the local lane
+    instead. A lane is relevance, not a filter — a posting that merely
+    mentions the word can land in the lane — so lane membership only
+    ever fills silence in `_apply_gates`, never overrides a mode stated
+    in the posting's own text.
     """
     lanes = ("worldwide",) + (("local",) if local else ())
     steps = [{"source": name, "role": title, "lane": lane,
