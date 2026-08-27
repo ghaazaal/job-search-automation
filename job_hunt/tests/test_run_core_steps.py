@@ -91,7 +91,7 @@ def test_no_mode_lanes_when_none_selected():
 
 
 def test_no_mode_lanes_when_linkedin_is_not_a_source():
-    indeed_only = (("Indeed", "indeed_actor", "valig~indeed-jobs-scraper"),)
+    indeed_only = (("Indeed", "indeed_actor", "kaix~indeed-scraper"),)
     steps = plan_steps(["Data Analyst"], sources=indeed_only,
                        mode_lanes=("remote", "hybrid"))
     assert not any(s["lane"].startswith("mode") for s in steps)

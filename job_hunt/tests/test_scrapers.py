@@ -169,6 +169,25 @@ def test_indeed_drops_expired_postings(monkeypatch):
     assert indeed.scrape("Data Analyst", "Data Analyst", "x") == []
 
 
+def test_indeed_warns_when_rows_come_back_but_none_parse(monkeypatch, caplog):
+    """A shape mismatch (e.g. the config still points at the retired
+    valig actor) must not look like an empty job market: the actor
+    returning rows that all fail to parse is a different, louder fact.
+    valig's flat item shape has no `urls.*` path for kaix's `_get` to
+    find, so every row is silently skipped without this guard."""
+    valig_shaped_item = {
+        "jobUrl": "https://example.com/j1", "title": "Data Analyst",
+        "company": "Acme", "location": "Remote",
+    }
+    monkeypatch.setattr(indeed, "call_actor",
+                        lambda *a, **k: [valig_shaped_item])
+    with caplog.at_level("WARNING", logger="src.scrapers.indeed"):
+        jobs = indeed.scrape("Data Analyst", "Data Analyst",
+                            "valig~indeed-jobs-scraper")
+    assert jobs == []
+    assert any("none could be parsed" in r.message for r in caplog.records)
+
+
 def test_indeed_prefers_html_over_pre_flattened_text(monkeypatch):
     """The plain text sibling arrives pre-flattened with no separators
     ("run togetherText here"), which defeats word-boundary phrase

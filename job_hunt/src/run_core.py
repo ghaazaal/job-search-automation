@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # (display name, config key for the actor id, default actor id)
 SOURCES = (
-    ("Indeed",   "indeed_actor",   "valig~indeed-jobs-scraper"),
+    ("Indeed",   "indeed_actor",   "kaix~indeed-scraper"),
     ("LinkedIn", "linkedin_actor", "valig~linkedin-jobs-scraper"),
 )
 

@@ -146,6 +146,17 @@ def scrape(category: str, title: str,
             job["country"] = country_code
         jobs.append(job)
 
+    if raw and not jobs:
+        # Rows came back and none survived parsing - almost always a
+        # shape mismatch (wrong actor id, or the actor changed its
+        # output). An empty search and an unparseable response are
+        # different facts and must not look the same in the log: the
+        # former means the job market has nothing, the latter means
+        # this scraper is silently reading zero jobs from every run.
+        logger.warning(
+            "Indeed returned %d rows for %s but none could be parsed - "
+            "check the actor id is %s", len(raw), category, actor_id)
+
     jobs = jobs[:jobs_per_category]
 
     if fellback and payload["country"] != _LEGACY_COUNTRY.upper():
