@@ -163,3 +163,18 @@ def test_the_whole_plan_for_a_remote_and_hybrid_user():
     titles = ["BI Developer", "Data Analyst", "data engineer", "data analytics"]
     steps = plan_steps(titles, local=True, mode_lanes=("remote", "hybrid"))
     assert len(steps) == 16
+
+
+def test_an_onsite_only_user_gets_no_remote_board_step():
+    """Every row the boards return is stamped remote, so an onsite-only
+    user has all of them dropped or flagged - after paying for the
+    slowest source in the run."""
+    steps = plan_steps(["Data Analyst"], local=True, mode_lanes=(),
+                       wants_remote=False)
+    assert "Remote boards" not in {s["source"] for s in steps}
+
+
+def test_a_remote_user_still_gets_the_remote_board_step():
+    steps = plan_steps(["Data Analyst"], local=True, mode_lanes=("remote",),
+                       wants_remote=True)
+    assert "Remote boards" in {s["source"] for s in steps}

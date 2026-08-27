@@ -771,3 +771,21 @@ def test_each_lane_asks_its_own_question_in_its_own_place(conn, user, resume):
             if c["title"] == "remote BI Developer"] == ["Worldwide"]
     # And the boards are borderless: worldwide, once.
     assert [c["location"] for c in boards] == ["Worldwide"]
+
+
+def test_an_onsite_only_profile_never_calls_the_remote_boards(conn, user,
+                                                             resume):
+    """The boards stamp every row remote, so an onsite-only user would
+    have all of them dropped or flagged - after paying for the slowest
+    source in the run."""
+    profile = {**_PROFILE, "work_modes": ["onsite"]}
+    called = []
+
+    def boards(*args, **kwargs):
+        called.append(args)
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], profile,
+            scrapers={"LinkedIn": lambda *a, **k: [], "Remote boards": boards})
+    assert called == []

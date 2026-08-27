@@ -85,7 +85,7 @@ def search_titles(resumes: list[dict]) -> list[str]:
 
 
 def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
-               mode_lanes: tuple = ()) -> list[dict]:
+               mode_lanes: tuple = (), wants_remote: bool = True) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
@@ -115,6 +115,14 @@ def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
     ever fills silence in `_apply_gates`, never overrides a mode stated
     in the posting's own text.
     """
+    # The remote boards carry nothing but remote work — `remote_boards.
+    # scrape` stamps every row "remote" because that is what those boards
+    # are. A user who did not tick remote would have every row dropped or
+    # flagged by the work-mode policy, after paying for the slowest source
+    # in the run (a 420-second floor against LinkedIn's 20 seconds).
+    if not wants_remote:
+        sources = tuple(s for s in sources if s[0] not in _WORLDWIDE_ONLY)
+
     lanes = ("worldwide",) + (("local",) if local else ())
     steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
@@ -331,7 +339,9 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                        if m in LANE_MODES)
     steps = plan_steps(titles, sources=sources,
                       local=bool((profile.get("location") or "").strip()),
-                      mode_lanes=mode_lanes)
+                      mode_lanes=mode_lanes,
+                      wants_remote="remote" in {str(m).strip().lower()
+                                                for m in work_modes})
     scraped_total = 0
     dropped_total = 0
     offtopic_total = 0

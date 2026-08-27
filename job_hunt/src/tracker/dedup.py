@@ -88,10 +88,19 @@ def dedupe(jobs: list[dict],
 
     kept: dict[str, dict] = {}          # fingerprint -> winning job
     order: list[str] = []
+    url_owner: dict[str, str] = {}      # normalised url -> that fingerprint
 
     for job in jobs:
         url = normalize_url(job.get("url", ""))
-        if not url or url in seen_urls:
+        if not url:
+            continue
+        if url in seen_urls:
+            # Already claimed — by a job kept above, or by a row already in
+            # the store. Only the first case has somewhere to put lane
+            # evidence; the second is not ours to annotate.
+            owner = url_owner.get(url)
+            if owner is not None:
+                _carry_lane(kept[owner], job)
             continue
         fp = fingerprint(job)
         if fp in seen_fps:
@@ -102,10 +111,34 @@ def dedupe(jobs: list[dict],
             incumbent = kept[fp]
             if not incumbent.get("description") and job.get("description"):
                 kept[fp] = job
+                # The incumbent's url still resolves to this fingerprint.
+                url_owner[normalize_url(incumbent.get("url", ""))] = fp
+            winner = kept[fp]
+            _carry_lane(winner, incumbent if winner is job else job)
             continue
 
         seen_urls.add(url)
+        url_owner[url] = fp
         kept[fp] = job
         order.append(fp)
 
     return [kept[fp] for fp in order]
+
+
+def _carry_lane(winner: dict, loser: dict) -> None:
+    """Move lane membership onto the copy that survives a collapse.
+
+    A mode lane runs after the plain lanes, so its copy is always the
+    challenger — and for a posting whose own text says nothing about work
+    mode, lane membership is the only evidence there is. Discarding the
+    loser wholesale threw it away for exactly the postings the lane exists
+    to serve.
+
+    Never overwritten: if both copies carry a lane, the one already on the
+    winner stands. Two lanes disagreeing is a conflict, and a conflict
+    claims nothing — `_apply_gates` decides that, not this function, and it
+    can only decide it if the first-recorded value is stable.
+    """
+    lane = winner.get("_lane_mode") or loser.get("_lane_mode")
+    if lane:
+        winner.setdefault("_lane_mode", lane)
