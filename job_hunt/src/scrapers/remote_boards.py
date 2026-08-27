@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 # The aggregator's board slug -> the name we show the user. Two
 # DevITjobs slugs (US/UK) deliberately collapse to one display name —
 # the user doesn't need the geography of the recruiter's own board.
+# This actor sweeps ten boards serially, so it is an order of magnitude
+# slower than the others: a measured live run of 50 rows took 301
+# seconds, against roughly 20 for valig. `search.run_timeout` defaults to
+# 120, which would time this source out on EVERY call — and a timeout
+# returns an empty list, which looks exactly like the boards genuinely
+# having nothing. So the floor is raised here rather than globally,
+# where it would also let a hung Indeed call block for seven minutes.
+_MIN_TIMEOUT = 420
+
 _BOARDS = {
     "remoteok": "RemoteOK",
     "weworkremotely": "We Work Remotely",
@@ -131,7 +140,7 @@ def scrape(category: str, title: str,
     }
     try:
         raw = call_actor(actor_id, payload, f"RemoteBoards/{category}",
-                         run_timeout)
+                         max(run_timeout, _MIN_TIMEOUT))
     except Exception as exc:
         # Allowed to fail — the other sources carry the run — but not
         # allowed to fail invisibly. 14 total users, no ratings, days

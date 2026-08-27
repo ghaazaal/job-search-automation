@@ -178,3 +178,31 @@ def test_description_snippet_is_used_when_description_is_missing(monkeypatch):
     monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
     job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
     assert job["description"] == "Build the data platform."
+
+
+def test_the_timeout_floor_beats_the_global_default(monkeypatch):
+    """A measured live run took 301s; search.run_timeout defaults to 120.
+
+    Without a floor this source times out on every call, and a timeout
+    returns [] - indistinguishable from the boards having nothing.
+    """
+    seen = {}
+
+    def fake_call(actor_id, payload, label, timeout):
+        seen["timeout"] = timeout
+        return []
+
+    monkeypatch.setattr(remote_boards, "call_actor", fake_call)
+    remote_boards.scrape("Data Analyst", "Data Analyst", "actor",
+                         run_timeout=120)
+    assert seen["timeout"] >= 360
+
+
+def test_a_generous_configured_timeout_is_respected(monkeypatch):
+    """The floor raises a too-small value; it never lowers a large one."""
+    seen = {}
+    monkeypatch.setattr(remote_boards, "call_actor",
+                        lambda a, p, l, t: seen.update(timeout=t) or [])
+    remote_boards.scrape("Data Analyst", "Data Analyst", "actor",
+                         run_timeout=900)
+    assert seen["timeout"] == 900
