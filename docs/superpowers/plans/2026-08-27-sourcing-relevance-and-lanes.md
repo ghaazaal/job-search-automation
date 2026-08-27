@@ -537,6 +537,82 @@ git commit -m "feat: reject off-target titles before scoring, count them on the 
 
 ---
 
+### Task 3b: Extract the filtering pipeline from `execute()`
+
+Added after the Task 3 code review. `execute()` is already ~360 lines.
+Task 4 is scoped to add a lane branch to the scrape loop, a
+`title_override` bypass, per-job lane tagging, AND a rewrite of the
+mode-reconciliation block — and Task 8 registers a fourth source on top.
+Landing those inside the current body leaves one function holding six
+entangled concerns.
+
+Extract now, so Task 4's reconciliation rewrite lands in a small,
+independently testable function instead of deepening `execute()`.
+
+**Files:**
+- Modify: `job_hunt/src/run_core.py`
+- Test: `job_hunt/tests/test_run_core_execute.py`
+
+- [ ] **Step 1: Identify the seam**
+
+`run_core.py` lines ~192-266: the relevance gate plus the work-mode/geo
+policy loop. Both stages take `new_jobs` in and return a filtered list
+plus a count. Neither touches the scrape loop's step or progress
+bookkeeping, so the extraction is mechanical.
+
+- [ ] **Step 2: Extract**
+
+Create a module-level function in `run_core.py`:
+
+```python
+def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
+                 work_modes) -> tuple[list[dict], int, int]:
+    """Everything that decides whether a scraped job is worth scoring.
+
+    Two independent gates, in order of cheapness. The relevance gate
+    asks whether this is the job at all, and rejects ~41% of what the
+    actors return. The work-mode/geo policy then asks whether this user
+    could take it, which needs the vocabulary and the profile country.
+
+    Returns (kept, offtopic_count, dropped_count). Both counts are
+    reported and persisted — nothing here disappears silently.
+    """
+```
+
+Move the two blocks in verbatim. `execute()` becomes:
+
+```python
+    new_jobs, offtopic_total, dropped_total = _apply_gates(
+        new_jobs, vocab, profile, work_modes)
+    report("scraping")
+```
+
+Keep the existing comments with the code they explain.
+
+- [ ] **Step 3: Verify no behaviour changed**
+
+Run: `cd job_hunt && python -m pytest tests/ -q`
+Expected: the same count as before the extraction, with no test edits.
+If any test needed changing, the extraction was not behaviour-preserving
+— revert and reconsider.
+
+- [ ] **Step 4: Add direct unit tests for the extracted function**
+
+The gates were previously only reachable through the whole of
+`execute()`. Now they can be tested directly. Add tests calling
+`_apply_gates` with a small job list, asserting the returned counts and
+which jobs survive — one per gate, plus one proving the counts stay
+separate.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add job_hunt/src/run_core.py job_hunt/tests/test_run_core_execute.py
+git commit -m "refactor: extract the filtering gates from execute()"
+```
+
+---
+
 ### Task 4: LinkedIn keyword lanes
 
 `f_WT` and `remote` are both ignored. Putting the mode in the search words is the only mechanism that partitions results: measured 0 shared job IDs between the remote and hybrid lanes, against 9–25 for the parameter routes.

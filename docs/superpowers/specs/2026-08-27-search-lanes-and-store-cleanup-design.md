@@ -386,6 +386,20 @@ Guard rails:
   They are additive and phrase-bounded, so a wrong one under-claims
   rather than over-claims, but they need re-checking against a larger
   sample after the first clean run.
+- **The relevance gate is a fixed data-professional list, not per-user.**
+  `vocabulary.yaml`'s `roles.include` names the market's data-role titles.
+  That satisfies the vocabulary rule (market facts, not a person), and the
+  scorer still judges per-user fit from the resumes. But a user whose
+  resumes target a different profession would have every genuine posting
+  rejected as off-topic, and the run would look empty rather than
+  misconfigured. `search_titles()` already extracts each user's own
+  `target_roles` from their resumes, so a per-user include list is
+  reachable — the open question is whether it is *better*, since a user
+  listing "Data Analyst" would then stop matching "Business Intelligence
+  Analyst", losing the market synonyms the fixed list provides.
+  Trigger to revisit: the first non-data user, or any run where the
+  off-topic count approaches the scraped count.
+
 - **The relevance exclusion list is hand-maintained** and will drift as
   new trap titles appear. Trigger: review it whenever an off-target role
   reaches the map.
