@@ -464,6 +464,31 @@ def test_an_unplaceable_job_is_stored_unverified(conn, user, resume):
     assert "_local_ok" not in evidence
 
 
+def test_offtopic_titles_are_never_stored(conn, user, resume):
+    """A nurse posting must not reach the map, whatever it scores."""
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[
+                         _job("https://x/40"),
+                         _job("https://x/41", title="Nurse Practitioner",
+                              company="Med"),
+                     ]))
+    titles = [job["title"] for job in result.scored_jobs]
+    assert titles == ["BI Developer"]
+    assert result.offtopic == 1
+
+
+def test_offtopic_count_reaches_the_progress_payload(conn, user, resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers=_scrapers(indeed_jobs=[
+                _job("https://x/42", title="Travel Advisor", company="T"),
+            ]))
+    assert seen[-1]["offtopic"] == 1
+
+
 def test_the_local_lane_never_falls_back(conn, user, resume):
     """The local lane finding nothing must stay silent, not retry with the
     legacy Worldwide/remote-us payload — that re-fetches the worldwide

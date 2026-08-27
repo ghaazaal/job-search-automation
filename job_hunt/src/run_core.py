@@ -64,6 +64,7 @@ class RunResult:
     scraped: int = 0
     kept: int = 0
     dropped: int = 0
+    offtopic: int = 0
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
@@ -97,6 +98,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     from .pipeline_store import persist_run
     from .scoring.matching import has_term, location_country, work_mode
+    from .scoring.relevance import is_target_role
     from .scoring.scorer import Scorer
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
@@ -131,10 +133,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                       local=bool((profile.get("location") or "").strip()))
     scraped_total = 0
     dropped_total = 0
+    offtopic_total = 0
 
     def report(stage: str) -> None:
         emit({"stage": stage, "steps": [dict(s) for s in steps],
-             "scraped": scraped_total, "dropped": dropped_total})
+             "scraped": scraped_total, "dropped": dropped_total,
+             "offtopic": offtopic_total})
 
     # Announce the whole plan before doing any of it.
     report("scraping")
@@ -185,6 +189,20 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
 
+    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
+        vocab = yaml.safe_load(handle)
+
+    # Relevance gate. 41% of what these actors return is not a data role
+    # at all — Nurse Practitioner, Travel Advisor, Fleet Parking
+    # Specialist. The scorer rates them 1-4 and they were stored anyway.
+    # Rejecting here means an off-target role costs no enrichment lookup
+    # and no scoring pass. Counted, never silent.
+    role_cfg = vocab.get("roles") or {}
+    on_topic = [job for job in new_jobs
+               if is_target_role(job.get("title"), role_cfg)]
+    offtopic_total = len(new_jobs) - len(on_topic)
+    new_jobs = on_topic
+
     # Work-mode policy. The one user-approved exception to flag-never-
     # hide: a posting that states a mode the user did not search for,
     # located in a country that is not theirs, is dropped — bounded by
@@ -193,8 +211,6 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     # unplaceable ones are flagged, because a silent drop cannot be
     # justified without knowing where the job is. Runs before `enrich`
     # so a dropped job never costs a company-enrichment lookup.
-    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
-        vocab = yaml.safe_load(handle)
     mode_cfg = vocab.get("work_mode") or {}
     loc_cfg = vocab.get("eligibility") or {}
     # Same fallback the scrape itself uses (see `work_modes` above) — an
@@ -277,5 +293,5 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                dropped=dropped_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
-                     dropped=dropped_total,
+                     dropped=dropped_total, offtopic=offtopic_total,
                      scored_jobs=scored_jobs, steps=steps, titles=titles)
