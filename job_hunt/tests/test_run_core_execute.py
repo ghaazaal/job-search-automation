@@ -570,9 +570,13 @@ def test_apply_gates_work_mode_policy_drops_a_foreign_onsite_job():
 
 
 def test_apply_gates_counts_stay_separate():
-    """One offtopic title, one foreign onsite mismatch, one clean survivor
-    — the two counts must track only their own gate, and the survivor must
-    be the one job neither gate touched."""
+    """One offtopic title, one foreign onsite mismatch, one clean survivor.
+
+    Each count registers its own gate's rejection and the survivor passes
+    both. This cannot prove the counts are unconflatable — the relevance
+    gate runs first and narrows what the geo loop ever sees, so an
+    off-topic job can never reach it — but it does catch an off-by-one, a
+    wrong-variable increment, or the survivor being dropped."""
     offtopic_job = _job("https://x/g4", title="Nurse Practitioner")
     dropped_job = _job("https://x/g5")
     dropped_job["location"] = "Bengaluru, India"
