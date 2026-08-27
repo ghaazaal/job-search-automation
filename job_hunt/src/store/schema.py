@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS run (
     scraped     INTEGER NOT NULL DEFAULT 0,
     kept        INTEGER NOT NULL DEFAULT 0,
     dropped     INTEGER NOT NULL DEFAULT 0,
+    offtopic    INTEGER NOT NULL DEFAULT 0,
     stage       TEXT,
     progress    TEXT NOT NULL DEFAULT '{}',
     error       TEXT
@@ -164,6 +165,10 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
     5: (
         ("role", "eligibility_verified",
          "ALTER TABLE role ADD COLUMN eligibility_verified INTEGER NOT NULL DEFAULT 0"),
+    ),
+    6: (
+        ("run", "offtopic",
+         "ALTER TABLE run ADD COLUMN offtopic INTEGER NOT NULL DEFAULT 0"),
     ),
 }
 

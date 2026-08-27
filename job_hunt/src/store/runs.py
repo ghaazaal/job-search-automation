@@ -33,12 +33,13 @@ def start_run(conn: sqlite3.Connection, user_id: int) -> int:
 
 def finish_run(conn: sqlite3.Connection, run_id: int,
                scraped: int, kept: int, ok: bool = True,
-               dropped: int = 0) -> None:
+               dropped: int = 0, offtopic: int = 0) -> None:
     with transaction(conn):
         conn.execute(
             """UPDATE run SET status = ?, finished_at = ?, scraped = ?,
-               kept = ?, dropped = ? WHERE id = ?""",
-            ("OK" if ok else "FAILED", _now(), scraped, kept, dropped, run_id))
+               kept = ?, dropped = ?, offtopic = ? WHERE id = ?""",
+            ("OK" if ok else "FAILED", _now(), scraped, kept, dropped,
+             offtopic, run_id))
 
 
 def fail_run(conn: sqlite3.Connection, run_id: int, error: str) -> None:
@@ -59,7 +60,8 @@ def set_progress(conn: sqlite3.Connection, run_id: int,
 
 def get_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
     row = conn.execute(
-        """SELECT id, status, stage, progress, error, scraped, kept, dropped
+        """SELECT id, status, stage, progress, error, scraped, kept, dropped,
+                  offtopic
              FROM run WHERE id = ?""", (run_id,)).fetchone()
     if row is None:
         return None
@@ -78,6 +80,7 @@ def get_run(conn: sqlite3.Connection, run_id: int) -> dict | None:
         "scraped":  row["scraped"],
         "kept":     row["kept"],
         "dropped":  row["dropped"],
+        "offtopic": row["offtopic"],
     }
 
 

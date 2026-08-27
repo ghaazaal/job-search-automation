@@ -290,7 +290,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
-               dropped=dropped_total)
+               dropped=dropped_total, offtopic=offtopic_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total, offtopic=offtopic_total,

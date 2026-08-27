@@ -419,6 +419,13 @@ def render(maps: list[dict], meta: dict | None = None,
     if hidden:
         meta_2 = f"{meta_2} &middot; {hidden} HIDDEN (ON-SITE ELSEWHERE)"
 
+    # A relevance-gate rejection is a different fact from a hidden-elsewhere
+    # posting — wrong place vs. not this job at all — so it earns its own
+    # clause rather than folding into the count above.
+    offtopic = meta.get("offtopic") or 0
+    if offtopic:
+        meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A DATA ROLE)"
+
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 

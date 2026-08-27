@@ -152,3 +152,17 @@ def test_dropped_defaults_to_zero_when_not_given(conn, user):
     runs.finish_run(conn, run_id, scraped=1, kept=1)
 
     assert runs.get_run(conn, run_id)["dropped"] == 0
+
+
+def test_finishing_records_the_offtopic_count(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=5, kept=3, offtopic=2)
+
+    assert runs.get_run(conn, run_id)["offtopic"] == 2
+
+
+def test_offtopic_defaults_to_zero_when_not_given(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=1, kept=1)
+
+    assert runs.get_run(conn, run_id)["offtopic"] == 0

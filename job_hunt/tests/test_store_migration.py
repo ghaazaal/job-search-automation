@@ -207,3 +207,13 @@ def test_version_five_adds_eligibility_verified_defaulting_honest(tmp_path):
     assert "eligibility_verified" in _columns(conn, "role")
     assert conn.execute("SELECT eligibility_verified FROM role"
                         ).fetchone()["eligibility_verified"] == 0
+
+
+def test_version_six_adds_offtopic_and_old_runs_default_to_zero(tmp_path):
+    """A run recorded before the relevance gate existed rejected nothing it
+    knew about — 0, not NULL, same as `dropped` in version 4."""
+    conn = _v1_database(tmp_path / "v1.db")
+    init_db(conn)
+    assert "offtopic" in _columns(conn, "run")
+    assert conn.execute(
+        "SELECT offtopic FROM run").fetchone()["offtopic"] == 0

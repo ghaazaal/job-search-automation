@@ -158,3 +158,20 @@ def test_the_map_reports_what_the_last_run_hid(tmp_path):
 
     body = _client(path, tmp_path).get("/").get_data(as_text=True)
     assert "HIDDEN (ON-SITE ELSEWHERE)" in body
+
+
+def test_the_map_reports_what_the_last_run_rejected_as_offtopic(tmp_path):
+    """The offtopic count is durably recorded on the run row and must reach
+    the map the same way `dropped` does — the two are different facts and
+    neither substitutes for the other."""
+    path = _ready(tmp_path)
+    conn = connect(path)
+    try:
+        user_id = ensure_user(conn, "default")
+        done = start_run(conn, user_id)
+        finish_run(conn, done, scraped=5, kept=3, offtopic=4)
+    finally:
+        conn.close()
+
+    body = _client(path, tmp_path).get("/").get_data(as_text=True)
+    assert "OFF-TOPIC (NOT A DATA ROLE)" in body

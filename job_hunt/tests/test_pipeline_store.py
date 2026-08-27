@@ -45,6 +45,15 @@ def test_persist_does_not_create_a_second_run(conn):
     assert total == 1
 
 
+def test_persist_writes_the_offtopic_count(conn):
+    user_id = ensure_user(conn, "default")
+    run_id = start_run(conn, user_id)
+
+    persist_run(conn, user_id, run_id, [_JOB], scraped=1, offtopic=4)
+
+    assert get_run(conn, run_id)["offtopic"] == 4
+
+
 def test_a_failing_ingest_marks_the_run_failed_and_re_raises(conn):
     user_id = ensure_user(conn, "default")
     run_id = start_run(conn, user_id)
