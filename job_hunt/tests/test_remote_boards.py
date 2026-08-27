@@ -93,3 +93,66 @@ def test_a_missing_posted_at_falls_back_to_today(monkeypatch):
     monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
     job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
     assert job["date"] == datetime.date.today().isoformat()
+
+
+def test_a_non_numeric_salary_does_not_crash_the_whole_category(monkeypatch):
+    """Ten independent boards means ten different ideas of what belongs
+    in a salary field. A free-text value like "Competitive" (seen on a
+    live row) must not blow up _salary and take the entire category's
+    results with it via scrape()'s own error boundary - the row should
+    just come back with no salary."""
+    row = {"title": "Data Analyst", "company": "X", "location": "Remote",
+           "url": "https://remoteok.com/1", "source_board": "remoteok",
+           "posted_at": "2026-08-25",
+           "salary_min": "Competitive", "salary_max": None,
+           "salary_currency": "USD", "description": ""}
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
+    jobs = remote_boards.scrape("Data Analyst", "Data Analyst", "a")
+    assert len(jobs) == 1
+    assert jobs[0]["salary"] == ""
+
+
+def test_a_foreign_currency_renders_its_own_symbol(monkeypatch):
+    row = {"title": "Data Analyst", "company": "X", "location": "Remote, EU",
+           "url": "https://remoteok.com/1", "source_board": "remoteok",
+           "posted_at": "2026-08-25",
+           "salary_min": 60000, "salary_max": 75000,
+           "salary_currency": "EUR", "description": ""}
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
+    job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
+    assert job["salary"] == "€60,000 – €75,000"
+
+
+def test_an_unmapped_currency_falls_back_to_its_bare_code(monkeypatch):
+    row = {"title": "Data Analyst", "company": "X", "location": "Remote",
+           "url": "https://remoteok.com/1", "source_board": "remoteok",
+           "posted_at": "2026-08-25",
+           "salary_min": 120000, "salary_max": 150000,
+           "salary_currency": "CAD", "description": ""}
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
+    job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
+    assert job["salary"] == "CAD 120,000 – CAD 150,000"
+
+
+def test_description_is_flattened_like_the_other_scrapers(monkeypatch):
+    """Ten boards, no guaranteed formatting - a description that arrives
+    pre-flattened with no separators between fields must not defeat
+    word-boundary phrase matching. Routed through the same
+    extract_description helper indeed.py and linkedin.py use."""
+    row = {"title": "Data Analyst", "company": "X", "location": "Remote",
+           "url": "https://remoteok.com/1", "source_board": "remoteok",
+           "posted_at": "2026-08-25",
+           "description": "<p>Location: Remote</p><p>Travel: None</p>"}
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
+    job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
+    assert "Location: Remote Travel: None" == job["description"]
+
+
+def test_description_snippet_is_used_when_description_is_missing(monkeypatch):
+    row = {"title": "Data Analyst", "company": "X", "location": "Remote",
+           "url": "https://remoteok.com/1", "source_board": "remoteok",
+           "posted_at": "2026-08-25",
+           "description_snippet": "Build the data platform."}
+    monkeypatch.setattr(remote_boards, "call_actor", lambda *a, **k: [row])
+    job = remote_boards.scrape("Data Analyst", "Data Analyst", "a")[0]
+    assert job["description"] == "Build the data platform."

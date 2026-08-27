@@ -17,11 +17,16 @@ ratings, published days ago), one of its boards failed mid-run during
 testing, and a run takes minutes rather than seconds — so every error
 is swallowed and the run continues on the others. Allowed to fail does
 not mean allowed to fail silently: the exception is always logged.
+
+It aggregates ten independent boards with no guaranteed shape, so it
+is *more* exposed than either incumbent to a single malformed row
+(free-text salary, HTML-flavoured description) taking the whole
+category down — every field read from a row is guarded accordingly.
 """
 from datetime import date
 import logging
 
-from .base import call_actor
+from .base import call_actor, extract_description
 from ..utils._dates import normalize_date
 
 logger = logging.getLogger(__name__)
@@ -42,25 +47,65 @@ _BOARDS = {
     "hn_hiring": "Hacker News",
 }
 
+# Rendered natively where we know the mark; anything else falls back to
+# the bare ISO code so the value stays honest rather than guessing.
+_CURRENCY_SYMBOLS = {"EUR": "€", "GBP": "£"}
+
+
+def _symbol(currency: str) -> str:
+    code = (currency or "").strip().upper()
+    if code in ("", "USD"):
+        return "$"
+    return _CURRENCY_SYMBOLS.get(code, f"{code} ")
+
 
 def _salary(row: dict) -> str:
-    """The aggregator publishes salary already annualised.
+    """The aggregator publishes salary already annualised — when it is
+    numeric at all. Ten independent boards means ten different ideas of
+    what belongs in a salary field, including free text like
+    "Competitive" seen on live rows, so the numeric formatting only
+    applies when the value actually is one (mirrors parse_salary's
+    `isinstance(lo, (int, float))` guard in `utils/_dates.py`, which
+    exists for the same reason). A row with an unparseable salary loses
+    its salary, not its existence — unlike parse_salary's own fallback
+    of gluing the raw values together, which reads fine for numeric-ish
+    strings but not for free text next to a currency symbol.
 
-    Formatted to match parse_salary's structured-range rendering
-    (`utils/_dates.py`, used for LinkedIn's `minValue`/`maxValue` pairs)
-    so a mixed map doesn't show two different dash/comma styles side by
-    side. parse_salary hardcodes "$", which would be wrong here for a
-    non-USD board, so it isn't reused directly — but the digit grouping
-    and " – " separator are kept identical.
+    The digit grouping and " – " separator match parse_salary's
+    structured-range rendering so a mixed map doesn't show two
+    different styles side by side; parse_salary itself isn't reused
+    directly because it hardcodes "$", which would be wrong here for a
+    non-USD board.
     """
     low, high = row.get("salary_min"), row.get("salary_max")
-    currency = (row.get("salary_currency") or "").strip()
-    symbol = "$" if currency in ("", "USD") else f"{currency} "
-    if low and high:
+    symbol = _symbol(row.get("salary_currency"))
+    numeric_low = isinstance(low, (int, float))
+    numeric_high = isinstance(high, (int, float))
+    if numeric_low and numeric_high:
         return f"{symbol}{int(low):,} – {symbol}{int(high):,}"
-    if low:
+    if numeric_low:
         return f"{symbol}{int(low):,}"
     return ""
+
+
+def _description(row: dict) -> str:
+    """Routed through the shared HTML-flattener, not read raw.
+
+    Ten boards means no guaranteed formatting; some may return
+    pre-flattened plain text with no separators (the same failure
+    `extract_description` exists to catch — see `base.py`), and this
+    source is more exposed to it than either incumbent, not less. A
+    synthesised dict is passed rather than adding "description_snippet"
+    to the shared `_DESCRIPTION_KEYS` tuple in base.py, so this
+    source's field naming can't change what Indeed or LinkedIn resolve.
+    "description" already matches a key in that tuple; the snippet is
+    mapped onto "snippet", the tuple's lowest-priority key, since a
+    snippet is a worse source than the full text whenever both exist.
+    """
+    return extract_description({
+        "description": row.get("description"),
+        "snippet": row.get("description_snippet"),
+    })
 
 
 def scrape(category: str, title: str,
@@ -91,7 +136,7 @@ def scrape(category: str, title: str,
         # Allowed to fail — the other sources carry the run — but not
         # allowed to fail invisibly. 14 total users, no ratings, days
         # old, and one board (Jobicy) already failed mid-run once.
-        logger.warning("Remote boards failed for %s: %s", category, exc)
+        logger.warning("RemoteBoards failed for %s: %s", category, exc)
         return []
 
     today = date.today().isoformat()
@@ -116,8 +161,7 @@ def scrape(category: str, title: str,
             "date":     normalize_date(row.get("posted_at") or today),
             "url":      url,
             "salary":   _salary(row),
-            "description": row.get("description")
-                           or row.get("description_snippet") or "",
+            "description": _description(row),
             # Not inference. These boards carry nothing else.
             "work_mode": "remote",
         })
@@ -129,7 +173,7 @@ def scrape(category: str, title: str,
         # deliberate-skip category to gate this on (see above), so
         # this fires whenever rows came back but none survived.
         logger.warning(
-            "Remote boards returned %d unusable row(s) for %s but none "
+            "RemoteBoards returned %d unusable row(s) for %s but none "
             "could be parsed — check the actor id is %s",
             unusable_count, category, actor_id)
 
