@@ -700,3 +700,21 @@ def test_apply_gates_counts_stay_separate():
     assert [j["url"] for j in kept] == ["https://x/g6"]
     assert offtopic == 1
     assert dropped == 1
+
+
+def test_apply_gates_a_stated_mode_beats_lane_and_text():
+    """kaix sets work_mode from Indeed's own workArrangement.locationType
+    field before this ever runs. That publisher-stated value must win
+    over both a text phrase and a lane, even when the two weaker signals
+    agree with each other and disagree with the stated field - neither
+    gets a vote once the posting has already answered."""
+    job = _job("https://x/g7")
+    job["work_mode"] = "remote"
+    job["_lane_mode"] = "hybrid"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+
+    kept, offtopic, dropped = _apply_gates(
+        [job], _GATE_VOCAB, _PROFILE, ["remote"])
+
+    assert kept[0]["work_mode"] == "remote"
+    assert "_lane_mode" not in kept[0]

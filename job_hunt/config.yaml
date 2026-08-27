@@ -10,7 +10,7 @@ search:
   run_timeout: 120
 
 apify:
-  indeed_actor:   "valig~indeed-jobs-scraper"
+  indeed_actor:   "kaix~indeed-scraper"
   linkedin_actor: "valig~linkedin-jobs-scraper"
   company_actor:  "curious_coder~linkedin-company-scraper"
 

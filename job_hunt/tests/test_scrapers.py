@@ -2,6 +2,13 @@
 
 The network call is monkeypatched out; these cover the raw-item -> job-dict
 mapping only, which is where the description was being dropped.
+
+Indeed moved from valig's flat item shape to kaix's deeply-nested one (see
+`test_indeed_maps_the_kaix_field_shape` below), so the generic
+description-mapping tests below are LinkedIn-only now — a flat `_MINIMAL`
+item has no `urls.*` path for the new Indeed scraper to find at all, and
+its own field mapping is covered by the dedicated Indeed tests further
+down instead.
 """
 import pytest
 
@@ -20,15 +27,24 @@ def _scrape(module, monkeypatch, item):
 _MINIMAL = {"jobUrl": "https://example.com/j1", "title": "Data Analyst",
             "company": "Acme", "location": "Remote"}
 
+# kaix's nested item shape, minimal enough to satisfy the new Indeed
+# scraper's `_get(item, "urls.indeed")` etc. lookups.
+_KAIX_MINIMAL = {
+    "title": {"text": "Data Analyst"},
+    "company": {"name": "Acme"},
+    "location": {"formatted": "Nashville, TN"},
+    "urls": {"indeed": "https://indeed.com/viewjob?jk=abc"},
+}
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+
+@pytest.mark.parametrize("module", [linkedin])
 def test_description_is_captured(module, monkeypatch):
     job = _scrape(module, monkeypatch,
                   {**_MINIMAL, "description": "We run dbt and Airflow."})
     assert job["description"] == "We run dbt and Airflow."
 
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+@pytest.mark.parametrize("module", [linkedin])
 @pytest.mark.parametrize("key", ["descriptionText", "jobDescription",
                                  "descriptionHtml"])
 def test_description_alternate_keys(module, key, monkeypatch):
@@ -37,7 +53,7 @@ def test_description_alternate_keys(module, key, monkeypatch):
     assert job["description"] == "Airflow required."
 
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+@pytest.mark.parametrize("module", [linkedin])
 def test_html_description_is_flattened(module, monkeypatch):
     """HTML bodies must become plain text so keyword matching works."""
     html = "<p>We use <strong>dbt</strong> and Airflow.</p><ul><li>SQL</li></ul>"
@@ -47,30 +63,17 @@ def test_html_description_is_flattened(module, monkeypatch):
     assert "SQL" in job["description"]
 
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+@pytest.mark.parametrize("module", [linkedin])
 def test_missing_description_is_empty_string(module, monkeypatch):
     """No description available must not crash or yield None."""
     job = _scrape(module, monkeypatch, _MINIMAL)
     assert job["description"] == ""
 
 
-def test_indeed_description_under_the_real_nested_shape(monkeypatch):
-    """valig~indeed-jobs-scraper nests the body as description.text/html —
-    a bare string check on item["description"] misses it entirely, which is
-    why two full production runs came back with zero Indeed descriptions."""
-    item = {
-        **_MINIMAL,
-        "description": {
-            "text": ("Description:\n\nNuclear Power is a carbon-free energy "
-                      "source. You will work on major process controls "
-                      "engineering projects."),
-            "html": ("<p>Description:</p><p>Nuclear Power is a carbon-free "
-                      "energy source.</p>"),
-        },
-    }
-    job = _scrape(indeed, monkeypatch, item)
-    assert job["description"] != ""
-    assert "Nuclear Power" in job["description"]
+def test_indeed_missing_description_is_empty_string(monkeypatch):
+    """Same guarantee as above, under kaix's nested shape."""
+    job = _scrape(indeed, monkeypatch, _KAIX_MINIMAL)
+    assert job["description"] == ""
 
 
 def _capture(monkeypatch, module, items):
@@ -86,32 +89,119 @@ def _capture(monkeypatch, module, items):
 
 
 # ── Indeed ────────────────────────────────────────────────────────────────────
+#
+# kaix's `remote` filter param replaces the old trick of putting "remote"
+# in the location box (see test_indeed_never_puts_remote_in_the_location_box
+# below for the regression that motivated the swap). The retry/fallback and
+# `_scraped_under` reduced-confidence tagging behaviour is unchanged from
+# valig — only the legacy sentinel values and payload key names moved.
 
-def test_indeed_uses_the_literal_remote_location_for_a_remote_search(monkeypatch):
-    seen = _capture(monkeypatch, indeed, [[_MINIMAL]])
+def test_indeed_never_puts_remote_in_the_location_box(monkeypatch):
+    """Indeed echoes the location box back as the job's location."""
+    sent = {}
+
+    def fake_call(actor_id, payload, label, timeout):
+        sent.update(payload)
+        return []
+
+    monkeypatch.setattr(indeed, "call_actor", fake_call)
+    indeed.scrape("Data Analyst", "Data Analyst", "kaix~indeed-scraper",
+                  location="Yerevan, Armenia", country="am",
+                  work_modes=("remote",))
+    assert sent["location"].lower() != "remote"
+    assert sent["remote"] == "remote"
+    assert sent["keyword"] == 'title:"Data Analyst"'
+
+
+def test_indeed_uses_one_title_per_search():
+    """Combining titles with `or` collapses precision from 15/15 to 11/20."""
+    assert indeed._keyword("Data Analyst") == 'title:"Data Analyst"'
+
+
+def test_indeed_local_lane_modes_yield_no_remote_filter(monkeypatch):
+    """The local lane asks for ("remote", "hybrid", "onsite") together —
+    two filterable values at once must mean no filter, not an arbitrary
+    pick, or on-site/hybrid work in the user's own city would vanish."""
+    seen = _capture(monkeypatch, indeed, [[_KAIX_MINIMAL]])
     indeed.scrape("BI Developer", "BI Developer", "actor~id",
-                  location="Toronto, ON", country="ca", work_modes=["remote"])
-    assert seen[0]["location"] == "remote"
-    assert seen[0]["country"] == "ca"
+                 location="Toronto, ON", country="ca",
+                 work_modes=("remote", "hybrid", "onsite"))
+    assert "remote" not in seen[0]
+    assert "fromDays" in seen[0]
 
 
-def test_indeed_searches_the_place_when_onsite_is_wanted(monkeypatch):
-    seen = _capture(monkeypatch, indeed, [[_MINIMAL]])
-    indeed.scrape("BI Developer", "BI Developer", "actor~id",
-                  location="Toronto, ON", country="ca",
-                  work_modes=["remote", "onsite"])
-    assert seen[0]["location"] == "Toronto, ON"
+def test_indeed_maps_the_kaix_field_shape(monkeypatch):
+    item = {
+        "title": {"text": "Data Analyst"},
+        "company": {"name": "Acme"},
+        "location": {"formatted": "Nashville, TN", "country": "US"},
+        "workArrangement": {"locationType": "Remote"},
+        "salary": {"text": "$65 - $75 an hour"},
+        "dates": {"posted": "2026-08-25"},
+        "urls": {"indeed": "https://indeed.com/viewjob?jk=abc"},
+        "description": {"html": "<p>SQL and Python</p>"},
+        "signals": {"isExpired": False},
+    }
+    monkeypatch.setattr(indeed, "call_actor",
+                        lambda *a, **k: [item])
+    jobs = indeed.scrape("Data Analyst", "Data Analyst", "kaix~indeed-scraper")
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["title"] == "Data Analyst"
+    assert job["company"] == "Acme"
+    assert job["location"] == "Nashville, TN"
+    assert job["work_mode"] == "remote"
+    assert job["salary"] == "$65 - $75 an hour"
+    assert job["country"] == "us"
+    assert "SQL and Python" in job["description"]
+
+
+def test_indeed_drops_expired_postings(monkeypatch):
+    item = {
+        "title": {"text": "Data Analyst"},
+        "company": {"name": "Acme"},
+        "location": {"formatted": "Nashville, TN"},
+        "urls": {"indeed": "https://indeed.com/viewjob?jk=abc"},
+        "description": {"text": "SQL"},
+        "signals": {"isExpired": True},
+    }
+    monkeypatch.setattr(indeed, "call_actor", lambda *a, **k: [item])
+    assert indeed.scrape("Data Analyst", "Data Analyst", "x") == []
+
+
+def test_indeed_prefers_html_over_pre_flattened_text(monkeypatch):
+    """The plain text sibling arrives pre-flattened with no separators
+    ("run togetherText here"), which defeats word-boundary phrase
+    matching — html must win whenever both exist."""
+    item = {**_KAIX_MINIMAL,
+            "description": {"text": "runtogetherText here",
+                            "html": "<p>run</p><p>together</p><p>Text here</p>"}}
+    job = _scrape(indeed, monkeypatch, item)
+    assert "runtogetherText" not in job["description"]
+    assert "run together Text here" == job["description"]
+
+
+def test_indeed_overshoot_is_truncated_to_the_cap(monkeypatch):
+    """The actor returns ~100 when asked for 50. The cap is enforced at
+    the client boundary regardless of actor behavior."""
+    items = [{**_KAIX_MINIMAL,
+             "urls": {"indeed": f"https://indeed.com/viewjob?jk={i}"}}
+            for i in range(100)]
+    monkeypatch.setattr(indeed, "call_actor", lambda *a, **k: items)
+    jobs = indeed.scrape("Data Analyst", "Data Analyst", "actor~id",
+                        jobs_per_category=50)
+    assert len(jobs) == 50
 
 
 def test_indeed_falls_back_when_the_actor_returns_nothing(monkeypatch):
     """An actor that rejects the new input yields an empty list, which is
     indistinguishable from no results — so retry with what used to work."""
-    seen = _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    seen = _capture(monkeypatch, indeed, [[], [_KAIX_MINIMAL]])
     jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
                          location="Toronto, ON", country="ca",
                          work_modes=["onsite"])
     assert len(seen) == 2
-    assert seen[1] == {**seen[0], "location": "remote", "country": "us"}
+    assert seen[1] == {**seen[0], "location": "United States", "country": "US"}
     assert len(jobs) == 1
 
 
@@ -127,7 +217,8 @@ def test_indeed_returns_nothing_gracefully_when_the_retry_also_fails(monkeypatch
 def test_indeed_does_not_retry_when_it_already_used_the_legacy_values(monkeypatch):
     seen = _capture(monkeypatch, indeed, [[]])
     indeed.scrape("BI Developer", "BI Developer", "actor~id",
-                  location="remote", country="us", work_modes=["remote"])
+                  location="United States", country="us",
+                  work_modes=["remote"])
     assert len(seen) == 1
 
 
@@ -135,7 +226,7 @@ def test_indeed_tags_fallback_results_with_the_board_they_came_from(monkeypatch)
     """When the actor rejects the user's country and the retry lands on the
     us board, every job must say so — the scorer turns the tag into a
     reduced-confidence flag."""
-    _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    _capture(monkeypatch, indeed, [[], [_KAIX_MINIMAL]])
     jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
                          location="Yerevan, Armenia", country="am",
                          work_modes=["remote"])
@@ -145,7 +236,7 @@ def test_indeed_tags_fallback_results_with_the_board_they_came_from(monkeypatch)
 def test_indeed_does_not_tag_when_the_country_already_matched(monkeypatch):
     """A retry that only changed the location searched the same country —
     nothing to warn about."""
-    _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    _capture(monkeypatch, indeed, [[], [_KAIX_MINIMAL]])
     jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
                          location="Austin, TX", country="us",
                          work_modes=["onsite"])
@@ -153,7 +244,7 @@ def test_indeed_does_not_tag_when_the_country_already_matched(monkeypatch):
 
 
 def test_indeed_does_not_tag_without_a_fallback(monkeypatch):
-    _capture(monkeypatch, indeed, [[_MINIMAL]])
+    _capture(monkeypatch, indeed, [[_KAIX_MINIMAL]])
     jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
                          location="Yerevan, Armenia", country="am",
                          work_modes=["remote"])
@@ -173,7 +264,7 @@ def test_indeed_stays_silent_when_fallback_is_disallowed(monkeypatch):
 
 def test_indeed_still_falls_back_by_default(monkeypatch):
     """Pinning existing behaviour: worldwide lanes keep the retry."""
-    seen = _capture(monkeypatch, indeed, [[], [_MINIMAL]])
+    seen = _capture(monkeypatch, indeed, [[], [_KAIX_MINIMAL]])
     jobs = indeed.scrape("BI Developer", "BI Developer", "actor~id",
                          location="Yerevan, Armenia", country="am",
                          work_modes=["onsite"])
@@ -244,20 +335,21 @@ def test_linkedin_still_falls_back_by_default(monkeypatch):
 
 def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
     """Callers that have not been updated yet must not change what they get."""
-    indeed_seen = _capture(monkeypatch, indeed, [[_MINIMAL]])
+    indeed_seen = _capture(monkeypatch, indeed, [[_KAIX_MINIMAL]])
     indeed.scrape("BI Developer", "BI Developer", "actor~id")
-    assert indeed_seen[0]["location"] == "remote"
-    assert indeed_seen[0]["country"] == "us"
+    assert indeed_seen[0]["location"] == "United States"
+    assert indeed_seen[0]["country"] == "US"
 
     linkedin_seen = _capture(monkeypatch, linkedin, [[_MINIMAL]])
     linkedin.scrape("BI Developer", "BI Developer", "actor~id")
     assert linkedin_seen[0]["location"] == "Worldwide"
 
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+@pytest.mark.parametrize("module", [linkedin])
 def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
-    """The Indeed actor returns ~100 when asked for 50. The cap is
-    enforced at the client boundary regardless of actor behavior."""
+    """The cap is enforced at the client boundary regardless of actor
+    behavior. See test_indeed_overshoot_is_truncated_to_the_cap for
+    Indeed's kaix-shaped equivalent."""
     items = [{**_MINIMAL, "jobUrl": f"https://example.com/j{i}"}
              for i in range(100)]
     _patch(monkeypatch, module, items)
@@ -266,12 +358,14 @@ def test_an_actor_overshoot_is_truncated_to_the_cap(module, monkeypatch):
     assert len(jobs) == 50
 
 
-@pytest.mark.parametrize("module", [indeed, linkedin])
+@pytest.mark.parametrize("module", [linkedin])
 def test_html_is_preferred_over_a_prefused_plain_field(module, monkeypatch):
     """valig's plain `description` arrives pre-flattened with NO
     separators ("…RemoteTravel Required…"), defeating word-boundary
     matching. The html sibling has real structure, and tag-flattening
-    inserts a space per tag — so html wins whenever both exist."""
+    inserts a space per tag — so html wins whenever both exist. See
+    test_indeed_prefers_html_over_pre_flattened_text for Indeed's
+    kaix-shaped equivalent."""
     item = {**_MINIMAL,
             "description": "Location: RemoteTravel Required: 2-5 Weeks",
             "descriptionHtml": "<p>Location: Remote</p>"
@@ -279,12 +373,3 @@ def test_html_is_preferred_over_a_prefused_plain_field(module, monkeypatch):
     job = _scrape(module, monkeypatch, item)
     assert "RemoteTravel" not in job["description"]
     assert "Location: Remote" in job["description"]
-
-
-def test_indeed_nested_dict_prefers_html_over_text(monkeypatch):
-    item = {**_MINIMAL,
-            "description": {"text": "runtogetherText here",
-                            "html": "<p>run</p><p>together</p><p>Text here</p>"}}
-    job = _scrape(indeed, monkeypatch, item)
-    assert "runtogetherText" not in job["description"]
-    assert "run together Text here" == job["description"]

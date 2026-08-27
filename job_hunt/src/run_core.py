@@ -161,18 +161,31 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     dropped_total = 0
     kept_jobs = []
     for job in new_jobs:
-        text_mode = work_mode(f"{job.get('title') or ''}\n"
-                              f"{job.get('description') or ''}", mode_cfg)
+        # Three kinds of work-mode evidence, strongest first. Popping
+        # `_lane_mode` happens unconditionally either way - it is
+        # transient regardless of whether it ends up used.
+        stated_mode = job.get("work_mode")
         lane_mode = job.pop("_lane_mode", None)
-        if text_mode and lane_mode and text_mode != lane_mode:
-            # A lane is LinkedIn matching words, not a filter - a posting
-            # that merely mentions "remote" lands in the remote lane.
-            # Disagreement claims nothing, as every other conflict does.
-            mode = None
-        elif lane_mode and not text_mode:
-            mode = lane_mode
+        if stated_mode:
+            # The employer said so, in a structured field, on the job
+            # board itself (kaix's workArrangement.locationType). That
+            # beats both a phrase the scorer inferred from prose and a
+            # LinkedIn lane, which is relevance rather than a filter -
+            # neither gets a vote once the posting has already answered.
+            mode = stated_mode
         else:
-            mode = text_mode
+            text_mode = work_mode(f"{job.get('title') or ''}\n"
+                                  f"{job.get('description') or ''}", mode_cfg)
+            if text_mode and lane_mode and text_mode != lane_mode:
+                # A lane is LinkedIn matching words, not a filter - a
+                # posting that merely mentions "remote" lands in the
+                # remote lane. Disagreement claims nothing, as every
+                # other conflict does.
+                mode = None
+            elif lane_mode and not text_mode:
+                mode = lane_mode
+            else:
+                mode = text_mode
         if mode:
             job["work_mode"] = mode
 
