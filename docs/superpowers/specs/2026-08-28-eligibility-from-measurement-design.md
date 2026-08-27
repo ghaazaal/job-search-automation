@@ -1,96 +1,141 @@
-# Eligibility from measurement — Ship 8 design
+# Remote-first sourcing for small-country users — Ship 8 design
 
 Date: 2026-08-28
 Status: proposed
 Supersedes: parts 6–9 of
 `2026-08-27-search-lanes-and-store-cleanup-design.md`, whose rules were
-derived from eleven postings scraped by a source Ship 7 replaced.
+derived from eleven postings scraped by a source this ship removes.
+
+## The persona, stated
+
+Earlier ships built for "a job-seeking data professional". Run 6 forced a
+sharper statement, and it is the reason this spec exists:
+
+> **A data professional living in a country the big job boards do not
+> serve, who needs roles they can actually be hired into from there.**
+
+Not "someone who wants remote work". Someone for whom remote work is the
+only category that exists, because the local market is small and the
+large markets will not hire across a border. Armenia is the working
+example; the persona is every country in the same position.
+
+This changes what the product is. It is not a job board aggregator that
+happens to filter for remote. It is an eligibility engine, and its
+sources are worth keeping only insofar as they carry roles that pass it.
 
 ## Why
 
-Ship 7 landed and ran live. Run 6, against the real profile
-(Yerevan / `am` / remote+hybrid, four titles), took 26.5 minutes over 24
-steps and produced:
+Ship 7 landed and ran live. Run 6 (Yerevan / `am` / remote+hybrid, four
+titles) took 26.5 minutes over 24 steps:
 
 ```
 796 scraped -> 508 deduped -> 384 kept, 124 off-topic, 0 dropped
 ```
 
-The run invalidated four things the Ship 7 spec asserted. Every number
-below is from that run, not from an estimate.
+Broken down by source, against the only question that matters:
 
-| | Ship 7 estimate | Run 6 |
-|---|---|---|
-| off-topic share | 41% | **24%** (124 / 508) |
-| remote-board rows kept | 50 | 87 |
-| **open to the user's country** | 11 of 50 (22%) | **2 of 87 (2.3%)** |
-| boards contributing | 10 | **4** |
+| Source | Steps | Roles kept | **Provably open** |
+|---|---|---|---|
+| Indeed | 4 | 0 — every call HTTP 400 | — |
+| LinkedIn | 16 | 297 | **0** |
+| Remote boards | 4 | 87 | **2** |
 
-Two roles out of 796. That is the honest size of this market for this
-profile, and the product has to say so.
+Two-thirds of the run went to a source that produced nothing eligible.
 
-### Indeed contributed nothing, and said "done"
+### Indeed cannot serve this persona at all
 
 All four Indeed calls returned HTTP 400. `kaix/indeed-scraper` declares
-`country` as an **enum of 54 Indeed country sites**; `AM` is not one,
-because Indeed has no Armenia site. Verified directly against the API:
+`country` as an enum of 54 Indeed country sites. Verified against the
+live API: `AM` → 400, `GB` → 400, `UK` → 201, `US` → 201.
 
-| Sent | Result |
+Diffing that enum against `eligibility.countries` (66 codes):
+
+| | Count |
 |---|---|
-| `AM` | **400** |
-| `GB` | **400** |
-| `UK` | 201 |
-| `US` | 201 |
+| map by straight upper-casing | 43 |
+| genuine spelling mismatch | 1 — `gb` → `UK` |
+| **Indeed has no site at all** | **22** |
 
-Two defects, not one. Armenia is genuinely unsupported — but `GB` fails
-only because kaix spells the United Kingdom `UK` while `eligibility.
-countries` and `user.country` store ISO codes. **Every UK user 400s on
-every Indeed call**, and nothing says so.
+The 22: Armenia, Azerbaijan, Bangladesh, Belarus, Bulgaria, Croatia,
+Cyprus, Egypt, Estonia, Georgia, Kazakhstan, Kenya, Latvia, Lithuania,
+Malta, Nigeria, Pakistan, Serbia, Slovakia, Slovenia, Sri Lanka,
+Thailand.
 
-That is the second defect. `call_actor` catches `RequestException`,
-logs, and returns `[]`. `execute` sees an empty list, not an exception,
-so the step is marked `done` with `found: 0` — indistinguishable from a
-search that genuinely found nothing. Ship 7 made three silent failures
-loud and left the loudest one in place.
+Indeed is organised as one site per country. That is precisely the shape
+this persona is not: a third of the countries the product supports have
+no Indeed at all, and for the rest Indeed answers "what is hiring *in*
+this country", which is the local question, not the one being asked.
 
-### The eligibility rules were derived from the wrong sample
+`call_actor` also swallowed the 400 and returned `[]`, so each step read
+`done, found: 0` — indistinguishable from a search that found nothing.
+That is the same silent-failure shape Ship 7 fixed three times and missed
+once, and it is why this took a live run to notice.
 
-Ship 7's rules 6b–6d came from eleven Indeed postings hand-read by the
-user. Run 6 contains 384 roles with 382 descriptions, from LinkedIn and
-the remote boards. Measured against that sample, **rule 6c is wrong in
-the most dangerous direction available.**
+### LinkedIn produced 297 roles and nothing verifiable
 
-Rule 6c proposed adding `"work from anywhere"` as *open* eligibility
-evidence, on the grounds that it "fired on exactly the three roles the
-user marked OPEN, and nothing else". It fires on 12 roles in run 6:
+Running `geo_verdict` over the 297 stored LinkedIn descriptions:
+
+| Verdict | Roles |
+|---|---|
+| unknown | 286 |
+| restricted | 8 |
+| eligible | 3 |
+
+All three "eligible" roles are false positives, from the **already-
+shipped** `anywhere_words` window rule:
+
+```
+"work from anywhere in the world for up to 4 weeks per year"     — holiday perk
+"embrace the freedom to work from anywhere ... for up to 30 days" — holiday perk
+"work together in real time from anywhere in the world"           — Figma's marketing copy
+```
+
+The third is not about employment at all; it is a sentence about the
+product the company sells. LinkedIn's true count is **0 of 297**.
+
+`unknown` means unmeasured, not ineligible — many genuinely remote-first
+employers never state reach in prose. But unverifiable is what the
+product can act on, and 286 unverifiable roles is what LinkedIn costs
+16 of 24 steps to produce.
+
+### Prose mining does not work. Published fields do.
+
+| Mechanism | Real finds | False positives |
+|---|---|---|
+| mining prose (`geo_verdict`) | **0** | 3 |
+| reading a reach field (`location_scope`) | **2** | 0 known |
+
+Across 384 roles with 382 descriptions, mining prose for eligibility
+found nothing and manufactured three claims. The only mechanism that
+found anything reads a field the board publishes on purpose.
+
+This is the finding the whole ship turns on. Ship 7 said the source was
+the binding constraint rather than the rules; run 6 says the *shape of
+the evidence* is, and only one source shape carries it.
+
+### The rules were derived from the wrong sample
+
+Ship 7's rule 6c proposed `"work from anywhere"` as open evidence, from
+three hand-read postings. It fires on 12 roles in run 6:
 
 | Reading | Count | Example |
 |---|---|---|
 | genuine eligibility | **1** | `remote (work from anywhere)` |
-| **country-qualified** | **1** | `work from anywhere in the united states for most positions` |
+| country-qualified | 1 | `work from anywhere in the united states for most positions` |
 | time-boxed perk | 4 | `work from anywhere in the world for up to 4 weeks per year` |
 | culture / benefits prose | 6 | `lifeway has a strong work from anywhere (wfa) culture` |
 
-One in twelve. And the second row is the failure that matters: rule 6c
-would read a US-only posting as open to an Armenian user — the exact
-outcome rules 6a and 6d exist to prevent.
+One in twelve, and the second row would read a US-only posting as open to
+an Armenian user — the outcome rules 6a and 6d exist to prevent.
 
-Rule 6b — remove `"work from home"` — is **confirmed**. It fires on 15
-roles: roughly five genuinely remote, six benefits boilerplate, and four
-that state the opposite outright (`at least 4 days in the office per
-week, with the flexibility to work from home 1 day a week`).
-
-Rule 6d's closed phrases barely fire on this sample at all: `us-based` 3,
-`u.s.-based` 2, `unable to sponsor` 2, `not eligible for immigration
-sponsorship` 1, and **zero** for the other eleven. They are not wrong —
-they are phrase-bounded and additive, so they under-claim — but they were
-tuned against Indeed prose and this pipeline no longer fetches Indeed
-prose for this user.
+Rule 6b (remove `"work from home"`) is **confirmed** on the larger
+sample: 15 hits, roughly five genuinely remote, six boilerplate, and four
+stating the opposite outright (`at least 4 days in the office per week,
+with the flexibility to work from home 1 day a week`).
 
 ### The reach parser was built for shapes that did not arrive
 
-`location_scope` recognises worldwide phrases, timezone bands, regions
-and country names. Run 6's actual reach values:
+Run 6's actual reach values:
 
 ```
 33  "United States"        5  ""                     2  "Europe"
@@ -98,316 +143,297 @@ and country names. Run 6's actual reach values:
  5  "USA"                  3  "Brazil"               1  "Darwen"
 ```
 
-Not one `Anywhere in the World`. Not one timezone band. Those shapes come
-from We Work Remotely, RemoteOK and Remotive — three of the six boards
-that returned nothing this run. The parser's worldwide and timezone
-branches remain **unvalidated against live data**; its country-list branch
-is the one doing all the work, and it works: the reach string
+Not one `Anywhere in the World`, not one timezone band. Those come from
+We Work Remotely, RemoteOK and Remotive — three of the **six boards that
+returned nothing this run**. `location_scope`'s worldwide and
+timezone-band branches remain unvalidated against live data; its
+country-list branch did all the work and did it correctly, resolving
 `Armenia, Cyprus, Georgia, Kazakhstan, Poland, Portugal, Serbia, Spain`
-resolved correctly to open.
-
-## The finding underneath this one
-
-Ship 7's closing section said the source was the binding constraint, not
-the rules. Run 6 says it again, harder. Indeed is structurally unavailable
-to this user. LinkedIn contributed 297 kept roles and **not one** of them
-proves it will hire from Armenia. The remote boards contributed 87, of
-which 2 do.
-
-So the entire product, for this profile, is four job boards — and six more
-that were supposed to be there and weren't.
+to open.
 
 ## What we are changing
 
-### 1. Indeed's country, and a transport failure that says so
+### 1. Remove Indeed
 
-**1a. Map ISO codes to kaix's enum, and refuse the rest before paying.**
-Add `apify.indeed_countries` to `vocabulary.yaml`: ISO code → the value
-kaix accepts. Diffed against `eligibility.countries` (66 codes) and
-kaix's enum (54):
+Not "skip when unsupported" — remove. Delete `scrapers/indeed.py`, its
+entry in `SOURCES`, `apify.indeed_actor`, and its tests.
 
-| | Count |
-|---|---|
-| map by straight upper-casing | 43 |
-| **genuine spelling mismatch** | **1** — `gb` → `UK` |
-| Indeed has no site at all | **22** |
+It cannot serve 22 of 66 supported countries, and for the rest it answers
+the local question that the LinkedIn local lane already covers. Keeping
+it as a conditionally-skipped source means maintaining a country-mapping
+table, a skip path, and a scraper, for a source this persona never uses.
 
-The 22: Armenia, Azerbaijan, Bangladesh, Belarus, Bulgaria, Croatia,
-Cyprus, Egypt, Estonia, Georgia, Kazakhstan, Kenya, Latvia, Lithuania,
-Malta, Nigeria, Pakistan, Serbia, Slovakia, Slovenia, Sri Lanka,
-Thailand.
+The country findings above are recorded **in this spec** rather than in
+code, so nothing is lost if Indeed is ever reintroduced for a
+big-country user. Git keeps the implementation.
 
-So **a third of the countries this product supports cannot use Indeed**,
-and one more (the UK) was failing on a spelling. That is the fact worth
-writing down; the table is just where it lives.
+### 2. Demote LinkedIn to the local and mode lanes
 
-A country absent from the table means Indeed has no site for it. The
-Indeed source is then **skipped for that user**, with the step marked
-`skipped` and a reason, not `done` — and never billed. This is a normal
-outcome for a user in Armenia, not an error.
+LinkedIn stays, at two-thirds of its current cost. Its plain worldwide
+lane goes; the local and mode lanes remain.
 
-**1b. A non-200 must not look like an empty search.** `call_actor`
-currently returns `[]` for every failure, so its callers cannot tell "the
-search found nothing" from "the request was rejected". It gains a way to
-signal failure — an exception, or a sentinel the scrapers translate — and
-`execute` marks the step `failed`, exactly as it already does when a
-scraper raises. The run still completes on the other sources; that
-behaviour does not change. What changes is that the screen and the run row
-stop claiming a source succeeded when it did not.
+| Lane | Steps (4 titles) | Keep? | Why |
+|---|---|---|---|
+| plain worldwide | 4 | **no** | The mode lanes ask the same worldwide question with better precision — Ship 7 measured remote 5/5 and hybrid 3/4 against an unfiltered lane's noise. |
+| local | 4 | **yes** | 63 roles in run 6, all in the user's own country. A hybrid role in Yerevan *is* a role workable from Armenia. This lane serves the persona directly. |
+| mode remote / hybrid | 8 | **yes** | The worldwide reach, mode-worded. |
 
-This is the same fault Ship 7 fixed three times over (a wrong actor id, a
-renamed field, a config gate keyed on a display name) and missed once.
+`_LOCAL_ONLY` survives with its membership changed from `("Indeed",)` to
+`("LinkedIn",)` — the constant already means "no plain worldwide lane",
+and mode lanes are constructed separately, so they are unaffected.
 
-### 2. Eligibility phrases, re-derived
+Run shape: 24 steps → **16**. Remote boards worldwide (4), LinkedIn local
+(4), LinkedIn mode (8).
 
-**2a. Rule 6c is withdrawn.** `"work from anywhere"` and
-`"(from anywhere)"` are not added as open evidence. Measured precision on
-384 real roles is 1/12.
+### 3. Fix the shipped `anywhere_words` false positives
 
-**2b. Rule 6b stands.** Remove `"work from home"` from `remote_phrases`.
-Confirmed on a larger sample than the one that proposed it.
+This is a live bug, not a rejected proposal. `geo_verdict`'s
+anywhere-word window rule produced all three of LinkedIn's false
+"eligible" verdicts.
 
-**2c. Rules 6a and 6d stand, unchanged.** Never treat a location field of
-`"Remote"` as evidence; keep the closed-eligibility phrase list. They
-under-claim rather than over-claim, which is the correct direction, and
-nothing in run 6 contradicts them.
-
-**2d. Add a qualifier guard, which is what rule 6c was reaching for.**
-Both false-positive families in the table above share one shape: the
-phrase is immediately followed by something that takes the claim back.
+Both failing families share one shape — the phrase is followed directly
+by something that takes the claim back:
 
 - a place — `work from anywhere **in the united states**`
-- a duration — `work from anywhere **for up to 4 weeks per year**`,
-  `**for up to 30 days a year**`
+- a duration — `**for up to 4 weeks per year**`, `**for up to 30 days a
+  year**`
 
-So: an eligibility phrase followed directly by a country or region name,
-or by a duration expression, claims **nothing**. Not closed — nothing.
-Same discipline as every other conflict in this codebase. Phrase-shaped,
-not a character window: match the compound (`<phrase> in <place>`,
-`<phrase> for up to <n> <unit>`) rather than scanning N characters ahead,
-so the rule stays as inspectable as the phrase lists it guards.
+So: an anywhere-word or eligibility phrase followed directly by a country
+or region name, or by a duration expression, claims **nothing**. Not
+closed — nothing. Phrase-shaped, matching the compound (`<phrase> in
+<place>`, `<phrase> for up to <n> <unit>`) rather than scanning N
+characters ahead, so the rule stays as inspectable as the phrase lists it
+guards.
 
-This is the identical fix already applied to bare `"anywhere"` in
+This is the same fix already applied to bare `"anywhere"` in
 `location_scope` during the Ship 7 review, where `Anywhere in the United
-States` was reading as open. The same trap, in prose instead of a field.
+States` read as open. The same trap, in prose instead of a field.
 
-**The guard does not rescue rule 6c, and this is worth being explicit
-about.** It would kill the country-qualified case and all four time-boxed
-ones — 5 of the 11 false positives. The other 6 are plain benefits prose
-with no qualifier to catch (`wfa culture`, `embrace the freedom to work
-from anywhere, anytime`, `work from anywhere (remote-first workplace)`).
-Precision goes from 1/12 to **1/7**. Still not defensible, so 6c stays
-withdrawn.
+The Figma case (`work together in real time from anywhere in the world`)
+is **not** caught by this guard and is recorded as a residual. It is
+marketing copy about a product, and no phrase rule separates it from an
+eligibility statement.
 
-The guard earns its place elsewhere: on the closed phrases in 2c, and as
-the general mechanism this codebase keeps needing. It is not a way to
-keep a refuted rule alive.
+### 4. Eligibility phrases, re-derived
 
-### 3. Wire `scope_verdict` into ingest
+- **Rule 6c is withdrawn.** Measured precision 1/12. With the part-3
+  guard it reaches 1/7 — the guard kills the country-qualified and
+  time-boxed cases but not the six plain-prose ones. Still not
+  defensible, so the rule stays out rather than being propped up.
+- **Rule 6b stands** — remove `"work from home"` from `remote_phrases`.
+- **Rules 6a and 6d stand unchanged.** Never treat a location field of
+  `"Remote"` as evidence; keep the closed-eligibility phrases. They fire
+  8 times across 384 roles — thin, but phrase-bounded and additive, so
+  they under-claim, which is the correct direction.
 
-It is tested, correct, and called by nothing. `role.location_scope` ships
-NULL on every row. It is also the only thing that separates 2 applicable
-roles from 85 that are not, so it is the highest-value wiring in this
-ship.
+### 5. Wire `scope_verdict` into ingest
 
-The call belongs in **ingest**, not the scraper (which should not carry
-per-user judgment) and not scoring (which runs after the row is written).
+Tested, correct, called by nothing; `role.location_scope` is NULL on
+every row. It is also the only mechanism in the product that has ever
+found this user an eligible role, so it is the highest-value change here.
+
+The call belongs in **ingest** — not the scraper, which should not carry
+per-user judgment, and not scoring, which runs after the row is written.
 It takes the row's `location` and the user's country and writes `open`,
-`closed` or `unknown` into `role.location_scope`.
+`closed` or `unknown`.
 
-The Ship 7 residual asking for a stated precedence between `role.country`
-and `location_country(role.location)` **resolves itself**: `role.country`
-is populated only from kaix's structured field, and run 6 set it on
-**0 of 384 rows**. There is no conflict to arbitrate until Indeed
-produces data again. Record that, prefer `role.country` when it is
-present, and move on.
+**Remote-board rows only.** LinkedIn's location field is a place, not a
+reach statement; feeding it to a reach parser manufactures exactly the
+fake evidence rule 6a exists to stop.
 
-Scope applies to remote-board rows only. LinkedIn's location field is a
-place, not a reach statement, and feeding it to a reach parser would
-manufacture exactly the fake evidence rule 6a exists to stop.
+Ship 7's residual asking for precedence between `role.country` and
+`location_country(role.location)` **dissolves**: `role.country` came only
+from Indeed's structured field, and Indeed is gone. Drop the column's
+only writer along with it; the residual is closed, not deferred.
 
-### 4. The four findings deferred from Ship 7's review
+### 6. Board breadth — the actual growth path
 
-All four are recorded in that spec's "Corrections after review" section.
+With Indeed gone and LinkedIn demoted, the remote boards are the product.
+Run 6 got **4 of 10 advertised boards**: himalayas 65, jobicy 15, muse 5,
+devitjobs_uk 2. Silent: RemoteOK, We Work Remotely, Working Nomads,
+Remotive, Hacker News, DevITjobs US.
 
-**4a. Lane evidence is lost to dedupe.** Mode-lane steps run last and
-`dedupe` keeps the first copy, so `_lane_mode` is discarded whenever the
-plain lane already returned the posting — which is the case the lane
-exists to serve. Fix: carry lane membership across the collapse rather
-than dropping the challenger wholesale.
+Ship 7's residual watched for "two consecutive failed runs, or a run
+under 10 rows". Neither fired — 133 rows arrived. The trigger watched
+the wrong thing.
 
-**4b. Remote boards run for users who never selected remote.** The source
-is planned on the worldwide lane unconditionally, stamps every row
-`work_mode: "remote"`, and an onsite-only user then has every row dropped
-or flagged — after paying the slowest source in the run. Fix: plan it only
-when `remote` is among the user's work modes.
+**6a. Record which boards were seen.** The actor reports `source_board`
+per row; persist the distinct set on the run row. A board silent across
+two consecutive runs is the signal, whatever the row count. This is the
+only way to learn whether the aggregator sweeps ten boards or advertises
+ten and sweeps four.
 
-**4c. `_countries_named` contradicts its docstring twice.** It does use
-the bare `us` alias (`"come join us"` → United States), and word-bounding
-does not stop `Ireland` matching inside `Northern Ireland`. Make the
-guards real or drop the claims.
+**6b. Evaluate sources outside the aggregator.** Previously out of scope;
+now the growth path. Candidates in order of fit to the persona — boards
+that publish reach as a field and hire across borders: Wellfound,
+Arc.dev, and the direct APIs of the four silent boards that have them
+(RemoteOK and Remotive both publish public JSON feeds, which removes the
+aggregator as a single point of failure for them).
 
-**4d. An unrecognised timezone anchor short-circuits everything after
-it.** `Europe, Time zone: XYZ (+/- 3 hours)` returns unknown without ever
-checking the region or country. The band branch should fall through, not
-return.
+Evaluate, do not adopt blind. The measure is roles-open-to-a-small-country
+per run, not rows per run. Run 6's own numbers are the baseline: 87 rows,
+2 open.
 
-### 5. Remote-board coverage
+### 7. The map shows the roles that are actually open
 
-Six of ten boards contributed nothing: RemoteOK, We Work Remotely,
-Working Nomads, Remotive, Hacker News, DevITjobs US. The Ship 7 residual
-watches for "two consecutive failed runs, or a run under 10 rows" —
-neither fired, because 133 rows arrived. The trigger was watching the
-wrong thing.
-
-**Replace it with a per-board expectation.** The actor reports
-`source_board` per row; record the distinct boards seen on the run row.
-A board silent across two consecutive runs is a signal, whatever the row
-count. This is cheap and it is the only way we find out whether the
-aggregator sweeps ten boards or advertises ten and sweeps four.
-
-Do **not** switch actors on this evidence alone. One run, and the missing
-boards may simply have had nothing for four data-role titles.
-
-### 6. The LinkedIn fields already paid for
-
-Unchanged from Ship 7 part 7: `contractType`, `experienceLevel`,
-`applicationsCount`, `id` → `employment_type`, `applicants`,
-`source_job_id`. LinkedIn is now 297 of 384 kept roles, so reading four
-more of its fields is worth more than it was when this was written.
-
-The `workType` guard stays: despite the name it carries LinkedIn's job
-function ("Legal", "Health Care Provider"), and it must never reach
-`work_mode`.
-
-### 7. Say the honest number
-
-384 roles on the map implies 384 roles worth reading. Two of them are
-provably open. The map already states off-topic and hidden counts; it
-should also state what eligibility verification found, in the same
-register:
-
-Run 6's actual split, from `scope_verdict` computed over the stored rows:
+Run 6's split, from `scope_verdict` over the stored rows:
 
 | | Roles |
 |---|---|
 | open | **2** |
 | closed | 66 |
-| unverified (19 board rows unparseable + 297 LinkedIn) | 316 |
+| unverified (19 unparseable board rows + 297 LinkedIn) | 316 |
+
+The map currently renders all 384, which tells the user there are 384
+roles worth reading. There are two.
+
+**The map shows verified-open roles.** Everything else is not rendered.
+
+**And says so, always.** Hidden is never silent — the same rule the
+product already follows for drops (`N HIDDEN (ON-SITE ELSEWHERE)`). The
+header states what was found and what is not shown:
 
 ```
-384 ROLES · 2 OPEN · 66 NOT OPEN · 316 UNVERIFIED
+2 OPEN · 66 NOT OPEN · 316 UNVERIFIED · 124 OFF-TOPIC
 ```
 
-Exact wording is a UI decision against `DESIGN.md`, not settled here. The
-requirement is: a user must not have to open 384 cards to discover that
-two of them will hire from their country. Unverified is not a failure —
-LinkedIn publishes nothing to verify against — but it must not read as
-eligible either.
+Exact wording and layout is a `DESIGN.md` decision, not settled here. The
+requirement is that a user can see, without opening anything, both how
+many roles they can act on and how much was set aside on their behalf.
 
-### 8. Store cleanup — last, and only last
+This is a deliberate, user-approved narrowing of the flag-never-hide
+rule, and it should be recorded in `CLAUDE.md` as the second such
+exception alongside the on-site-elsewhere drop.
 
-Ship 7 part 9, unchanged in substance, deliberately unchanged in
-position. It decides what to drop using exactly the rules in part 2, so
-it cannot run before they are settled and measured. Soft drops
-(`role.dropped_at`, schema v8), the application-row guard, the
-unparseable-country keep, and per-branch counts to the run log all stand
-as written.
+### 8. The four findings deferred from Ship 7's review
 
-The store is now 1184 roles across six runs, of which 800 predate the
+Recorded in that spec's "Corrections after review" section.
+
+- **8a.** Mode-lane evidence is lost to `dedupe` when the plain lane
+  returned the posting first. Note part 2 removes LinkedIn's plain
+  worldwide lane, which removes the main collision source — but the local
+  lane can still collide, so the fix stands.
+- **8b.** Remote boards are planned for users who never selected remote,
+  then have every row dropped or flagged. Plan the source only when
+  `remote` is among the user's work modes.
+- **8c.** `_countries_named` contradicts its docstring twice: it does use
+  the bare `us` alias (`"come join us"` → United States), and
+  word-bounding does not stop `Ireland` matching inside `Northern
+  Ireland`.
+- **8d.** An unrecognised timezone anchor returns unknown before the
+  region and country checks run.
+
+### 9. Store cleanup — last, and only last
+
+Ship 7 part 9, unchanged in substance and deliberately unchanged in
+position. Soft drops (`role.dropped_at`, schema v8), the application-row
+guard, the unparseable-country keep, per-branch counts to the run log.
+
+It decides what to drop using exactly the rules in parts 3–5, so it
+cannot run before those are settled and measured. Ship 7's own history is
+the argument: those rules were wrong when written, and only a live run
+showed it.
+
+The store is 1184 roles across six runs, 800 of which predate the
 relevance gate. That is the population this migration exists for.
 
 ## Shipping order
 
-Eight parts is more than Ship 7 carried, and they are not equally
-entangled. If this runs long, it splits cleanly in two at a real seam:
+Nine parts, splitting at a real seam:
 
-- **8a — parts 1, 2, 3, 4.** Everything that changes what the pipeline
-  believes: the country mapping and loud transport failure, the re-derived
-  phrase rules, `scope_verdict` wired up, and the four deferred findings.
-  Self-contained, and part 3 is the highest-value change in the ship.
-- **8b — parts 5, 6, 7, 8.** Board coverage, the unused LinkedIn fields,
-  the honest count on the map, and the store cleanup. Part 8 depends on
-  part 2 having landed and been measured; parts 5–7 are additive.
+- **8a — parts 1, 2, 3, 4, 5.** Everything that changes what the pipeline
+  fetches and believes: Indeed out, LinkedIn demoted, the live
+  anywhere-window bug fixed, the phrase rules corrected, `scope_verdict`
+  wired up. Self-contained, and it is the whole persona re-scope.
+- **8b — parts 6, 7, 8, 9.** Board breadth, the map, the deferred
+  findings, the cleanup.
 
-Do not reorder part 8 forward under any circumstance. It deletes rows
-using the rules from part 2, and Ship 7's own history is the argument:
-those rules were wrong when they were written and only a live run showed
-it.
+Part 7 (the map) may be worth pulling forward into 8a: it is the only
+part the user sees, and after part 5 the data behind it exists.
+
+Part 9 never moves forward.
 
 ## Testing
 
-- **Country mapping**: `gb` → `UK`; `us` → `US`; `am` → not present, so
-  Indeed is skipped and never called. A test asserting the skipped step is
-  `skipped`, not `done`, and that `call_actor` was not invoked.
-- **Transport failure**: a stubbed 400 marks the step `failed`, the run
-  still completes on the other sources, and the run row records it.
-  Regression test for the exact shape run 6 hit.
-- **Rule 6c withdrawal**: the four measured false-positive strings —
-  `work from anywhere in the united states for most positions`,
+- **Indeed removal**: `SOURCES` names two sources; `_default_scrapers`
+  matches; no import of `scrapers.indeed` survives; `plan_steps` for a
+  located profile emits Remote-boards-worldwide, LinkedIn-local and
+  LinkedIn-mode steps only.
+- **Lane shape**: 4 titles, remote+hybrid → 16 steps, and no LinkedIn
+  step on the plain worldwide lane.
+- **Part 3 guard**: the three measured live false positives —
   `work from anywhere in the world for up to 4 weeks per year`,
-  `work from anywhere (wfa) culture`, `embrace the freedom to work from
-  anywhere, anytime` — each yields no open claim. Fixtures verbatim from
-  run 6.
-- **Rule 6b**: the four contradicting strings, including
-  `at least 4 days in the office per week, with the flexibility to work
-  from home 1 day a week`, yield no remote claim.
-- **Qualifier guard**: place-qualified and duration-qualified phrases
-  claim nothing; the one genuine case (`remote (work from anywhere)`)
-  survives, so the guard is measured to be a guard and not a mute button.
-- **`scope_verdict` wiring**: a remote-board row with reach
-  `Armenia, Cyprus, Georgia, Kazakhstan, Poland` stores `open` for an `am`
-  user and `closed` for a `us` one; a LinkedIn row is never scoped at all.
-- **4a**: a posting returned by both the plain lane and the mode lane
-  keeps its lane evidence through `dedupe`.
-- **4b**: an onsite-only profile plans no remote-board step.
-- **4c**: `come join us` names no country; `northern ireland` does not
+  `embrace the freedom to work from anywhere in the world for up to 30
+  days a year`, `work from anywhere in the united states for most
+  positions` — each yields no eligibility claim. Fixtures verbatim from
+  run 6. Plus a guard-is-not-a-mute-button case: `remote (work from
+  anywhere)` still claims what it claimed before.
+- **Rule 6b**: `at least 4 days in the office per week, with the
+  flexibility to work from home 1 day a week` yields no remote claim.
+- **`scope_verdict` wiring**: a board row with reach `Armenia, Cyprus,
+  Georgia, Kazakhstan, Poland` stores `open` for an `am` user and
+  `closed` for a `us` one; a LinkedIn row is never scoped at all.
+- **Map**: a fixture with 2 open, 66 closed and 316 unverified renders 2
+  cards and states all four counts; a run with 0 open renders the counts
+  and an explicit empty state, not a blank page.
+- **8a**: a posting returned by both the local and a mode lane keeps its
+  lane evidence through `dedupe`.
+- **8b**: an onsite-only profile plans no remote-board step.
+- **8c**: `come join us` names no country; `northern ireland` does not
   resolve to Ireland.
-- **4d**: `Europe, Time zone: XYZ (+/- 3 hours)` reaches the region check.
+- **8d**: `Europe, Time zone: XYZ (+/- 3 hours)` reaches the region check.
 - **Board coverage**: the run row records the distinct boards seen.
 - **Migration**: each branch of `keep()`, the application-row guard, the
   unparseable-country keep, and ordering — a role rescued by a widened
-  phrase must not be dropped by the same migration that widened it.
-- **Live check after merge**: rerun and confirm Indeed is skipped rather
-  than failed-silently, the board list is recorded, and the map's stated
-  open count matches what `location_scope` wrote.
+  phrase must not be dropped by the migration that widened it.
+- **Live check after merge**: rerun and confirm 16 steps, the board list
+  recorded, and the map's stated open count matching what
+  `location_scope` wrote.
 
 ## Accepted residuals
 
 - **Everything here rests on one run.** Run 6 is one profile, one day,
-  four titles. It is a much larger sample than the eleven postings it
-  replaces, and it is still one run. Re-measure after the next.
-- **The worldwide and timezone-band branches of `location_scope` have
-  never seen live data.** They are tested against strings from a Ship 7
-  exploratory run, not from any run the product has made. Trigger: if the
-  six silent boards return in a later run, re-check those branches against
-  what they actually publish.
-- **The qualifier guard is designed from 12 examples.** Enough to see the
-  two shapes, not enough to know the window size. It ships with
-  `work from anywhere` still excluded from open evidence, so a wrong
-  window costs nothing until that changes.
-- **Rule 6d is retained on almost no evidence.** Eight hits across 384
-  roles. Phrase-bounded and additive, so the failure mode is
-  under-claiming. Revisit if Indeed becomes reachable for any user.
-- **`role.country` is NULL on every row**, so its precedence against
-  `location_country` is decided but untested. It becomes live the first
-  time a supported-country user runs Indeed.
-- **Six of ten boards are unexplained.** They may have had nothing, or the
-  aggregator may not sweep them. Part 5 measures it rather than assuming
-  either.
-- **Indeed is permanently unavailable to users in unsupported countries.**
-  That is Indeed's constraint, not ours; the product's job is to say so
-  plainly rather than show an empty source that looks like a failed one.
+  four titles — a far larger sample than the eleven postings it replaces,
+  and still one run. Re-measure after the next.
+- **The map may show zero roles.** On run 6 it shows two. That is the
+  honest answer for this profile and this source set, and part 6 is the
+  response — but the product must read as "we checked and found two", not
+  as broken. The empty state carries this and is explicitly tested.
+- **Marketing copy is indistinguishable from eligibility prose.** The
+  Figma sentence (`work together in real time from anywhere in the
+  world`) defeats the part-3 guard and any phrase rule we could write.
+  Prose mining is now a supporting mechanism rather than the primary one,
+  which bounds the damage. Trigger: if a false `open` reaches the map,
+  drop prose-derived eligibility to evidence-only.
+- **`unknown` is unmeasured, not ineligible.** 286 LinkedIn roles are set
+  aside on the strength of what they do not say. Some are certainly open.
+  The product's answer is that it will not claim what it cannot show, and
+  the counts make the size of that set visible.
+- **`location_scope`'s worldwide and timezone branches have never seen
+  live data.** They are tested against strings from a Ship 7 exploratory
+  run, not from any run the product has made. Trigger: if the six silent
+  boards return, re-check both branches against what they publish.
+- **Six of ten boards are unexplained.** They may have had nothing for
+  four data-role titles, or the aggregator may not sweep them. Part 6a
+  measures rather than assumes.
+- **Indeed is removed, not disabled.** A big-country user loses a source
+  they could have used. Accepted: the persona above is the one being
+  built for, and the local lane still answers their local question via
+  LinkedIn. Trigger: a user in a supported country asking for it.
+- **Rule 6d is retained on 8 hits across 384 roles.** Thin. Phrase-bounded
+  and additive, so it under-claims.
 
 ## Out of scope
 
-- Switching the remote-board actor. Part 5 gathers the evidence; acting on
-  it is a later decision.
-- Adding job boards outside the aggregator (Wellfound, Arc.dev).
 - Re-fetching LinkedIn postings to detect closure — still the only way to
   satisfy rule 6e for LinkedIn, still deferred.
-- `skipJobId` to avoid re-scraping stored postings. Real saving,
-  independent of this work, and now worth more: run 6 re-scraped 288
-  duplicates out of 796.
-- Per-user relevance include lists. Recorded as a Ship 7 residual with its
-  own trigger; nothing in run 6 fired it.
+- The unused LinkedIn fields (`contractType`, `experienceLevel`,
+  `applicationsCount`, `id`). Ship 7 part 7, **demoted out of this ship**:
+  LinkedIn is now a supporting source, and four more of its fields do not
+  move the number this ship is about. The `workType` guard stays wherever
+  the fields eventually land — despite the name it carries job function
+  ("Legal", "Health Care Provider") and must never reach `work_mode`.
+- `skipJobId` to avoid re-scraping stored postings. Independent, and now
+  worth more: run 6 re-scraped 288 duplicates of 796.
+- Per-user relevance include lists. Ship 7 residual, trigger unfired.
+- Switching the remote-board aggregator. Part 6a gathers the evidence.
