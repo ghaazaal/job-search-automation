@@ -616,13 +616,34 @@ def test_lane_membership_fills_silence_about_work_mode(conn, user, resume):
                          linkedin_mode_jobs={"remote": [silent_job]}))
 
     assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "remote"
+    # Transient, popped inside _apply_gates: must never reach what the
+    # LLM/Excel steps and persist_run receive, same guard as
+    # _scraped_under above.
+    assert "_lane_mode" not in evidence
+
+
+def test_lane_and_text_agreeing_confirms_the_mode(conn, user, resume):
+    """A job surfaced by the remote lane whose own description also says
+    remote is the third, unpinned branch of the rule: lane and text
+    agreeing is not a conflict, so the mode is simply confirmed."""
+    agreeing_job = _job("https://x/lane3")
+    agreeing_job["description"] += " This is a remote position."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(
+                         linkedin_mode_jobs={"remote": [agreeing_job]}))
+
+    assert result.kept == 1
     assert result.scored_jobs[0]["work_mode"] == "remote"
 
 
-def test_stated_text_wins_over_the_lane(conn, user, resume):
+def test_lane_and_text_disagreeing_claims_nothing(conn, user, resume):
     """A job surfaced by the remote lane whose own description says
-    hybrid must not come out as remote — conflicting evidence claims
-    nothing, exactly like every other conflict this scorer handles."""
+    hybrid must not come out as remote, or as hybrid — conflicting
+    evidence claims nothing, exactly like every other conflict this
+    scorer handles."""
     conflicting_job = _job("https://x/lane2")
     conflicting_job["description"] += (
         " Hybrid work, 2 days a week in the office.")
