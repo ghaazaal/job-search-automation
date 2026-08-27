@@ -20,6 +20,11 @@ from .matching import bounded, location_country
 _BAND_RE = re.compile(
     r"\b([a-z]{2,4})\s*\(\s*\+/-\s*(\d+)\s*(?:hours?|hrs?)?\s*\)", re.I)
 
+# A word that turns the country name after it into a different place.
+# "Northern Ireland" is not Ireland. Word-bounded matching stops
+# "Irelander"; it does nothing about what comes before.
+_ALIAS_PREFIX_TRAPS = ("northern",)
+
 
 def scope_verdict(text: str, user_country: str,
                   cfg: dict, geo_cfg: dict) -> str:
@@ -73,7 +78,11 @@ def scope_verdict(text: str, user_country: str,
             centre = anchors[anchor]
             return ("open" if abs(offsets[user] - centre) <= span
                     else "closed")
-        return "unknown"
+        # Anchor or user offset unknown: this branch has nothing to say,
+        # so it says nothing and lets the region and country checks below
+        # try. Returning "unknown" here took the whole field down —
+        # `timezone_anchors` lists six zones, so a board writing IST or
+        # AEST silenced any country list in the same string.
 
     region_named = False
     for region in geo_cfg.get("regions") or []:
@@ -130,17 +139,36 @@ def scope_verdict(text: str, user_country: str,
 def _countries_named(text: str, geo_cfg: dict) -> set[str]:
     """Every country code the text names, word-bounded.
 
-    Deliberately does not use the bare "us" alias the eligibility table
-    carries for prose: a reach field is short and enumerative, so a
-    two-letter token is far more likely to be a country code than the
-    pronoun `geo_verdict` has to guard against — but "Ireland" must not
-    match inside "Northern Ireland", so bounded matching still applies.
+    Two guards the previous docstring claimed and the code did not have.
+
+    `eligibility.ambiguous_names` is honoured, the same way `geo_verdict`
+    honours it: a name that collides with an ordinary English word counts
+    only when written with its article. "Anywhere in **the US**" names the
+    country; "Remote - come join us" does not. Dropping the alias outright
+    would have been simpler and wrong — it turned "Anywhere in the US"
+    back into an open field for every non-US user, which is the exact
+    failure Ship 7's review fixed.
+
+    And word-bounding does not stop a preceding word: `ireland` matches
+    inside "Northern Ireland", which is a different place. An alias
+    preceded by a trap word does not count.
     """
+    ambiguous = {str(n).strip().lower()
+                 for n in (geo_cfg.get("ambiguous_names") or [])}
     found: set[str] = set()
     for code, aliases in (geo_cfg.get("countries") or {}).items():
         for alias in aliases or ():
             alias = str(alias).strip().lower()
-            if alias and re.search(bounded(alias), text):
-                found.add(str(code).strip().lower())
-                break
+            if not alias:
+                continue
+            pattern = (r"(?<!\w)the\s+" + re.escape(alias) + r"(?!\w)"
+                       if alias in ambiguous else bounded(alias))
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            before = text[:match.start()].rstrip()
+            if any(before.endswith(trap) for trap in _ALIAS_PREFIX_TRAPS):
+                continue
+            found.add(str(code).strip().lower())
+            break
     return found
