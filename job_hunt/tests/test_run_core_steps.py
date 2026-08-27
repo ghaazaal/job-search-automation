@@ -115,8 +115,20 @@ def test_remote_boards_gets_no_local_lane():
     assert "Remote boards" not in local
 
 
-def test_a_source_can_be_switched_off_in_config():
-    from src.run_core import SOURCES
+def test_plan_steps_only_plans_the_given_sources():
+    """plan_steps' own `sources` filter — not the config.yaml gate, which
+    execute() applies before calling plan_steps (see
+    test_a_disabled_source_is_never_planned_or_called and
+    test_a_multi_word_source_can_be_switched_off_in_config in
+    test_run_core_execute.py for that path)."""
     only_indeed = tuple(s for s in SOURCES if s[0] == "Indeed")
     steps = plan_steps(["Data Analyst"], sources=only_indeed)
     assert {s["source"] for s in steps} == {"Indeed"}
+
+
+def test_default_scrapers_cover_every_source():
+    """SOURCES and _default_scrapers are two hand-maintained lists of the
+    same names; a drift is a runtime KeyError the suite would stay green
+    through if nothing checked they agree."""
+    from src.run_core import _default_scrapers
+    assert set(_default_scrapers()) == {name for name, _, _ in SOURCES}

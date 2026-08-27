@@ -21,8 +21,24 @@ SOURCES = (
      "flash_scraper~remote-job-aggregator"),
 )
 
+# search.sources (config.yaml) switches a source on/off by a snake_case
+# key: the source's own config-key stem, e.g. "remote_boards_actor" ->
+# "remote_boards" — the shape a user editing that same file will guess,
+# and the only spelling that works for a multi-word source. The legacy
+# single-word spelling (the display name lowercased, e.g. "indeed") is
+# also accepted so a config written before this stem existed keeps
+# working. A key absent from search.sources defaults to enabled — see
+# `_gate_key` and its use in `execute`.
+def _gate_key(config_key: str) -> str:
+    suffix = "_actor"
+    return config_key[:-len(suffix)] if config_key.endswith(suffix) else config_key
+
+
 # Sources with no meaningful local lane. A borderless board has no
-# "near Yerevan" to search — asking costs money and returns noise.
+# "near Yerevan" to search: `remote_boards.scrape` ignores location,
+# country and work_modes entirely, so a local lane would send the
+# identical payload and get back the same rows again — a second billed
+# run for no new data, not merely noise.
 _WORLDWIDE_ONLY = ("Remote boards",)
 
 # The only modes a keyword lane can express. On-site has no lane:
@@ -287,11 +303,13 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     country    = profile.get("country") or "us"
     work_modes = profile.get("work_modes") or ["remote"]
 
-    # A source can be switched off in config.yaml (search.sources).
+    # A source can be switched off in config.yaml (search.sources), keyed
+    # by _gate_key's snake_case stem (or the legacy single-word spelling).
     # Missing key means enabled, so existing configs keep working.
     gates = (config.get("search", {}) or {}).get("sources") or {}
-    sources = tuple(entry for entry in SOURCES
-                    if gates.get(entry[0].lower(), True))
+    sources = tuple(
+        entry for entry in SOURCES
+        if gates.get(_gate_key(entry[1]), gates.get(entry[0].lower(), True)))
 
     mode_lanes = tuple(m for m in
                        (str(x).strip().lower() for x in work_modes)

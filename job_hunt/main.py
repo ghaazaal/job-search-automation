@@ -192,7 +192,7 @@ def run_pipeline(config: dict) -> None:
         print("  PowerShell:  $env:APIFY_TOKEN = 'apify_api_xxx'")
         sys.exit(1)
 
-    print(f"\n[2/7] Scraping Indeed + LinkedIn + remote boards "
+    print(f"\n[2/7] Scraping Indeed + LinkedIn + Remote boards "
           f"(last {days_posted} days)...")
 
     # Company enrichment is disabled by default; the block below — unchanged
@@ -391,7 +391,7 @@ def run_pipeline(config: dict) -> None:
             and r["Application Status"] != "Filtered Out"]
     apply_now = [r for r in rows if r.get("Apply_Now") == "yes"]
     by_cat: dict[str, int] = {}
-    by_platform = {"Indeed": 0, "LinkedIn": 0}
+    by_platform: dict[str, int] = {}
     for r in rows:
         by_cat[r["Search Category"]] = by_cat.get(r["Search Category"], 0) + 1
         by_platform[r["Platform"]] = by_platform.get(r["Platform"], 0) + 1
@@ -401,7 +401,9 @@ def run_pipeline(config: dict) -> None:
     print(f"  Filtered out: {filtered_out_count}  |  Shortlisted: {len(shortlist)}")
     print(f"  Apply_Now: {len(apply_now)}")
     if by_cat:
-        print(f"\n  By platform: Indeed={by_platform['Indeed']} LinkedIn={by_platform['LinkedIn']}")
+        platform_summary = " ".join(f"{name}={count}" for name, count
+                                    in sorted(by_platform.items()))
+        print(f"\n  By platform: {platform_summary}")
         print(f"  By category:")
         for cat, n in sorted(by_cat.items(), key=lambda x: cat_order.get(x[0], 9)):
             print(f"    {cat:28s}: {n}")

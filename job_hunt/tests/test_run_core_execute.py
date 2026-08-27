@@ -483,6 +483,23 @@ def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
     assert sources == {"LinkedIn", "Remote boards"}
 
 
+def test_a_multi_word_source_can_be_switched_off_in_config(conn, user, resume):
+    """A user editing config.yaml sees `remote_boards_actor` right above
+    search.sources and will reasonably guess `remote_boards` there too —
+    not `"remote boards"`, the space-containing display name that
+    happened to work by accident while every source was one word."""
+    config = {**_CONFIG,
+              "search": {**_CONFIG["search"],
+                        "sources": {"remote_boards": False}}}
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, config, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+
+    sources = {s["source"] for s in seen[0]["steps"]}
+    assert sources == {"Indeed", "LinkedIn"}
+
+
 def test_a_missing_sources_key_enables_everything(conn, user, resume):
     seen = []
     run_id = start_run(conn, user)
