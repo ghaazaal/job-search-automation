@@ -390,6 +390,22 @@ def test_linkedin_still_falls_back_by_default(monkeypatch):
     assert len(jobs) == 1
 
 
+def test_linkedin_warns_when_rows_come_back_but_none_parse(monkeypatch, caplog):
+    """A shape mismatch (none of jobUrl/applyUrl/url/link present) must
+    not look like an empty job market — see the equivalent Indeed test
+    for why this guard exists. Location is pinned so the fallback retry
+    (also empty) doesn't add a second, distracting warning."""
+    wrong_shaped_item = {"title": "Data Analyst", "company": "Acme",
+                          "location": "Remote"}  # no url-ish key at all
+    monkeypatch.setattr(linkedin, "call_actor",
+                        lambda *a, **k: [wrong_shaped_item])
+    with caplog.at_level("WARNING", logger="src.scrapers.linkedin"):
+        jobs = linkedin.scrape("Data Analyst", "Data Analyst",
+                               "wrong~actor~id", location="Worldwide")
+    assert jobs == []
+    assert any("none could be parsed" in r.message for r in caplog.records)
+
+
 def test_the_defaults_reproduce_the_old_behaviour(monkeypatch):
     """Callers that have not been updated yet must not change what they get."""
     indeed_seen = _capture(monkeypatch, indeed, [[_KAIX_MINIMAL]])

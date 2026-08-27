@@ -46,10 +46,15 @@ def scrape(category: str, title: str,
 
     today = date.today().isoformat()
     jobs: list[dict] = []
+    unusable_count = 0
     for item in raw:
         url = (item.get("jobUrl") or item.get("applyUrl")
                or item.get("url") or item.get("link") or "")
         if not url:
+            # The only skip this scraper has — LinkedIn carries nothing
+            # like Indeed's isExpired flag, so there is no deliberate
+            # skip category here; any loss below is a shape problem.
+            unusable_count += 1
             continue
         job_title = (item.get("title") or item.get("jobTitle")
                      or item.get("positionName") or "")
@@ -70,6 +75,17 @@ def scrape(category: str, title: str,
                 item.get("salary") or item.get("baseSalary") or {}),
             "description": extract_description(item),
         })
+
+    if unusable_count and not jobs:
+        # Every row failed to yield a usable job — almost always a
+        # shape mismatch (wrong actor id, or the actor changed its
+        # output), not a genuinely empty search. There is no
+        # deliberate-skip category to gate this on (see above), so
+        # this fires whenever rows came back but none survived.
+        logger.warning(
+            "LinkedIn returned %d unusable row(s) for %s but none could "
+            "be parsed — check the actor id is %s",
+            unusable_count, category, actor_id)
 
     # Actors overshoot (Indeed returns ~100 for maxResults=50). The cap
     # is a promise to the user about volume and cost, so it is enforced
