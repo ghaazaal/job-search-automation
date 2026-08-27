@@ -56,9 +56,8 @@ def test_dropped_jobs_are_surfaced_in_the_progress_note():
 
 def test_the_step_row_can_label_the_local_lane():
     """The page appends ' · <lane>' from the step's lane field — the
-    source name itself stays clean for the scraper lookup. Labeling now
-    covers any non-worldwide lane (local, probe hybrid, probe onsite),
-    not just 'local' specifically."""
+    source name itself stays clean for the scraper lookup. Labeling is
+    generic to any non-worldwide lane, not a special case for 'local'."""
     html = render(7)
     assert "s.lane !== 'worldwide'" in html
 

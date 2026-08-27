@@ -386,6 +386,31 @@ Guard rails:
   They are additive and phrase-bounded, so a wrong one under-claims
   rather than over-claims, but they need re-checking against a larger
   sample after the first clean run.
+- **`role.country` and `role.location` are two country signals with no
+  stated precedence.** Ship 7 added `role.country` (structured, lowercase
+  ISO, from kaix's `location.country`). `location_country()` still
+  derives its own guess from the free-text `location` and nothing yet
+  says which wins when both exist. This matters directly to part 9's
+  cleanup, whose `keep()` test calls `location_country(role.location)` —
+  it should prefer `role.country` where present, since that is the
+  publisher's structured answer and the text parse is a heuristic that
+  cannot tell "Chennai, IN" from "Gary, IN". Decide the precedence
+  explicitly in Ship 8 rather than leaving two sources of truth.
+
+- **The relevance gate is a fixed data-professional list, not per-user.**
+  `vocabulary.yaml`'s `roles.include` names the market's data-role titles.
+  That satisfies the vocabulary rule (market facts, not a person), and the
+  scorer still judges per-user fit from the resumes. But a user whose
+  resumes target a different profession would have every genuine posting
+  rejected as off-topic, and the run would look empty rather than
+  misconfigured. `search_titles()` already extracts each user's own
+  `target_roles` from their resumes, so a per-user include list is
+  reachable — the open question is whether it is *better*, since a user
+  listing "Data Analyst" would then stop matching "Business Intelligence
+  Analyst", losing the market synonyms the fixed list provides.
+  Trigger to revisit: the first non-data user, or any run where the
+  off-topic count approaches the scraped count.
+
 - **The relevance exclusion list is hand-maintained** and will drift as
   new trap titles appear. Trigger: review it whenever an off-target role
   reaches the map.
@@ -394,6 +419,89 @@ Guard rails:
   exactly Seniority level, Employment type, Job function, Industries),
   `cheap_scraper`'s own documentation, and valig and `cheap_scraper`
   returning an identical four-field set. No vendor can sell this.
+
+## Corrections after review
+
+Three faults found reviewing the implementation, all fixed on the branch.
+
+### The "worldwide" lane was not worldwide
+
+`execute` passed the profile's own location to the lane named worldwide.
+Deleting LinkedIn's `_filters_for` (part 4) removed the last thing that
+made the two lanes differ, so they sent identical payloads:
+
+```
+Indeed   worldwide  location="Yerevan, Armenia" country=AM fromDays=7
+Indeed   local      location="Yerevan, Armenia" country=AM fromDays=7
+LinkedIn worldwide  location="Yerevan, Armenia"
+LinkedIn local      location="Yerevan, Armenia"
+```
+
+For LinkedIn this held for every user with a location set; for Indeed
+whenever `_remote_filter` returned "" for both lanes, which is any
+multi-mode selection. Two billed searches per title per source for one
+question, `scraped` double-counted, and no reach past the user's own
+country — in a ship whose entire premise is that this user's country
+carries nothing.
+
+**Fixed two ways.** The worldwide lane now sends `_LANE_WORLDWIDE`, the
+same value the mode lanes already used. And Indeed is dropped from the
+worldwide lane entirely (`_LOCAL_ONLY`): kaix is country-scoped by
+construction, so its worldwide lane could only ever have been the local
+one wearing a different name. Nothing measurable is lost — for a US user
+the local lane already *is* the US board, and for a user outside it that
+board returned zero eligible roles across 800. Worldwide reach is the
+LinkedIn mode lanes and the remote boards, which are the sources that
+carry it.
+
+### The bare word "anywhere" claimed the whole world
+
+`location_scope.worldwide` listed `"anywhere"` alongside the certain
+phrases, and that list is checked first and returns "open" outright.
+Measured against the real vocabulary with `user_country="am"`:
+
+| Reach field | Was | Now |
+|---|---|---|
+| `Anywhere in the World` | open | open |
+| `Anywhere in the United States` | **open** | closed |
+| `Anywhere in the US` | **open** | closed |
+| `Anywhere in Europe` | **open** | unknown |
+| `Anywhere` | open | open |
+
+The first two are precisely the US-only postings rule 6d exists to
+exclude. The third contradicted `eligibility.regions`, which deliberately
+leaves the Caucasus out of "Europe" — and which this parser's own
+docstring says it defers to.
+
+The bare word still has to be read: Remotive and Jobicy publish it alone.
+So it moves to `worldwide_unqualified` and is checked **last**, after a
+named country or region has had its say. A qualified "anywhere" defers to
+its qualifier; "Anywhere in Europe" stays unknown, since region absence
+never claims exclusion either.
+
+### The test suite would not collect from the repo root
+
+`test_location_scope.py` and `test_relevance.py` read `vocabulary.yaml`
+by cwd-relative path at module level, so `pytest job_hunt/tests` from the
+repo root raised `FileNotFoundError` during collection and ran nothing at
+all. Both now use `Path(__file__).parent.parent`, as every sibling does.
+`test_work_mode.py` had the same read inside a test body — pre-existing,
+one line, fixed alongside so the suite passes from either directory.
+
+### Deferred to Ship 8
+
+Four further findings from the same review, none of which change what a
+user sees today:
+
+- Mode-lane evidence is lost to dedupe whenever the plain lane returned
+  the same posting first — which is the case the lane exists to serve.
+- Remote boards are planned for users who never selected remote; every
+  row they return is then dropped or flagged.
+- `_countries_named` contradicts its docstring twice: it does use the
+  bare `us` alias, and word-bounding does not stop `Ireland` matching
+  inside `Northern Ireland`.
+- An unrecognised timezone anchor returns "unknown" before the region and
+  country checks can answer.
 
 ## The finding underneath all of this
 

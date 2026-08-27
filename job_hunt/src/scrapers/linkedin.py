@@ -9,28 +9,8 @@ logger = logging.getLogger(__name__)
 
 _DATE_MAP = {1: "r86400", 7: "r604800", 14: "r604800", 30: "r2592000"}
 
-# LinkedIn's own filter codes for how a job is worked.
-_REMOTE_CODES = {"onsite": "1", "remote": "2", "hybrid": "3"}
-
 # What this scraper sent before it knew where the user lives.
 _LEGACY_LOCATION = "Worldwide"
-_LEGACY_REMOTE = ["2"]
-
-
-def _filters_for(location: str, work_modes) -> tuple[str, list[str]]:
-    """Location and remote codes for one search.
-
-    A remote-only search is worldwide by definition. Any other combination has
-    to name the place, because 'hybrid in Worldwide' is not a thing.
-    """
-    modes = [str(m).strip().lower() for m in work_modes or ()]
-    modes = [m for m in modes if m in _REMOTE_CODES]
-    if not modes:
-        return _LEGACY_LOCATION, list(_LEGACY_REMOTE)
-    codes = [_REMOTE_CODES[m] for m in modes]
-    if modes == ["remote"]:
-        return _LEGACY_LOCATION, codes
-    return ((location or "").strip() or _LEGACY_LOCATION), codes
 
 
 def scrape(category: str, title: str,
@@ -41,38 +21,40 @@ def scrape(category: str, title: str,
            country: str = "us",
            work_modes=("remote",),
            allow_fallback: bool = True) -> list[dict]:
-    where, codes = _filters_for(location, work_modes)
+    where = (location or "").strip() or _LEGACY_LOCATION
     payload = {
         "title":      title,
         "location":   where,
-        "remote":     codes,
         "datePosted": _DATE_MAP.get(days_posted, "r604800"),
         "limit":      jobs_per_category,
     }
     raw = call_actor(actor_id, payload, f"LinkedIn/{category}", run_timeout)
 
     # See the note in indeed.py: a rejected payload is indistinguishable from
-    # an empty search, so retry once with the values known to work. But a
-    # probe or the local lane asked a narrow, deliberate question — Worldwide/
-    # remote answers a different one, and for a probe that answer gets
-    # recorded as badge evidence. A search that found nothing there must
-    # stay silent rather than fabricate.
-    legacy = {**payload, "location": _LEGACY_LOCATION,
-              "remote": list(_LEGACY_REMOTE)}
+    # an empty search, so retry once with the values known to work. But the
+    # local lane asked a narrow, deliberate question — Worldwide answers a
+    # different one. A search that found nothing there must stay silent
+    # rather than fabricate.
+    legacy = {**payload, "location": _LEGACY_LOCATION}
     if allow_fallback and not raw and legacy != payload:
         logger.warning(
-            "LinkedIn returned nothing for %s with location=%r remote=%r — "
-            "retrying with the legacy Worldwide/remote payload",
-            category, payload["location"], payload["remote"])
+            "LinkedIn returned nothing for %s with location=%r — "
+            "retrying with the legacy Worldwide payload",
+            category, payload["location"])
         raw = call_actor(actor_id, legacy, f"LinkedIn/{category} (legacy)",
                          run_timeout)
 
     today = date.today().isoformat()
     jobs: list[dict] = []
+    unusable_count = 0
     for item in raw:
         url = (item.get("jobUrl") or item.get("applyUrl")
                or item.get("url") or item.get("link") or "")
         if not url:
+            # The only skip this scraper has — LinkedIn carries nothing
+            # like Indeed's isExpired flag, so there is no deliberate
+            # skip category here; any loss below is a shape problem.
+            unusable_count += 1
             continue
         job_title = (item.get("title") or item.get("jobTitle")
                      or item.get("positionName") or "")
@@ -93,6 +75,17 @@ def scrape(category: str, title: str,
                 item.get("salary") or item.get("baseSalary") or {}),
             "description": extract_description(item),
         })
+
+    if unusable_count and not jobs:
+        # Every row failed to yield a usable job — almost always a
+        # shape mismatch (wrong actor id, or the actor changed its
+        # output), not a genuinely empty search. There is no
+        # deliberate-skip category to gate this on (see above), so
+        # this fires whenever rows came back but none survived.
+        logger.warning(
+            "LinkedIn returned %d unusable row(s) for %s but none could "
+            "be parsed — check the actor id is %s",
+            unusable_count, category, actor_id)
 
     # Actors overshoot (Indeed returns ~100 for maxResults=50). The cap
     # is a promise to the user about volume and cost, so it is enforced

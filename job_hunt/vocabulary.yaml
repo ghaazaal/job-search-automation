@@ -336,3 +336,128 @@ work_mode:
     - "onsite work required"
     - "work setup & shift: onsite"  # BPO JD-header idiom
     - "work setup: onsite"  # BPO JD-header idiom
+
+# Which titles name a data role at all. Title-only, phrases only, never
+# bare words: a bare "data" matched "Data Center & Edge Infrastructure
+# Lead" and "Urban Data Platforms"; a bare "analyst" matched
+# "Quantitative Analyst". All three reached the live map.
+#
+# These are market facts — the names these roles go by. Nothing here
+# describes a particular person; which of them a given user searches for
+# comes from their resumes.
+roles:
+  include:
+    - "data analyst"
+    - "data engineer"
+    - "data analytics"
+    - "data scientist"
+    - "analytics engineer"
+    - "business intelligence"
+    - "bi developer"
+    - "bi analyst"
+    - "bi engineer"
+    - "power bi"
+    - "product analyst"
+    - "analytics manager"
+    - "data warehouse"
+    - "etl developer"
+    - "reporting analyst"
+    - "insights analyst"
+    - "data platform"
+  exclude:
+    # Traps that pass an include phrase but are not the job.
+    # Plural forms listed explicitly, same as everywhere else in this
+    # file (see work_mode's "on-site role" / "onsite role") — word-
+    # bounded matching does not stem, so the singular alone misses
+    # "Data Centers", which is the more common form in the wild (both
+    # live-store data-centre titles pulled were plural).
+    - "data center"
+    - "data centers"
+    - "data centre"
+    - "data centres"
+    - "data entry"
+    - "data protection"
+    - "clinical data"
+    - "flight data"
+
+# Remote boards publish reach as a FIELD rather than burying it in
+# prose. These are the shapes measured on a live run:
+#   "Anywhere in the World" / "Europe, North America, Latin America,
+#   APAC" / "Time zone: CET (+/- 3 hours)" / "United States"
+# `location_scope.py` reads this section for worldwide phrases and the
+# timezone tables. Region membership is NOT duplicated here — it reads
+# `eligibility.regions` above instead, because that table already
+# encodes a considered, reviewed judgment call (e.g. the Caucasus and
+# Turkey are deliberately left out of "Europe" but included in "EMEA" —
+# see its comment) and a second, differently-shaped region table in
+# this section previously reversed that call by accident. One
+# canonical region table, one place to edit it. The bare-country-name
+# fallback also reuses `eligibility.countries`, so there is exactly one
+# spelling of every country in the product.
+location_scope:
+  worldwide:
+    - "anywhere in the world"
+    - "worldwide"
+    - "work from anywhere"
+  # The bare word, which is worldwide ONLY when the field names nowhere
+  # else. Remotive and Jobicy publish it alone, so it has to be read —
+  # but listed above with the certain phrases it matched first and won
+  # outright, and "Anywhere in the United States" (a live value, and
+  # exactly the US-only posting rule 6d exists to exclude) came back
+  # open to an Armenian user. Checked last instead, after a named
+  # country or region has had its say.
+  worldwide_unqualified:
+    - "anywhere"
+  # Anchor zone -> UTC offset, for "CET (+/- 3 hours)" style bands.
+  timezone_anchors:
+    cet: 1
+    cest: 2
+    utc: 0
+    gmt: 0
+    est: -5
+    pst: -8
+  # UTC offset per country, for the timezone-band check. Only countries
+  # a user can select today plus the common remote markets.
+  #
+  # These are STANDARD-TIME offsets, and several countries here observe
+  # DST for part of the year (the US, Canada, the EU countries, Turkey
+  # does not currently but has flip-flopped). This table does not track
+  # that, so a country mid-DST is read at its standard offset, off by an
+  # hour for part of the year. A timezone band this parser checks is a
+  # wide "+/- N hours" span (commonly 3 or more), so a single hour of
+  # drift rarely moves a posting across the open/closed line — but it
+  # is a real, accepted limitation, not a rounding error we can promise
+  # away.
+  #
+  # A SEPARATE and coarser limitation: a country spanning multiple real
+  # UTC offsets is collapsed here to ONE representative number, not a
+  # range — `us: -5` is Eastern time only, but the US actually runs from
+  # UTC-5 to UTC-10; `ca: -5` is similarly just its eastmost zone against
+  # a real range of -3.5 to -8; `au: 10` ignores Western Australia's
+  # UTC+8; `br: -3` ignores Amazonas/Acre further west; `mx: -6` ignores
+  # its Pacific states. A user physically in a different zone within one
+  # of these countries is compared against the wrong number, potentially
+  # by several hours — enough on a narrow "+/- N hour" band to flip a
+  # verdict in either direction, not just round it. Accepted for now
+  # because there is no per-region signal to disambiguate against in
+  # this field; a future fix would need the user's zone, not just their
+  # country.
+  country_utc_offset:
+    am: 4
+    ge: 4
+    us: -5
+    ca: -5
+    gb: 0
+    de: 1
+    fr: 1
+    es: 1
+    pl: 1
+    ua: 2
+    tr: 3
+    ae: 4
+    in: 5
+    sg: 8
+    au: 10
+    br: -3
+    mx: -6
+    za: 2

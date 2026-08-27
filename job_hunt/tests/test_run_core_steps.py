@@ -27,10 +27,14 @@ def test_a_resume_with_no_target_roles_contributes_nothing():
 
 
 def test_every_title_is_planned_against_every_source():
-    steps = plan_steps(["BI Developer", "Data Analyst"])
+    # Both lanes, because no single lane reaches every source any more:
+    # Remote boards is worldwide-only and Indeed is local-only.
+    steps = plan_steps(["BI Developer", "Data Analyst"], local=True)
 
-    assert len(steps) == len(SOURCES) * 2
     assert {s["source"] for s in steps} == {name for name, _, _ in SOURCES}
+    for title in ("BI Developer", "Data Analyst"):
+        planned = {s["source"] for s in steps if s["role"] == title}
+        assert planned == {name for name, _, _ in SOURCES}
 
 
 def test_steps_start_pending_with_nothing_found():
@@ -39,13 +43,19 @@ def test_steps_start_pending_with_nothing_found():
 
 
 def test_steps_are_grouped_by_role_so_the_screen_reads_in_order():
-    """A reader follows one role across both sources, then the next role."""
+    """A reader follows one role across every source, then the next role."""
     steps = plan_steps(["BI Developer", "Data Analyst"])
+    # 2 sources on the worldwide lane (Indeed is local-only) and no local
+    # lane requested: each role appears twice in a row before the next.
     assert [s["role"] for s in steps] == [
-        "BI Developer", "BI Developer", "Data Analyst", "Data Analyst"]
+        "BI Developer", "BI Developer",
+        "Data Analyst", "Data Analyst"]
 
 
-def test_a_location_doubles_the_plan_with_a_local_lane():
+def test_a_location_adds_a_local_lane():
+    # Neither lane carries every source: Remote boards is worldwide-only,
+    # Indeed local-only. 2 worldwide (LinkedIn, Remote boards) + 2 local
+    # (Indeed, LinkedIn) = 4.
     steps = plan_steps(["BI Developer"], local=True)
     assert len(steps) == 4
     assert [s["lane"] for s in steps] == ["worldwide", "worldwide",
@@ -53,20 +63,98 @@ def test_a_location_doubles_the_plan_with_a_local_lane():
 
 
 def test_without_a_location_the_plan_is_worldwide_only():
+    # One worldwide step per worldwide-capable source: LinkedIn and
+    # Remote boards. Indeed is local-only, so it drops out entirely.
     steps = plan_steps(["BI Developer"])
     assert len(steps) == 2
     assert all(s["lane"] == "worldwide" for s in steps)
+    assert "Indeed" not in {s["source"] for s in steps}
 
 
-def test_probes_append_two_linkedin_steps_per_role():
-    steps = plan_steps(["BI Developer"], probes=True)
-    lanes = [(s["source"], s["lane"]) for s in steps]
-    assert lanes == [("Indeed", "worldwide"), ("LinkedIn", "worldwide"),
-                     ("LinkedIn", "probe hybrid"),
-                     ("LinkedIn", "probe onsite")]
+def test_plan_steps_emits_no_probe_lanes():
+    """Probes never filtered anything - valig has no `remote` parameter."""
+    steps = plan_steps(["Data Analyst"], local=True)
+    lanes = {step["lane"] for step in steps}
+    assert lanes == {"worldwide", "local"}
+    assert not any(step["lane"].startswith("probe") for step in steps)
 
 
-def test_probes_require_linkedin_to_be_enabled():
-    indeed_only = tuple(s for s in SOURCES if s[0] == "Indeed")
-    steps = plan_steps(["BI Developer"], sources=indeed_only, probes=True)
-    assert all(not s["lane"].startswith("probe") for s in steps)
+def test_plan_steps_takes_no_probes_argument():
+    import inspect
+    assert "probes" not in inspect.signature(plan_steps).parameters
+
+
+def test_mode_lanes_follow_the_users_selection():
+    steps = plan_steps(["Data Analyst"], mode_lanes=("remote", "hybrid"))
+    lanes = [s["lane"] for s in steps if s["lane"].startswith("mode")]
+    assert lanes == ["mode remote", "mode hybrid"]
+    assert all(s["source"] == "LinkedIn"
+               for s in steps if s["lane"].startswith("mode"))
+
+
+def test_onsite_never_gets_a_lane():
+    """Measured 1/3 precision - postings rarely say "this is on-site"."""
+    steps = plan_steps(["Data Analyst"], mode_lanes=("onsite",))
+    assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_no_mode_lanes_when_none_selected():
+    steps = plan_steps(["Data Analyst"], mode_lanes=())
+    assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_no_mode_lanes_when_linkedin_is_not_a_source():
+    indeed_only = (("Indeed", "indeed_actor", "kaix~indeed-scraper"),)
+    steps = plan_steps(["Data Analyst"], sources=indeed_only,
+                       mode_lanes=("remote", "hybrid"))
+    assert not any(s["lane"].startswith("mode") for s in steps)
+
+
+def test_remote_boards_is_a_source():
+    steps = plan_steps(["Data Analyst"])
+    assert "Remote boards" in {s["source"] for s in steps}
+
+
+def test_remote_boards_gets_no_local_lane():
+    """A borderless board has no local; asking it for Yerevan is noise."""
+    steps = plan_steps(["Data Analyst"], local=True)
+    local = {s["source"] for s in steps if s["lane"] == "local"}
+    assert "Remote boards" not in local
+
+
+def test_plan_steps_only_plans_the_given_sources():
+    """plan_steps' own `sources` filter — not the config.yaml gate, which
+    execute() applies before calling plan_steps (see
+    test_a_disabled_source_is_never_planned_or_called and
+    test_a_multi_word_source_can_be_switched_off_in_config in
+    test_run_core_execute.py for that path)."""
+    only_indeed = tuple(s for s in SOURCES if s[0] == "Indeed")
+    # local=True because Indeed is local-only — see
+    # test_indeed_is_never_planned_on_the_worldwide_lane.
+    steps = plan_steps(["Data Analyst"], sources=only_indeed, local=True)
+    assert {s["source"] for s in steps} == {"Indeed"}
+
+
+def test_default_scrapers_cover_every_source():
+    """SOURCES and _default_scrapers are two hand-maintained lists of the
+    same names; a drift is a runtime KeyError the suite would stay green
+    through if nothing checked they agree."""
+    from src.run_core import _default_scrapers
+    assert set(_default_scrapers()) == {name for name, _, _ in SOURCES}
+
+
+def test_indeed_is_never_planned_on_the_worldwide_lane():
+    """kaix is country-scoped — it has no "Worldwide" to search.
+
+    Sending the profile's own location under a lane called worldwide made
+    the two lanes byte-identical (same keyword, location, country and
+    fromDays), so every run paid Apify twice per title for one search and
+    counted the rows twice. For a US user the local lane already IS the US
+    board; for a user outside it, the US board measured zero eligible
+    roles across 800. Worldwide reach comes from the mode lanes and the
+    remote boards instead.
+    """
+    steps = plan_steps(["Data Analyst"], local=True)
+    worldwide = {s["source"] for s in steps if s["lane"] == "worldwide"}
+    assert "Indeed" not in worldwide
+    assert "Indeed" in {s["source"] for s in steps if s["lane"] == "local"}

@@ -202,6 +202,83 @@ def test_a_job_without_eligibility_verification_stores_zero(conn):
     assert stored == 0
 
 
+def test_country_round_trips(conn):
+    """kaix's structured `location.country` is written and read back
+    unchanged — Indeed's live producer for this column."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/country", country="in")])
+    stored = conn.execute(
+        "SELECT country FROM role WHERE url = ?",
+        ("https://x/country",)).fetchone()["country"]
+    assert stored == "in"
+
+
+def test_a_job_without_a_country_stores_null(conn):
+    """A posting from a source with no structured country must not be
+    guessed at — NULL."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-country")])
+    stored = conn.execute(
+        "SELECT country FROM role WHERE url = ?",
+        ("https://x/no-country",)).fetchone()["country"]
+    assert stored is None
+
+
+def test_source_board_round_trips(conn):
+    """remote_boards.py now sets job["source_board"] to the raw slug
+    (e.g. "devitjobs_us") alongside the display name it puts in
+    `platform` — this is a live producer, not a synthetic value."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id,
+                [_job(url="https://x/board", platform="DevITjobs",
+                      source_board="devitjobs_us")])
+    row = conn.execute(
+        "SELECT platform, source_board FROM role WHERE url = ?",
+        ("https://x/board",)).fetchone()
+    assert row["platform"] == "DevITjobs"
+    assert row["source_board"] == "devitjobs_us"
+
+
+def test_a_job_without_a_source_board_stores_null(conn):
+    """Indeed and LinkedIn rows never set this key — NULL, not a guess."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-board")])
+    stored = conn.execute(
+        "SELECT source_board FROM role WHERE url = ?",
+        ("https://x/no-board",)).fetchone()["source_board"]
+    assert stored is None
+
+
+def test_location_scope_is_wired_but_has_no_producer_yet(conn):
+    """`scope_verdict` (src/scoring/location_scope.py) is uncalled by
+    anything today, so this is still a synthetic value — it only proves
+    the column is wired for whichever ship calls it next."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id,
+                [_job(url="https://x/scope", location_scope="open")])
+    stored = conn.execute(
+        "SELECT location_scope FROM role WHERE url = ?",
+        ("https://x/scope",)).fetchone()["location_scope"]
+    assert stored == "open"
+
+
+def test_a_job_without_a_location_scope_stores_null(conn):
+    """Today's real ingest path: nothing sets this key, so it must land
+    as NULL, not a fabricated default."""
+    u = ensure_user(conn, "Ghazal")
+    run_id = start_run(conn, u)
+    upsert_jobs(conn, u, run_id, [_job(url="https://x/no-scope")])
+    stored = conn.execute(
+        "SELECT location_scope FROM role WHERE url = ?",
+        ("https://x/no-scope",)).fetchone()["location_scope"]
+    assert stored is None
+
+
 def test_re_running_a_scrape_updates_the_attribution(conn):
     """A second resume can win a posting the first one won last week."""
     user_id = ensure_user(conn, "G")

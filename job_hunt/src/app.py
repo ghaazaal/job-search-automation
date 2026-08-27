@@ -113,17 +113,19 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             # supply the last run's drop count to the banner.
             latest = latest_ok_run(conn, user_id)
             hidden = 0
+            offtopic = 0
             if latest:
                 latest_run = get_run(conn, latest)
                 if latest_run:
                     hidden = latest_run.get("dropped") or 0
+                    offtopic = latest_run.get("offtopic") or 0
 
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden},
+                      "hidden": hidden, "offtopic": offtopic},
                 running_run_id=in_flight["id"] if in_flight else None)
 
             if latest:

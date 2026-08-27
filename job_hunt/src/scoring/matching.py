@@ -21,16 +21,12 @@ def has_term(term: str, haystack: str) -> bool:
     positives on short tokens — 'opt' inside 'optimize', 'bi' inside
     'ambitious'. Boundaries keep multi-word terms ('power bi') working.
 
-    Uses lookarounds rather than `\\b` because `\\b` only anchors on a
-    transition to/from a word character, and a term ending in `+` or `#`
-    (a skill named "C++", say) has no such transition at its own edge —
-    `\\b` would silently fail to match it in the ordinary case of the term
-    being followed by whitespace or punctuation.
+    See `bounded()` for why this uses lookarounds rather than `\\b`.
     """
     term = (term or "").strip()
     if not term:
         return False
-    return bool(re.search(_bounded(term), haystack))
+    return bool(re.search(bounded(term), haystack))
 
 
 def tokens(text: str) -> list[str]:
@@ -236,8 +232,19 @@ def _join_names(names: list[str], maybe_more: bool = False) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
-def _bounded(term: str) -> str:
-    """The has_term lookaround pattern, reusable inside larger regexes."""
+def bounded(term: str) -> str:
+    """A regex fragment matching `term` at a word boundary on both sides.
+
+    Public and reused well beyond this module (`relevance.py`'s title
+    gate, for one) because the reasoning below is easy to lose the second
+    time someone needs a bounded phrase match.
+
+    Uses lookarounds rather than `\\b` because `\\b` only anchors on a
+    transition to/from a word character, and a term ending in `+` or `#`
+    (a skill named "C++", say) has no such transition at its own edge —
+    `\\b` would silently fail to match it in the ordinary case of the term
+    being followed by whitespace or punctuation.
+    """
     return r"(?<!\w)" + re.escape(term) + r"(?!\w)"
 
 
@@ -260,7 +267,7 @@ def _find_bounded(term: str, body: str, start: int, ambiguous: bool = False):
     if not term:
         return None
     pattern = (r"(?<!\w)the\s+" + re.escape(term) + r"(?!\w)"
-               if ambiguous else _bounded(term))
+               if ambiguous else bounded(term))
     return re.compile(pattern).search(body, start)
 
 
@@ -309,7 +316,7 @@ def _window_has_bare_ambiguous_name(body: str, start: int, limit: int,
     discarded entirely by the caller, not just the ambiguous name's.
     """
     for name in ambiguous_names:
-        for match in re.compile(_bounded(name)).finditer(body, start):
+        for match in re.compile(bounded(name)).finditer(body, start):
             if match.start() >= limit:
                 break
             if not _preceded_by_article(body, match.start()):
@@ -411,7 +418,7 @@ def geo_verdict(body: str, user_country: str,
         phrase = str(phrase).strip().lower()
         if not phrase:
             continue
-        for match in re.finditer(_bounded(phrase), body):
+        for match in re.finditer(bounded(phrase), body):
             windows.append((match.end(), match.end() + _LIST_WINDOW))
     # Text order, not config order — a list phrase configured first can
     # still occur later in the body than another one. Processing windows
@@ -535,7 +542,7 @@ def _phrase_patterns(phrases: tuple[str, ...]) -> tuple[re.Pattern, ...]:
     per phrase while still removing the per-job (re.escape + compile)
     cost the uncached version paid on every call.
     """
-    return tuple(re.compile(_bounded(p)) for p in phrases)
+    return tuple(re.compile(bounded(p)) for p in phrases)
 
 
 def work_mode(body: str, cfg: dict) -> str | None:
@@ -645,7 +652,7 @@ def location_country(location: str, cfg: dict) -> str | None:
             name = str(name).strip().lower()
             if not name or name in ambiguous_names:
                 continue
-            for match in re.finditer(_bounded(name), location):
+            for match in re.finditer(bounded(name), location):
                 if best is None or match.start() > best[0]:
                     best = (match.start(), str(code).strip().lower())
 

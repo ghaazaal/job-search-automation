@@ -5,7 +5,7 @@ into the store is exactly what this is for.
 """
 import pytest
 
-from src.run_core import execute
+from src.run_core import _apply_gates, execute
 from src.store.db import connect
 from src.store.ingest import ensure_user
 from src.store.queries import map_sections
@@ -20,6 +20,21 @@ _CONFIG = {
 
 _PROFILE = {"location": "Toronto, ON", "country": "ca",
             "work_modes": ["remote"], "setup_complete": 1}
+
+# A minimal vocabulary — just enough for _apply_gates' two gates, not the
+# full vocabulary.yaml — so these tests don't depend on real-world phrase
+# lists changing underneath them.
+_GATE_VOCAB = {
+    "roles": {"include": ["data analyst", "bi developer"],
+              "exclude": ["nurse"]},
+    "work_mode": {
+        "remote_phrases": ["fully remote", "work from home"],
+        "hybrid_phrases": ["hybrid work"],
+        "onsite_phrases": ["onsite role", "on-site required"],
+    },
+    "eligibility": {"countries": {"ca": ["canada"], "in": ["india"],
+                                  "us": ["us", "usa", "united states"]}},
+}
 
 
 def _job(url, title="BI Developer", company="Acme"):
@@ -56,16 +71,32 @@ def resume(conn, user):
     return list_resumes(conn, user, active_only=True)[0]
 
 
-def _scrapers(indeed_jobs=None, linkedin_jobs=None, fail=()):
-    """Fake scrapers. `fail` names sources that raise instead of returning."""
+def _scrapers(indeed_jobs=None, linkedin_jobs=None, remote_boards_jobs=None,
+             fail=(), linkedin_mode_jobs=None):
+    """Fake scrapers. `fail` names sources that raise instead of returning.
+
+    `linkedin_mode_jobs`, if given, maps a mode word ("remote"/"hybrid") to
+    the jobs returned only for the LinkedIn call whose search title carries
+    that mode lane's prefix (e.g. "remote BI Developer") — every other
+    LinkedIn call still gets `linkedin_jobs`.
+
+    Remote boards always gets an entry here (default: no jobs) so tests
+    that don't care about the fourth source don't pick up a spurious
+    "failed" step from a missing dict key.
+    """
     def make(name, jobs):
         def scrape(category, title, actor_id, *args, **kwargs):
             if name in fail:
                 raise RuntimeError(f"{name} actor timed out")
+            if name == "LinkedIn" and linkedin_mode_jobs:
+                for mode, mode_jobs in linkedin_mode_jobs.items():
+                    if title == f"{mode} {category}":
+                        return list(mode_jobs)
             return list(jobs or [])
         return scrape
     return {"Indeed": make("Indeed", indeed_jobs),
-            "LinkedIn": make("LinkedIn", linkedin_jobs)}
+            "LinkedIn": make("LinkedIn", linkedin_jobs),
+            "Remote boards": make("Remote boards", remote_boards_jobs)}
 
 
 def test_scraped_jobs_are_scored_and_stored(conn, user, resume):
@@ -105,7 +136,11 @@ def test_the_first_event_already_lists_every_step(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
 
-    assert len(seen[0]["steps"]) == 6      # two lanes + two probes
+    # 2 sources worldwide (LinkedIn, Remote boards — Indeed is country-
+    # scoped and has no worldwide lane) + 2 local (Indeed, LinkedIn —
+    # Remote boards has no local lane) + 1 LinkedIn-only mode lane
+    # ("remote", the profile's own work mode) = 2 + 2 + 1 = 5.
+    assert len(seen[0]["steps"]) == 5
 
 
 def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
@@ -113,6 +148,19 @@ def test_one_source_failing_does_not_lose_the_other(conn, user, resume):
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         fail=("LinkedIn",)))
+
+    assert result.kept == 1
+    assert get_run(conn, run_id)["status"] == "OK"
+
+
+def test_remote_boards_failing_does_not_lose_the_others(conn, user, resume):
+    """Remote boards is allowed to fail (young actor, no ratings) — its own
+    scrape swallows errors and returns [], but the run loop's try/except
+    must also survive an actor raising outright, same as any other source."""
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[_job("https://x/rb1")],
+                                        fail=("Remote boards",)))
 
     assert result.kept == 1
     assert get_run(conn, run_id)["status"] == "OK"
@@ -128,7 +176,8 @@ def test_a_failed_source_is_marked_on_its_step(conn, user, resume):
 
     final = seen[-1]["steps"]
     states = {step["source"]: step["state"] for step in final}
-    assert states == {"Indeed": "done", "LinkedIn": "failed"}
+    assert states == {"Indeed": "done", "LinkedIn": "failed",
+                      "Remote boards": "done"}
 
 
 def test_finding_nothing_is_a_successful_run(conn, user, resume):
@@ -159,7 +208,9 @@ def test_duplicates_within_one_scrape_collapse(conn, user, resume):
                      scrapers=_scrapers(indeed_jobs=[_job("https://x/1")],
                                         linkedin_jobs=[_job("https://x/1")]))
 
-    assert result.scraped == 4  # two lanes each finding the same job
+    # Indeed's 1 lane (local only) plus LinkedIn's 3 (worldwide + local +
+    # the "remote" mode lane), each finding the same job: 1 + 3 = 4.
+    assert result.scraped == 4
     assert result.kept == 1
 
 
@@ -408,7 +459,11 @@ def test_no_location_means_no_local_lane(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], profile,
             on_progress=seen.append, scrapers=_scrapers())
-    assert len(seen[0]["steps"]) == 4
+    # 2 sources on the worldwide lane (LinkedIn and Remote boards; Indeed
+    # is local-only and so drops out entirely when there is no location),
+    # plus one LinkedIn-only mode lane ("remote") — the mode lane doesn't
+    # need a location, so an empty profile location still yields it: 2 + 1.
+    assert len(seen[0]["steps"]) == 3
 
 
 def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
@@ -427,7 +482,24 @@ def test_a_disabled_source_is_never_planned_or_called(conn, user, resume):
             scrapers={"Indeed": spy, "LinkedIn": spy})
 
     sources = {s["source"] for s in seen[0]["steps"]}
-    assert sources == {"LinkedIn"}
+    assert sources == {"LinkedIn", "Remote boards"}
+
+
+def test_a_multi_word_source_can_be_switched_off_in_config(conn, user, resume):
+    """A user editing config.yaml sees `remote_boards_actor` right above
+    search.sources and will reasonably guess `remote_boards` there too —
+    not `"remote boards"`, the space-containing display name that
+    happened to work by accident while every source was one word."""
+    config = {**_CONFIG,
+              "search": {**_CONFIG["search"],
+                        "sources": {"remote_boards": False}}}
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, config, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+
+    sources = {s["source"] for s in seen[0]["steps"]}
+    assert sources == {"Indeed", "LinkedIn"}
 
 
 def test_a_missing_sources_key_enables_everything(conn, user, resume):
@@ -435,101 +507,8 @@ def test_a_missing_sources_key_enables_everything(conn, user, resume):
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             on_progress=seen.append, scrapers=_scrapers())
-    assert {s["source"] for s in seen[0]["steps"]} == {"Indeed", "LinkedIn"}
-
-
-def test_probe_results_are_evidence_not_candidates(conn, user, resume):
-    """Probe jobs are never scored or stored; their step still reports
-    a found count."""
-    probe_job = _job("https://x/probe1")
-
-    def spy(category, title, actor_id, *args, **kwargs):
-        modes = tuple(kwargs.get("work_modes") or ())
-        if modes in (("hybrid",), ("onsite",)):
-            return [probe_job]
-        return []
-
-    seen = []
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     on_progress=seen.append,
-                     scrapers={"Indeed": spy, "LinkedIn": spy})
-    assert result.kept == 0
-    assert conn.execute("SELECT COUNT(*) AS n FROM role").fetchone()["n"] == 0
-    probe_steps = [s for s in seen[-1]["steps"]
-                   if s["lane"].startswith("probe")]
-    assert [s["found"] for s in probe_steps] == [1, 1]
-    assert result.scraped == 0      # probes don't inflate the count
-
-
-def test_probe_calls_are_worldwide_and_single_mode(conn, user, resume):
-    calls = []
-
-    def spy(category, title, actor_id, *args, **kwargs):
-        calls.append((kwargs.get("location"),
-                      tuple(kwargs.get("work_modes") or ())))
-        return []
-
-    run_id = start_run(conn, user)
-    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-            scrapers={"Indeed": spy, "LinkedIn": spy})
-    probe_calls = [c for c in calls if c[1] in (("hybrid",), ("onsite",))]
-    assert len(probe_calls) == 2
-    assert all(loc == "" for loc, _ in probe_calls)
-
-
-def _with_probe(probe_url, probe_mode, jobs):
-    """Scrapers where one probe lane returns a job at probe_url."""
-    def spy(category, title, actor_id, *args, **kwargs):
-        modes = tuple(kwargs.get("work_modes") or ())
-        if modes == (probe_mode,):
-            return [_job(probe_url)]
-        if modes in (("hybrid",), ("onsite",)):
-            return []
-        return list(jobs)
-    return {"Indeed": spy, "LinkedIn": spy}
-
-
-def test_the_salford_case_a_badge_hybrid_foreign_job_is_dropped(conn, user, resume):
-    """The ship's reason to exist: badge-only hybrid in another country.
-    Text says nothing; probe membership says hybrid; UK != ca -> drop."""
-    job = _job("https://x/salford")
-    job["location"] = "Salford, England, United Kingdom"
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_with_probe("https://x/salford", "hybrid",
-                                          [job]))
-    assert result.dropped == 1
-    assert result.kept == 0
-    assert result.badge_hits == 1
-
-
-def test_a_badge_conflicting_with_text_claims_nothing(conn, user, resume):
-    """LinkedIn badges mislabel ~19% of the time (our own measurement) —
-    badge says hybrid, text says fully remote: no claim, job kept."""
-    job = _job("https://x/conflict")
-    job["location"] = "Salford, England, United Kingdom"
-    job["description"] += " This is a fully remote role."
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_with_probe("https://x/conflict", "hybrid",
-                                          [job]))
-    assert result.dropped == 0
-    assert result.kept == 1
-    assert result.scored_jobs[0].get("work_mode") is None
-
-
-def test_a_badge_hybrid_local_job_is_kept_clean(conn, user, resume):
-    job = _job("https://x/localbadge")
-    job["location"] = "Toronto, Ontario, Canada"
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_with_probe("https://x/localbadge", "hybrid",
-                                          [job]))
-    assert result.kept == 1
-    evidence = result.scored_jobs[0]
-    assert evidence["work_mode"] == "hybrid"
-    assert "says hybrid" not in evidence["reason"]
+    assert {s["source"] for s in seen[0]["steps"]} == {
+        "Indeed", "LinkedIn", "Remote boards"}
 
 
 def test_local_country_verifies_eligibility(conn, user, resume):
@@ -558,99 +537,257 @@ def test_an_unplaceable_job_is_stored_unverified(conn, user, resume):
     assert "_local_ok" not in evidence
 
 
-def test_probes_and_the_local_lane_never_fall_back(conn, user, resume):
-    """The Critical: a probe or the local lane finding nothing must stay
-    silent, not retry with the legacy Worldwide/remote-us payload — that
-    fabricates badge evidence (a probe) or re-fetches the worldwide
-    lane's own results and double-counts `scraped` (the local lane)."""
+def test_offtopic_titles_are_never_stored(conn, user, resume):
+    """A nurse posting must not reach the map, whatever it scores."""
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(indeed_jobs=[
+                         _job("https://x/40"),
+                         _job("https://x/41", title="Nurse Practitioner",
+                              company="Med"),
+                     ]))
+    titles = [job["title"] for job in result.scored_jobs]
+    assert titles == ["BI Developer"]
+    assert result.offtopic == 1
+
+
+def test_offtopic_count_reaches_the_progress_payload(conn, user, resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append,
+            scrapers=_scrapers(indeed_jobs=[
+                _job("https://x/42", title="Travel Advisor", company="T"),
+            ]))
+    assert seen[-1]["offtopic"] == 1
+
+
+def test_offtopic_jobs_never_reach_the_enrich_hook(conn, user, resume):
+    handed = []
+
+    def enrich(jobs):
+        handed.extend(j["url"] for j in jobs)
+        return jobs
+
+    offtopic_job = _job("https://x/43", title="Nurse Practitioner",
+                        company="Med")
+    survivor = _job("https://x/44", company="Widgets Inc")
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE, enrich=enrich,
+            scrapers=_scrapers(indeed_jobs=[offtopic_job, survivor]))
+    assert handed == ["https://x/44"]
+
+
+def test_the_local_lane_never_falls_back(conn, user, resume):
+    """The local lane finding nothing must stay silent, not retry with the
+    legacy Worldwide/remote-us payload — that re-fetches the worldwide
+    lane's own results and double-counts `scraped`."""
     calls = []
 
     def spy(category, title, actor_id, *args, **kwargs):
-        calls.append({"work_modes": tuple(kwargs.get("work_modes") or ()),
+        calls.append({"title": title,
+                      "location": kwargs.get("location"),
+                      "work_modes": tuple(kwargs.get("work_modes") or ()),
                       "allow_fallback": kwargs.get("allow_fallback")})
         return []
 
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-            scrapers={"Indeed": spy, "LinkedIn": spy})
+            scrapers={"Indeed": spy, "LinkedIn": spy, "Remote boards": spy})
 
-    probe_calls = [c for c in calls
-                  if c["work_modes"] in (("hybrid",), ("onsite",))]
+    # The local lane is the only one that names the profile's own place;
+    # the other two both search Worldwide and are told apart by their
+    # search words, since a mode lane prefixes the mode onto the title.
     local_calls = [c for c in calls
-                  if c["work_modes"] == ("remote", "hybrid", "onsite")]
+                  if c["location"] == _PROFILE["location"]]
     worldwide_calls = [c for c in calls
-                       if c["work_modes"] == tuple(_PROFILE["work_modes"])]
+                       if c["location"] != _PROFILE["location"]
+                       and c["title"] == "BI Developer"]
+    mode_lane_calls = [c for c in calls
+                      if c["location"] != _PROFILE["location"]
+                      and c["title"] != "BI Developer"]
 
-    assert probe_calls and all(c["allow_fallback"] is False
-                               for c in probe_calls)
     assert local_calls and all(c["allow_fallback"] is False
                                for c in local_calls)
     assert worldwide_calls and all(c["allow_fallback"] is not False
                                    for c in worldwide_calls)
+    assert mode_lane_calls and all(c["allow_fallback"] is False
+                                   for c in mode_lane_calls)
 
 
-def test_contested_probe_membership_claims_nothing(conn, user, resume):
-    """Both probes claim the same URL under different modes — exactly
-    what the Critical's double-retry produced. Disagreement claims
-    nothing: kept, unstamped, undropped."""
-    job = _job("https://x/contested")
-    job["location"] = "Salford, England, United Kingdom"
-
-    def spy(category, title, actor_id, *args, **kwargs):
-        modes = tuple(kwargs.get("work_modes") or ())
-        if modes == ("hybrid",):
-            return [_job("https://x/contested")]
-        if modes == ("onsite",):
-            return [_job("https://x/contested")]
-        return list([job])
-
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers={"Indeed": spy, "LinkedIn": spy})
-    assert result.dropped == 0
-    assert result.kept == 1
-    assert result.scored_jobs[0].get("work_mode") is None
-    assert result.badge_hits == 0
-
-
-def test_badge_hits_counts_only_fills_not_agreement(conn, user, resume):
-    """A badge that agrees with text is not a 'hit' — the text already
-    said it. badge_hits counts only badge-filled silence."""
-    job = _job("https://x/agree")
-    job["location"] = "Toronto, Ontario, Canada"
-    job["description"] += " Hybrid work, 2 days a week in the office."
-    run_id = start_run(conn, user)
-    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-                     scrapers=_with_probe("https://x/agree", "hybrid",
-                                          [job]))
-    assert result.kept == 1
-    assert result.badge_hits == 0
-
-
-def test_probes_off_plans_and_calls_none(conn, user, resume):
-    config = {**_CONFIG,
-              "search": {**_CONFIG["search"], "probes": False}}
+def test_a_mode_lane_prefixes_the_mode_onto_the_search_words(conn, user, resume):
     calls = []
 
     def spy(category, title, actor_id, *args, **kwargs):
-        calls.append(tuple(kwargs.get("work_modes") or ()))
+        calls.append({"category": category, "title": title})
         return []
 
-    seen = []
-    run_id = start_run(conn, user)
-    execute(conn, user, run_id, config, [resume], _PROFILE,
-            on_progress=seen.append,
-            scrapers={"Indeed": spy, "LinkedIn": spy})
-
-    probe_steps = [s for s in seen[0]["steps"] if s["lane"].startswith("probe")]
-    assert probe_steps == []
-    assert ("hybrid",) not in calls and ("onsite",) not in calls
-
-
-def test_a_missing_probes_key_enables_probes(conn, user, resume):
-    seen = []
     run_id = start_run(conn, user)
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
-            on_progress=seen.append, scrapers=_scrapers())
-    probe_steps = [s for s in seen[0]["steps"] if s["lane"].startswith("probe")]
-    assert len(probe_steps) == 2
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    assert {"category": "BI Developer", "title": "remote BI Developer"} in calls
+
+
+def test_a_mode_lane_sends_no_fallback_and_a_worldwide_location(conn, user, resume):
+    calls = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        if title == "remote BI Developer":
+            calls.append({"location": kwargs.get("location"),
+                          "allow_fallback": kwargs.get("allow_fallback")})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": spy, "LinkedIn": spy})
+
+    assert calls == [{"location": "Worldwide", "allow_fallback": False}]
+
+
+def test_lane_membership_fills_silence_about_work_mode(conn, user, resume):
+    """A job the remote lane surfaces, whose own text says nothing about
+    mode, still ends up tagged remote — lane membership is the only
+    evidence there is."""
+    silent_job = _job("https://x/lane1")
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(
+                         linkedin_mode_jobs={"remote": [silent_job]}))
+
+    assert result.kept == 1
+    evidence = result.scored_jobs[0]
+    assert evidence["work_mode"] == "remote"
+    # Transient, popped inside _apply_gates: must never reach what the
+    # LLM/Excel steps and persist_run receive, same guard as
+    # _scraped_under above.
+    assert "_lane_mode" not in evidence
+
+
+def test_lane_and_text_agreeing_confirms_the_mode(conn, user, resume):
+    """A job surfaced by the remote lane whose own description also says
+    remote is the third, unpinned branch of the rule: lane and text
+    agreeing is not a conflict, so the mode is simply confirmed."""
+    agreeing_job = _job("https://x/lane3")
+    agreeing_job["description"] += " This is a remote position."
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(
+                         linkedin_mode_jobs={"remote": [agreeing_job]}))
+
+    assert result.kept == 1
+    assert result.scored_jobs[0]["work_mode"] == "remote"
+
+
+def test_lane_and_text_disagreeing_claims_nothing(conn, user, resume):
+    """A job surfaced by the remote lane whose own description says
+    hybrid must not come out as remote, or as hybrid — conflicting
+    evidence claims nothing, exactly like every other conflict this
+    scorer handles."""
+    conflicting_job = _job("https://x/lane2")
+    conflicting_job["description"] += (
+        " Hybrid work, 2 days a week in the office.")
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(
+                         linkedin_mode_jobs={"remote": [conflicting_job]}))
+
+    assert result.kept == 1
+    assert result.scored_jobs[0].get("work_mode") is None
+
+
+# --- _apply_gates: direct tests, no db/run/scrapers needed -----------------
+
+def test_apply_gates_relevance_gate_rejects_offtopic_titles():
+    jobs = [_job("https://x/g1", title="BI Developer"),
+           _job("https://x/g2", title="Nurse Practitioner")]
+    kept, offtopic, dropped = _apply_gates(
+        jobs, _GATE_VOCAB, _PROFILE, ["remote"])
+    assert [j["url"] for j in kept] == ["https://x/g1"]
+    assert offtopic == 1
+    assert dropped == 0
+
+
+def test_apply_gates_work_mode_policy_drops_a_foreign_onsite_job():
+    job = _job("https://x/g3")
+    job["location"] = "Bengaluru, India"
+    job["description"] += " Onsite role, 5 days in office."
+    kept, offtopic, dropped = _apply_gates(
+        [job], _GATE_VOCAB, _PROFILE, ["remote"])
+    assert kept == []
+    assert offtopic == 0
+    assert dropped == 1
+
+
+def test_apply_gates_counts_stay_separate():
+    """One offtopic title, one foreign onsite mismatch, one clean survivor.
+
+    Each count registers its own gate's rejection and the survivor passes
+    both. This cannot prove the counts are unconflatable — the relevance
+    gate runs first and narrows what the geo loop ever sees, so an
+    off-topic job can never reach it — but it does catch an off-by-one, a
+    wrong-variable increment, or the survivor being dropped."""
+    offtopic_job = _job("https://x/g4", title="Nurse Practitioner")
+    dropped_job = _job("https://x/g5")
+    dropped_job["location"] = "Bengaluru, India"
+    dropped_job["description"] += " Onsite role, 5 days in office."
+    survivor = _job("https://x/g6")
+
+    kept, offtopic, dropped = _apply_gates(
+        [offtopic_job, dropped_job, survivor],
+        _GATE_VOCAB, _PROFILE, ["remote"])
+
+    assert [j["url"] for j in kept] == ["https://x/g6"]
+    assert offtopic == 1
+    assert dropped == 1
+
+
+def test_apply_gates_a_stated_mode_beats_lane_and_text():
+    """kaix sets work_mode from Indeed's own workArrangement.locationType
+    field before this ever runs. That publisher-stated value must win
+    over both a text phrase and a lane, even when the two weaker signals
+    agree with each other and disagree with the stated field - neither
+    gets a vote once the posting has already answered."""
+    job = _job("https://x/g7")
+    job["work_mode"] = "remote"
+    job["_lane_mode"] = "hybrid"
+    job["description"] += " Hybrid work, 2 days a week in the office."
+
+    kept, offtopic, dropped = _apply_gates(
+        [job], _GATE_VOCAB, _PROFILE, ["remote"])
+
+    assert kept[0]["work_mode"] == "remote"
+    assert "_lane_mode" not in kept[0]
+
+
+def test_the_worldwide_lane_searches_worldwide_not_the_users_own_city(
+        conn, user, resume):
+    """The lane is named worldwide; it has to search there.
+
+    It was passing the profile's location, which made its payload
+    identical to the local lane's — LinkedIn stopped reading work_modes
+    when `_filters_for` was deleted, so the two lanes differed in nothing
+    at all. Two billed searches, one question, and no reach past the
+    user's own country.
+    """
+    linkedin, indeed = [], []
+
+    def li(category, title, actor_id, *args, **kwargs):
+        linkedin.append({"title": title, "location": kwargs.get("location")})
+        return []
+
+    def ind(category, title, actor_id, *args, **kwargs):
+        indeed.append({"title": title, "location": kwargs.get("location")})
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"Indeed": ind, "LinkedIn": li,
+                      "Remote boards": lambda *a, **k: []})
+
+    # LinkedIn's two plain lanes, in order: worldwide, then the profile's
+    # own place. The mode lane carries a prefixed title and is excluded.
+    plain = [c["location"] for c in linkedin if c["title"] == "BI Developer"]
+    assert plain == ["Worldwide", _PROFILE["location"]]
+    # Indeed is country-scoped, so it only ever runs the local lane.
+    assert [c["location"] for c in indeed] == [_PROFILE["location"]]

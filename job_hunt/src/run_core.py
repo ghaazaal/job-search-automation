@@ -15,9 +15,56 @@ logger = logging.getLogger(__name__)
 
 # (display name, config key for the actor id, default actor id)
 SOURCES = (
-    ("Indeed",   "indeed_actor",   "valig~indeed-jobs-scraper"),
-    ("LinkedIn", "linkedin_actor", "valig~linkedin-jobs-scraper"),
+    ("Indeed",        "indeed_actor",        "kaix~indeed-scraper"),
+    ("LinkedIn",      "linkedin_actor",      "valig~linkedin-jobs-scraper"),
+    ("Remote boards", "remote_boards_actor",
+     "flash_scraper~remote-job-aggregator"),
 )
+
+# search.sources (config.yaml) switches a source on/off by a snake_case
+# key: the source's own config-key stem, e.g. "remote_boards_actor" ->
+# "remote_boards" — the shape a user editing that same file will guess,
+# and the only spelling that works for a multi-word source. The legacy
+# single-word spelling (the display name lowercased, e.g. "indeed") is
+# also accepted so a config written before this stem existed keeps
+# working. A key absent from search.sources defaults to enabled — see
+# `_gate_key` and its use in `execute`.
+def _gate_key(config_key: str) -> str:
+    suffix = "_actor"
+    return config_key[:-len(suffix)] if config_key.endswith(suffix) else config_key
+
+
+# Sources with no meaningful local lane. A borderless board has no
+# "near Yerevan" to search: `remote_boards.scrape` ignores location,
+# country and work_modes entirely, so a local lane would send the
+# identical payload and get back the same rows again — a second billed
+# run for no new data, not merely noise.
+_WORLDWIDE_ONLY = ("Remote boards",)
+
+# The mirror image: sources with no meaningful worldwide lane. kaix is
+# country-scoped by construction — Indeed has no "Worldwide" board, only
+# a per-country one — so a worldwide lane could only ever send the
+# profile's own location, which is precisely what the local lane sends.
+# The two payloads came out byte-identical (same keyword, location,
+# country and fromDays, since `_remote_filter` returns "" for both
+# {remote, hybrid} and {remote, hybrid, onsite}), so every run paid Apify
+# twice per title for one question and counted the rows twice.
+#
+# Nothing is lost by dropping it. For a user in the US the local lane IS
+# the US board; for a user outside it, that board measured zero roles
+# open to them across 800. Worldwide reach comes from the LinkedIn mode
+# lanes and the remote boards, which are the sources that carry it.
+_LOCAL_ONLY = ("Indeed",)
+
+# The only modes a keyword lane can express. On-site has no lane:
+# measured 1/3 precision, because postings advertise "remote" and
+# "hybrid" as selling points but rarely state on-site at all. It is
+# inferred by elimination and served by the local lane.
+LANE_MODES = ("remote", "hybrid")
+
+# A mode lane asks a worldwide question - "remote data analyst", not
+# "remote data analyst in Yerevan".
+_LANE_WORLDWIDE = "Worldwide"
 
 
 def search_titles(resumes: list[dict]) -> list[str]:
@@ -38,8 +85,8 @@ def search_titles(resumes: list[dict]) -> list[str]:
     return titles
 
 
-def plan_steps(titles: list[str], sources=SOURCES,
-               local: bool = False, probes: bool = False) -> list[dict]:
+def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
+               mode_lanes: tuple = ()) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
@@ -47,27 +94,42 @@ def plan_steps(titles: list[str], sources=SOURCES,
     with every work mode — it exists so target-country on-site/hybrid
     jobs arrive at all instead of by accident.
 
-    Probes are evidence-gathering searches, not candidate lanes: two extra
-    LinkedIn-only searches per role (hybrid, onsite), appended after the
-    real lanes. LinkedIn's search filter respects the workplace badge
-    server-side even though per-item output doesn't carry it, so a job's
-    presence in a filtered probe result is evidence of its badge. They run
-    only when LinkedIn survives `sources` — there is nothing to probe
-    otherwise.
+    Mode lanes are the LinkedIn-only mechanism for recovering workplace
+    type, which LinkedIn hides from logged-out clients and whose actor
+    ignores every filter parameter we tried, and the two broken
+    mechanisms failed differently. The `remote` argument left 9 of 23
+    job IDs in BOTH the hybrid-filtered and onsite-filtered result sets,
+    where a working filter yields zero overlap — a job has exactly one
+    workplace type. The `f_WT` URL parameter was worse: four different
+    values collapsed to two identical result lists, item for item
+    (`f_WT=3` ≡ `f_WT=2`, `f_WT=1` ≡ `f_WT=1,3`). Only the search
+    *words* reach LinkedIn's relevance matcher — searching "remote
+    <title>" versus "hybrid <title>" shared 0 of 23 job IDs. So a mode
+    lane is an extra LinkedIn search per (title, mode) with the mode
+    word prefixed onto the query — one step per title for each mode in
+    `mode_lanes` that is also in `LANE_MODES`. There is no on-site lane:
+    measured 1/3 precision, because postings advertise "remote" and
+    "hybrid" as selling points but rarely state on-site at all, so
+    on-site is inferred by elimination and served by the local lane
+    instead. A lane is relevance, not a filter — a posting that merely
+    mentions the word can land in the lane — so lane membership only
+    ever fills silence in `_apply_gates`, never overrides a mode stated
+    in the posting's own text.
     """
     lanes = ("worldwide",) + (("local",) if local else ())
     steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
             for title in titles
             for lane in lanes
-            for name, _, _ in sources]
-
-    if probes and any(name == "LinkedIn" for name, _, _ in sources):
-        for title in titles:
-            for lane in ("probe hybrid", "probe onsite"):
-                steps.append({"source": "LinkedIn", "role": title,
-                              "lane": lane, "state": "pending", "found": 0})
-
+            for name, _, _ in sources
+            if not (lane == "local" and name in _WORLDWIDE_ONLY)
+            and not (lane == "worldwide" and name in _LOCAL_ONLY)]
+    if any(name == "LinkedIn" for name, _, _ in sources):
+        steps += [{"source": "LinkedIn", "role": title,
+                   "lane": f"mode {mode}", "state": "pending", "found": 0}
+                  for title in titles
+                  for mode in mode_lanes
+                  if mode in LANE_MODES]
     return steps
 
 
@@ -80,167 +142,43 @@ class RunResult:
     scraped: int = 0
     kept: int = 0
     dropped: int = 0
+    offtopic: int = 0
     scored_jobs: list[dict] = field(default_factory=list)
     steps: list[dict] = field(default_factory=list)
     titles: list[str] = field(default_factory=list)
-    badge_hits: int = 0
 
 
 def _default_scrapers() -> dict:
-    from .scrapers import indeed, linkedin
-    return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape}
+    from .scrapers import indeed, linkedin, remote_boards
+    return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape,
+            "Remote boards": remote_boards.scrape}
 
 
-def execute(conn, user_id: int, run_id: int, config: dict,
-            resumes: list[dict], profile: dict,
-            on_progress=None, scrapers=None, enrich=None) -> RunResult:
-    """Scrape, dedupe, score and store one run.
+def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
+                 work_modes) -> tuple[list[dict], int, int]:
+    """Everything that decides whether a scraped job is worth scoring.
 
-    Args:
-        run_id:      an already-open RUNNING run. This never creates one.
-        on_progress: called with the whole progress payload after each step.
-        scrapers:    {source name: scrape callable}. Injected by tests.
-        enrich:      optional hook handed the jobs that survived the
-                     work-mode/geo policy ladder, before scoring, returning
-                     the jobs to score. The terminal path uses it for
-                     company enrichment; the browser run passes nothing.
+    Two independent gates, in order of cheapness. The relevance gate
+    asks whether this is the job at all, and rejects ~41% of what the
+    actors return. The work-mode/geo policy then asks whether this user
+    could take it, which needs the vocabulary and the profile country.
 
-    Raises:
-        ValueError: when there is no active resume, or none of them name a
-            target role. There is nothing to search for, and failing here is
-            clearer than a run that scrapes nothing and looks broken.
+    Returns (kept, offtopic_count, dropped_count). Both counts are
+    reported and persisted — nothing here disappears silently.
     """
-    import yaml
-
-    from .pipeline_store import persist_run
     from .scoring.matching import has_term, location_country, work_mode
-    from .scoring.scorer import Scorer
-    from .store.queries import known_listings
-    from .tracker.dedup import dedupe, normalize_url
+    from .scoring.relevance import is_target_role
 
-    if not resumes:
-        raise ValueError("no active resume on file, so there is nothing to "
-                         "search for")
-    titles = search_titles(resumes)
-    if not titles:
-        raise ValueError("your resumes name no target roles between them")
-
-    emit = on_progress or (lambda event: None)
-    scrapers = scrapers or _default_scrapers()
-
-    apify_cfg    = config.get("apify", {})
-    search_cfg   = config.get("search", {})
-    days_posted  = search_cfg.get("days_posted", 7)
-    jobs_per_cat = search_cfg.get("jobs_per_category", 50)
-    run_timeout  = search_cfg.get("run_timeout", 120)
-
-    location   = profile.get("location") or ""
-    country    = profile.get("country") or "us"
-    work_modes = profile.get("work_modes") or ["remote"]
-
-    # A source can be switched off in config.yaml (search.sources).
-    # Missing key means enabled, so existing configs keep working.
-    gates = (config.get("search", {}) or {}).get("sources") or {}
-    sources = tuple(entry for entry in SOURCES
-                    if gates.get(entry[0].lower(), True))
-    # Same convention for the probe lanes (search.probes). Missing key
-    # means enabled.
-    probes_on = bool((config.get("search", {}) or {}).get("probes", True))
-
-    steps = plan_steps(titles, sources=sources,
-                      local=bool((profile.get("location") or "").strip()),
-                      probes=probes_on)
-    scraped_total = 0
-    dropped_total = 0
-    probe_badges: dict[str, str] = {}
-
-    def report(stage: str) -> None:
-        emit({"stage": stage, "steps": [dict(s) for s in steps],
-             "scraped": scraped_total, "dropped": dropped_total})
-
-    # Announce the whole plan before doing any of it.
-    report("scraping")
-
-    all_scraped: list[dict] = []
-    for step in steps:
-        step["state"] = "running"
-        report("scraping")
-
-        name = step["source"]
-        actor_key, actor_default = next(
-            (key, default) for source, key, default in sources
-            if source == name)
-
-        if step["lane"].startswith("probe"):
-            probe_mode = step["lane"].split(" ", 1)[1]      # hybrid|onsite
-            try:
-                # allow_fallback=False: a probe asks a narrow, deliberate
-                # question (does this URL show up in a hybrid/onsite-
-                # filtered search?). The legacy Worldwide/remote retry
-                # answers a different one — genuinely remote jobs — and
-                # recording those under this probe's mode would fabricate
-                # badge evidence. An empty answer must stay empty.
-                found = scrapers[name](
-                    step["role"], step["role"],
-                    apify_cfg.get(actor_key, actor_default),
-                    days_posted, jobs_per_cat, run_timeout,
-                    location="", country=country,
-                    work_modes=(probe_mode,), allow_fallback=False)
-            except Exception as exc:
-                logger.warning("%s/%s failed: %s", name, step["role"], exc)
-                step["state"] = "failed"
-                step["found"] = 0
-            else:
-                step["state"] = "done"
-                step["found"] = len(found)
-                for job in found:
-                    url = normalize_url(job.get("url") or "")
-                    seen = probe_badges.get(url)
-                    if seen is None:
-                        probe_badges[url] = probe_mode
-                    elif seen and seen != probe_mode:
-                        # Both probes claimed the same URL under different
-                        # modes — disagreement claims nothing, the same
-                        # rule every other conflict follows.
-                        probe_badges[url] = ""
-            report("scraping")
-            continue
-
-        if step["lane"] == "local":
-            lane_location = (profile.get("location") or "").strip()
-            lane_modes = ("remote", "hybrid", "onsite")
-            # allow_fallback=False: a Yerevan search that comes back empty
-            # must not silently fall back to Worldwide/remote-us — that
-            # re-fetches the worldwide lane's own results under the local
-            # lane, double-counting `scraped` and defeating the point of
-            # having a local lane at all.
-            lane_kwargs = {"allow_fallback": False}
-        else:
-            lane_location = location
-            lane_modes = work_modes
-            lane_kwargs = {}
-        try:
-            jobs = scrapers[name](
-                step["role"], step["role"],
-                apify_cfg.get(actor_key, actor_default),
-                days_posted, jobs_per_cat, run_timeout,
-                location=lane_location, country=country,
-                work_modes=lane_modes, **lane_kwargs)
-        except Exception as exc:
-            # One source failing must not throw away the other's results.
-            logger.warning("%s/%s failed: %s", name, step["role"], exc)
-            step["state"] = "failed"
-            step["found"] = 0
-        else:
-            step["state"] = "done"
-            step["found"] = len(jobs)
-            all_scraped.extend(jobs)
-            scraped_total += len(jobs)
-        report("scraping")
-
-    known_urls, known_rows = known_listings(conn, user_id)
-    new_jobs = dedupe(all_scraped,
-                      existing_urls=known_urls, existing_rows=known_rows)
+    # Relevance gate. 41% of what these actors return is not a data role
+    # at all — Nurse Practitioner, Travel Advisor, Fleet Parking
+    # Specialist. The scorer rates them 1-4 and they were stored anyway.
+    # Rejecting here means an off-target role costs no enrichment lookup
+    # and no scoring pass. Counted, never silent.
+    role_cfg = vocab.get("roles") or {}
+    on_topic = [job for job in new_jobs
+               if is_target_role(job.get("title"), role_cfg)]
+    offtopic_total = len(new_jobs) - len(on_topic)
+    new_jobs = on_topic
 
     # Work-mode policy. The one user-approved exception to flag-never-
     # hide: a posting that states a mode the user did not search for,
@@ -250,8 +188,6 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     # unplaceable ones are flagged, because a silent drop cannot be
     # justified without knowing where the job is. Runs before `enrich`
     # so a dropped job never costs a company-enrichment lookup.
-    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
-        vocab = yaml.safe_load(handle)
     mode_cfg = vocab.get("work_mode") or {}
     loc_cfg = vocab.get("eligibility") or {}
     # Same fallback the scrape itself uses (see `work_modes` above) — an
@@ -262,28 +198,38 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     user_country = (profile.get("country") or "").strip().lower()
     profile_city = (profile.get("location") or "").split(",")[0].strip().lower()
 
-    badge_hits = 0
+    dropped_total = 0
     kept_jobs = []
     for job in new_jobs:
-        text_mode = work_mode(f"{job.get('title') or ''}\n"
-                              f"{job.get('description') or ''}", mode_cfg)
-        # A "" entry means the two probes claimed this URL under different
-        # modes — contested membership, already silence — `or None`
-        # collapses it the same as no badge at all.
-        badge = probe_badges.get(normalize_url(job.get("url") or "")) or None
-        if text_mode and badge and text_mode != badge:
-            # LinkedIn badges mislabel ~19% of the time (our own
-            # measurement) and text can lie too — disagreement claims
-            # nothing, the same rule every other conflict follows.
-            mode = None
-        elif badge and not text_mode:
-            # badge_hits counts only this: how often the badge told us
-            # something the text did not. Agreement is not a "hit" — the
-            # text already said it.
-            mode = badge
-            badge_hits += 1
+        # A publisher-stated field outranks everything and overrides
+        # outright. Below that there is no second-strongest: text and
+        # lane corroborate each other when they agree, nullify each
+        # other when they conflict (see the branch below), and either
+        # one alone fills the other's silence. Popping `_lane_mode`
+        # happens unconditionally either way - it is transient
+        # regardless of whether it ends up used.
+        stated_mode = job.get("work_mode")
+        lane_mode = job.pop("_lane_mode", None)
+        if stated_mode:
+            # The employer said so, in a structured field, on the job
+            # board itself (kaix's workArrangement.locationType). That
+            # beats both a phrase the scorer inferred from prose and a
+            # LinkedIn lane, which is relevance rather than a filter -
+            # neither gets a vote once the posting has already answered.
+            mode = stated_mode
         else:
-            mode = text_mode
+            text_mode = work_mode(f"{job.get('title') or ''}\n"
+                                  f"{job.get('description') or ''}", mode_cfg)
+            if text_mode and lane_mode and text_mode != lane_mode:
+                # A lane is LinkedIn matching words, not a filter - a
+                # posting that merely mentions "remote" lands in the
+                # remote lane. Disagreement claims nothing, as every
+                # other conflict does.
+                mode = None
+            elif lane_mode and not text_mode:
+                mode = lane_mode
+            else:
+                mode = text_mode
         if mode:
             job["work_mode"] = mode
 
@@ -324,6 +270,152 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         kept_jobs.append(job)
     new_jobs = kept_jobs
 
+    return new_jobs, offtopic_total, dropped_total
+
+
+def execute(conn, user_id: int, run_id: int, config: dict,
+            resumes: list[dict], profile: dict,
+            on_progress=None, scrapers=None, enrich=None) -> RunResult:
+    """Scrape, dedupe, score and store one run.
+
+    Args:
+        run_id:      an already-open RUNNING run. This never creates one.
+        on_progress: called with the whole progress payload after each step.
+        scrapers:    {source name: scrape callable}. Injected by tests.
+        enrich:      optional hook handed the jobs that survived the
+                     work-mode/geo policy ladder, before scoring, returning
+                     the jobs to score. The terminal path uses it for
+                     company enrichment; the browser run passes nothing.
+
+    Raises:
+        ValueError: when there is no active resume, or none of them name a
+            target role. There is nothing to search for, and failing here is
+            clearer than a run that scrapes nothing and looks broken.
+    """
+    import yaml
+
+    from .pipeline_store import persist_run
+    from .scoring.scorer import Scorer
+    from .store.queries import known_listings
+    from .tracker.dedup import dedupe
+
+    if not resumes:
+        raise ValueError("no active resume on file, so there is nothing to "
+                         "search for")
+    titles = search_titles(resumes)
+    if not titles:
+        raise ValueError("your resumes name no target roles between them")
+
+    emit = on_progress or (lambda event: None)
+    scrapers = scrapers or _default_scrapers()
+
+    apify_cfg    = config.get("apify", {})
+    search_cfg   = config.get("search", {})
+    days_posted  = search_cfg.get("days_posted", 7)
+    jobs_per_cat = search_cfg.get("jobs_per_category", 50)
+    run_timeout  = search_cfg.get("run_timeout", 120)
+
+    location   = profile.get("location") or ""
+    country    = profile.get("country") or "us"
+    work_modes = profile.get("work_modes") or ["remote"]
+
+    # A source can be switched off in config.yaml (search.sources), keyed
+    # by _gate_key's snake_case stem (or the legacy single-word spelling).
+    # Missing key means enabled, so existing configs keep working.
+    gates = (config.get("search", {}) or {}).get("sources") or {}
+    sources = tuple(
+        entry for entry in SOURCES
+        if gates.get(_gate_key(entry[1]), gates.get(entry[0].lower(), True)))
+
+    mode_lanes = tuple(m for m in
+                       (str(x).strip().lower() for x in work_modes)
+                       if m in LANE_MODES)
+    steps = plan_steps(titles, sources=sources,
+                      local=bool((profile.get("location") or "").strip()),
+                      mode_lanes=mode_lanes)
+    scraped_total = 0
+    dropped_total = 0
+    offtopic_total = 0
+
+    def report(stage: str) -> None:
+        emit({"stage": stage, "steps": [dict(s) for s in steps],
+             "scraped": scraped_total, "dropped": dropped_total,
+             "offtopic": offtopic_total})
+
+    # Announce the whole plan before doing any of it.
+    report("scraping")
+
+    all_scraped: list[dict] = []
+    for step in steps:
+        step["state"] = "running"
+        report("scraping")
+
+        name = step["source"]
+        actor_key, actor_default = next(
+            (key, default) for source, key, default in sources
+            if source == name)
+
+        lane_title = step["role"]
+        if step["lane"].startswith("mode "):
+            lane_mode = step["lane"].split(" ", 1)[1]
+            lane_title = f"{lane_mode} {step['role']}"
+            lane_location = _LANE_WORLDWIDE
+            lane_modes = (lane_mode,)
+            lane_kwargs = {"allow_fallback": False}
+        elif step["lane"] == "local":
+            lane_location = (profile.get("location") or "").strip()
+            lane_modes = ("remote", "hybrid", "onsite")
+            # allow_fallback=False: a Yerevan search that comes back empty
+            # must not silently fall back to Worldwide/remote-us — that
+            # re-fetches the worldwide lane's own results under the local
+            # lane, double-counting `scraped` and defeating the point of
+            # having a local lane at all.
+            lane_kwargs = {"allow_fallback": False}
+        else:
+            # Worldwide means worldwide. Passing the profile's location
+            # here made this lane's payload identical to the local lane's
+            # — LinkedIn stopped reading work_modes when `_filters_for`
+            # went, so the two differed in nothing at all.
+            lane_location = _LANE_WORLDWIDE
+            lane_modes = work_modes
+            lane_kwargs = {}
+        try:
+            jobs = scrapers[name](
+                step["role"], lane_title,
+                apify_cfg.get(actor_key, actor_default),
+                days_posted, jobs_per_cat, run_timeout,
+                location=lane_location, country=country,
+                work_modes=lane_modes, **lane_kwargs)
+        except Exception as exc:
+            # One source failing must not throw away the other's results.
+            logger.warning("%s/%s failed: %s", name, step["role"], exc)
+            step["state"] = "failed"
+            step["found"] = 0
+        else:
+            step["state"] = "done"
+            step["found"] = len(jobs)
+            if step["lane"].startswith("mode "):
+                for job in jobs:
+                    # Transient. Popped in _apply_gates, never stored.
+                    job["_lane_mode"] = step["lane"].split(" ", 1)[1]
+            all_scraped.extend(jobs)
+            scraped_total += len(jobs)
+        report("scraping")
+
+    known_urls, known_rows = known_listings(conn, user_id)
+    new_jobs = dedupe(all_scraped,
+                      existing_urls=known_urls, existing_rows=known_rows)
+
+    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
+        vocab = yaml.safe_load(handle)
+
+    new_jobs, offtopic_total, dropped_total = _apply_gates(
+        new_jobs, vocab, profile, work_modes)
+
+    # `user_modes` is also needed below, for the Scorer.
+    user_modes = tuple(str(m).strip().lower()
+                       for m in work_modes if str(m).strip())
+
     if enrich is not None:
         new_jobs = enrich(new_jobs)
 
@@ -349,9 +441,8 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
-               dropped=dropped_total)
+               dropped=dropped_total, offtopic=offtopic_total)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
-                     dropped=dropped_total,
-                     scored_jobs=scored_jobs, steps=steps, titles=titles,
-                     badge_hits=badge_hits)
+                     dropped=dropped_total, offtopic=offtopic_total,
+                     scored_jobs=scored_jobs, steps=steps, titles=titles)

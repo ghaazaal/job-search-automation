@@ -220,6 +220,27 @@ def test_no_hidden_word_appears_when_nothing_was_dropped():
                                             "hidden": 0})
 
 
+# ── Off-topic (relevance gate) count ──────────────────────────────────────────
+
+def test_offtopic_titles_are_announced_in_the_meta_line():
+    html = render([], meta={"companies": 0, "roles": 0, "offtopic": 5})
+    assert "5 OFF-TOPIC (NOT A TARGET ROLE)" in html
+
+
+def test_no_offtopic_word_appears_when_nothing_was_rejected():
+    assert "OFF-TOPIC" not in render([], meta={"companies": 0, "roles": 0,
+                                               "offtopic": 0})
+
+
+def test_hidden_and_offtopic_read_as_distinct_clauses():
+    """Wrong place and not-this-job-at-all are different facts — both must
+    appear, neither swallowing the other's count or wording."""
+    html = render([], meta={"companies": 0, "roles": 0,
+                            "hidden": 3, "offtopic": 5})
+    assert "3 HIDDEN (ON-SITE ELSEWHERE)" in html
+    assert "5 OFF-TOPIC (NOT A TARGET ROLE)" in html
+
+
 # ── Work mode leads the meta line ─────────────────────────────────────────────
 
 def test_the_role_meta_leads_with_the_work_mode():
