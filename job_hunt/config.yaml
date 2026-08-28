@@ -5,7 +5,13 @@
 # This file is safe to commit. Add to .gitignore: output/, *.db, .env
 
 search:
-  days_posted: 7
+  # 30, not 7. Measured: the same search over a 7-day window reached 4 of
+  # the aggregator's 10 boards and found 0 roles open to an Armenian user;
+  # over 30 days it reached 9 and found 7. We Work Remotely, RemoteOK,
+  # Working Nomads, Hacker News and DevITjobs US were not empty - they post
+  # infrequently enough that a week hid them entirely. The narrow window,
+  # not the source list, was the binding constraint.
+  days_posted: 30
   jobs_per_category: 50
   run_timeout: 120
 
