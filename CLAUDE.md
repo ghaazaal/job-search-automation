@@ -61,12 +61,15 @@ the authority, including their correction notes and accepted residuals):
   1. A posting stating a work mode the user did not search for, in a
      confidently-parsed foreign country, is dropped — stated as
      "N HIDDEN (ON-SITE ELSEWHERE)".
-  2. The map lists only roles whose published reach proves them open to
-     the user. Everything else is counted in the header as NOT OPEN or
-     UNVERIFIED. Run 6 measured why: of 384 stored roles 2 were provably
-     open, and rendering all 384 told the reader there were 384 worth
-     opening. Unverified is neither eligible nor ineligible — it is every
-     LinkedIn row, whose location is a place, not a reach statement.
+  2. The map hides roles a posting's own words rule out, counted in the
+     header as NOT OPEN. It does NOT hide the unverified: those were never
+     judged rather than judged and rejected, so they are listed, ranked
+     below proven-open ones, and say so on the card. Ship 8 hid them too
+     and that was wrong — it buried 1055 LinkedIn roles the user could see
+     on LinkedIn itself behind a bare number.
+  Roles first seen before the relevance gate existed (runs 1-4) are
+  soft-dropped via `role.dropped_at` — excluded from map and counts, never
+  DELETEd, and never dropped if the user has an application row for them.
 - LinkedIn's workplace badge is guest-invisible. Ship 7 deleted the probe
   mechanism (it never filtered anything) and replaced it with keyword mode
   lanes; Ship 8 dropped LinkedIn's plain worldwide lane, since the mode

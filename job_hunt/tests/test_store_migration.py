@@ -259,5 +259,15 @@ def test_migration_v8_adds_the_boards_column(tmp_path):
     init_db(conn)
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(run)")}
     assert "boards" in cols
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    conn.close()
+
+
+def test_migration_v9_adds_the_dropped_at_column(tmp_path):
+    """Soft drop, never DELETE - a wrong cleanup rule has to be
+    recoverable as a column change, not a restore from backup."""
+    conn = connect(tmp_path / "v9.db")
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(role)")}
+    assert "dropped_at" in cols
     conn.close()
