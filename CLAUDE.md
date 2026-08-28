@@ -58,9 +58,16 @@ the authority, including their correction notes and accepted residuals):
   word-bounded and phrase-only; conflicting evidence claims nothing.
 - Flag-never-hide, with TWO user-approved exceptions. Both are counted
   and both are stated on the map — hidden, never silent:
-  1. A posting stating a work mode the user did not search for, in a
-     confidently-parsed foreign country, is dropped — stated as
-     "N HIDDEN (ON-SITE ELSEWHERE)".
+  1. A posting the user cannot physically attend, in a confidently-parsed
+     foreign country, is dropped — stated as "N HIDDEN (ON-SITE
+     ELSEWHERE)". Two ways to qualify: the posting states a mode the user
+     did not search for, OR it states hybrid/on-site, which require being
+     there whatever the user ticked. Ticking "hybrid" means hybrid NEAR
+     ME; reading it as hybrid-anywhere put 211 of 594 listed roles on the
+     live map that the user could not attend — hybrid posts in London,
+     Bengaluru and Sydney. Remote is exempt: being elsewhere is the point,
+     and reach evidence decides it, not geography. An unparseable location
+     still claims nothing and is flagged, not dropped.
   2. The map hides roles a posting's own words rule out, counted in the
      header as NOT OPEN. It does NOT hide the unverified: those were never
      judged rather than judged and rejected, so they are listed, ranked

@@ -903,3 +903,47 @@ def test_a_silent_body_leaves_the_boards_tag_standing():
              "description": "we build data pipelines with dbt and airflow."}]
     _apply_scope(jobs, vocab, {"country": "am"})
     assert jobs[0]["location_scope"] == "open"
+
+
+# --- presence-required modes need presence -----------------------------
+#
+# Ticking "hybrid" means hybrid NEAR ME. It never meant hybrid anywhere.
+# On the live map 211 of 594 listed roles were hybrid or on-site in a
+# confidently-parsed foreign country - jobs the user cannot be present for.
+
+def _gates(jobs, profile, work_modes):
+    return _apply_gates(jobs, _GATE_VOCAB, profile, work_modes)
+
+
+def test_a_hybrid_role_abroad_is_dropped_even_when_hybrid_was_ticked(conn):
+    profile = {"location": "Yerevan, Armenia", "country": "am"}
+    job = {**_job("https://x/h1"), "location": "Bengaluru, Karnataka, India",
+           "description": "hybrid work, three days in the office."}
+    kept, offtopic, dropped = _gates([job], profile, ["remote", "hybrid"])
+    assert kept == [] and dropped == 1
+
+
+def test_a_hybrid_role_at_home_is_kept(conn):
+    profile = {"location": "Yerevan, Armenia", "country": "am"}
+    job = {**_job("https://x/h2"), "location": "Yerevan, Armenia",
+           "description": "hybrid work, three days in the office."}
+    kept, offtopic, dropped = _gates([job], profile, ["remote", "hybrid"])
+    assert len(kept) == 1 and dropped == 0
+
+
+def test_a_hybrid_role_of_unknown_place_is_flagged_not_dropped(conn):
+    """Silence about location still claims nothing."""
+    profile = {"location": "Yerevan, Armenia", "country": "am"}
+    job = {**_job("https://x/h3"), "location": "Remote-ish",
+           "description": "hybrid work, three days in the office."}
+    kept, offtopic, dropped = _gates([job], profile, ["remote", "hybrid"])
+    assert len(kept) == 1 and dropped == 0
+
+
+def test_a_remote_role_abroad_is_untouched_by_the_presence_rule(conn):
+    """Remote is the whole point; eligibility decides it, not geography."""
+    profile = {"location": "Yerevan, Armenia", "country": "am"}
+    job = {**_job("https://x/r1"), "location": "Bengaluru, Karnataka, India",
+           "description": "this role is fully remote."}
+    kept, offtopic, dropped = _gates([job], profile, ["remote", "hybrid"])
+    assert len(kept) == 1 and dropped == 0
