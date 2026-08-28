@@ -349,3 +349,49 @@ def test_one_qualified_mention_does_not_mute_an_unqualified_one():
     body = ("work from anywhere in the world for up to 4 weeks per year. "
             "this role is remote: work from anywhere in the world.")
     assert geo_verdict(body, "am", _ELIGIBLE_CFG) == ("eligible", None)
+
+
+# --- rule 6d: the employer's own words about where they hire -----------
+#
+# Both bodies below are verbatim from live rows that We Work Remotely
+# tagged "Anywhere in the World". The tag is the board's categorisation;
+# these sentences are the employer's.
+
+def test_a_us_only_remote_role_is_restricted():
+    """Doximity, via We Work Remotely, tagged Anywhere in the World."""
+    body = ("headquarters: san francisco, ca or remote (u.s.) doximity is "
+            "transforming the healthcare industry.")
+    assert geo_verdict(body, "am", _real_eligibility_cfg())[0] == "restricted"
+
+
+def test_remotely_in_a_named_country_is_restricted():
+    """The same posting, said the other way further down."""
+    body = ("this role can be filled in our san francisco headquarters or "
+            "remotely in the u.s. how you will make an impact")
+    assert geo_verdict(body, "am", _real_eligibility_cfg())[0] == "restricted"
+
+
+def test_a_list_of_us_states_is_a_us_only_role():
+    """Faire, via We Work Remotely, tagged Anywhere in the World.
+
+    No country is named at all - the restriction is expressed purely as a
+    list of states, which is a US-only role by construction.
+
+    Deliberately omits Georgia, which is a country name as well as a
+    state - with it in the list the old code "passed" by resolving the
+    country Georgia and telling the user the role was open only to
+    Georgia, which is both wrong and confusing.
+    """
+    body = ("note: this is a remote role open to candidates located in "
+            "arizona, california, colorado, connecticut, florida, "
+            "illinois, ohio, texas, washington")
+    verdict, detail = geo_verdict(body, "am", _real_eligibility_cfg())
+    assert verdict in ("restricted", "excluded")
+    assert "Georgia" not in (detail or "")
+
+
+def test_a_single_state_name_is_not_a_us_only_role():
+    """'Georgia' is a country as well as a state, and one place name is
+    not an enumeration. Silence beats a wrong exclusion."""
+    body = "our team is distributed; we have an office in georgia."
+    assert geo_verdict(body, "am", _real_eligibility_cfg())[0] == "unknown"

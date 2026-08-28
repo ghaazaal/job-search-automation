@@ -76,6 +76,14 @@ the authority, including their correction notes and accepted residuals):
 - Eligibility evidence comes from a published reach field, not from prose.
   Measured over 384 live roles: prose mining found 0 real matches and
   manufactured 3; the reach field found 2 and manufactured none.
+- But a board's reach TAG is not the employer's word, and loses to the
+  posting's own text. We Work Remotely tagged a US-only Doximity role
+  "Anywhere in the World"; Faire the same, while enumerating the eleven US
+  states it would hire in. A restriction in the description overrides the
+  field; a silent description leaves the field standing, because most
+  postings are silent and the field is then all there is. This is NOT the
+  usual conflict-claims-nothing rule — the two sources are not of equal
+  standing.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name

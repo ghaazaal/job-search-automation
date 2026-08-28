@@ -861,3 +861,40 @@ def test_the_run_row_records_which_boards_returned_rows(conn, user, resume):
             scrapers=_scrapers(remote_boards_jobs=rows))
 
     assert get_run(conn, run_id)["boards"] == ["himalayas", "jobicy"]
+
+
+def test_the_employers_words_beat_the_boards_tag():
+    """We Work Remotely tagged a US-only Doximity role "Anywhere in the
+    World". The tag is the board's categorisation of the posting; the
+    posting's own sentences are the employer's, and they win."""
+    from src.run_core import _apply_scope
+
+    vocab = {
+        "location_scope": {"worldwide": ["anywhere in the world"]},
+        "eligibility": {"countries": {"am": ["armenia"],
+                                      "us": ["us", "u.s.", "united states"]},
+                        "ambiguous_names": ["us"],
+                        "templates": ["remote ({country})"],
+                        "regions": []},
+    }
+    jobs = [{"title": "Data Analyst", "source_board": "weworkremotely",
+             "location": "Anywhere in the World",
+             "description": "headquarters: san francisco, ca or remote (u.s.)"}]
+    _apply_scope(jobs, vocab, {"country": "am"})
+    assert jobs[0]["location_scope"] == "closed"
+
+
+def test_a_silent_body_leaves_the_boards_tag_standing():
+    """Most postings say nothing about reach. The field is then the only
+    evidence there is, and it still counts."""
+    from src.run_core import _apply_scope
+
+    vocab = {
+        "location_scope": {"worldwide": ["anywhere in the world"]},
+        "eligibility": {"countries": {"am": ["armenia"]}, "regions": []},
+    }
+    jobs = [{"title": "Data Analyst", "source_board": "weworkremotely",
+             "location": "Anywhere in the World",
+             "description": "we build data pipelines with dbt and airflow."}]
+    _apply_scope(jobs, vocab, {"country": "am"})
+    assert jobs[0]["location_scope"] == "open"
