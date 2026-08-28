@@ -55,6 +55,12 @@ _WORLDWIDE_ONLY = ("Remote boards",)
 # work — which is the whole question this product asks.
 _LOCAL_ONLY = ("LinkedIn",)
 
+# Modes that require the person to be physically there. A hybrid or
+# on-site role is workable only where its office is, which is why
+# `local_ok` and not the user's mode selection decides whether it can be
+# taken. Remote is absent on purpose: being elsewhere is the point.
+_PRESENCE_MODES = ("hybrid", "onsite")
+
 # The only modes a keyword lane can express. On-site has no lane:
 # measured 1/3 precision, because postings advertise "remote" and
 # "hybrid" as selling points but rarely state on-site at all. It is
@@ -250,7 +256,22 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
             # popped before scoring, handed to the scorer explicitly.
             job["_local_ok"] = True
 
-        if mode and user_modes and mode not in user_modes:
+        # A mode the user did not ask for, OR a mode that requires being
+        # somewhere they are not.
+        #
+        # Ticking "hybrid" means hybrid NEAR ME. It never meant hybrid
+        # anywhere, and reading it that way put 211 of 594 listed roles on
+        # the live map that the user cannot physically attend — hybrid and
+        # on-site posts in London, Bengaluru, Sydney. The old test asked
+        # only whether the mode was one the user ticked, so a hybrid role
+        # abroad sailed through for a user who had ticked hybrid.
+        #
+        # Remote is deliberately not in this set: being elsewhere is the
+        # entire point of it, and its eligibility is decided by reach
+        # evidence rather than by geography.
+        unwanted = bool(mode and user_modes and mode not in user_modes)
+        cannot_attend = mode in _PRESENCE_MODES and not local_ok
+        if unwanted or cannot_attend:
             if has_term("remote", raw_location):
                 # The location field carrying "remote" anywhere is the
                 # actor's own tag on where the job is — it beats a stray
