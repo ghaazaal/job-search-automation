@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 # (display name, config key for the actor id, default actor id)
 SOURCES = (
-    ("Indeed",        "indeed_actor",        "kaix~indeed-scraper"),
     ("LinkedIn",      "linkedin_actor",      "valig~linkedin-jobs-scraper"),
     ("Remote boards", "remote_boards_actor",
      "flash_scraper~remote-job-aggregator"),
@@ -41,20 +40,20 @@ def _gate_key(config_key: str) -> str:
 # run for no new data, not merely noise.
 _WORLDWIDE_ONLY = ("Remote boards",)
 
-# The mirror image: sources with no meaningful worldwide lane. kaix is
-# country-scoped by construction — Indeed has no "Worldwide" board, only
-# a per-country one — so a worldwide lane could only ever send the
-# profile's own location, which is precisely what the local lane sends.
-# The two payloads came out byte-identical (same keyword, location,
-# country and fromDays, since `_remote_filter` returns "" for both
-# {remote, hybrid} and {remote, hybrid, onsite}), so every run paid Apify
-# twice per title for one question and counted the rows twice.
+# Sources with no plain worldwide lane.
 #
-# Nothing is lost by dropping it. For a user in the US the local lane IS
-# the US board; for a user outside it, that board measured zero roles
-# open to them across 800. Worldwide reach comes from the LinkedIn mode
-# lanes and the remote boards, which are the sources that carry it.
-_LOCAL_ONLY = ("Indeed",)
+# This was Indeed, which is gone. It is now LinkedIn, for a different
+# reason: its plain worldwide lane asks the same question the mode lanes
+# ask, and asks it worse. Measured lane precision was remote 5/5 and
+# hybrid 3/4 against an unfiltered lane that returns whatever LinkedIn's
+# relevance matcher likes; run 6 spent 4 of 24 steps on it and the roles
+# it added were indistinguishable from the mode lanes' own.
+#
+# The LOCAL lane stays, and is not affected by this constant. It found 63
+# roles in the user's own country in run 6, and for a user in a small
+# country a hybrid role in their own city is a role they can actually
+# work — which is the whole question this product asks.
+_LOCAL_ONLY = ("LinkedIn",)
 
 # The only modes a keyword lane can express. On-site has no lane:
 # measured 1/3 precision, because postings advertise "remote" and
@@ -86,7 +85,7 @@ def search_titles(resumes: list[dict]) -> list[str]:
 
 
 def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
-               mode_lanes: tuple = ()) -> list[dict]:
+               mode_lanes: tuple = (), wants_remote: bool = True) -> list[dict]:
     """The whole scrape, listed before any of it runs.
 
     Grouped by role, worldwide lane before local, which is the order they
@@ -116,6 +115,14 @@ def plan_steps(titles: list[str], sources=SOURCES, local: bool = False,
     ever fills silence in `_apply_gates`, never overrides a mode stated
     in the posting's own text.
     """
+    # The remote boards carry nothing but remote work — `remote_boards.
+    # scrape` stamps every row "remote" because that is what those boards
+    # are. A user who did not tick remote would have every row dropped or
+    # flagged by the work-mode policy, after paying for the slowest source
+    # in the run (a 420-second floor against LinkedIn's 20 seconds).
+    if not wants_remote:
+        sources = tuple(s for s in sources if s[0] not in _WORLDWIDE_ONLY)
+
     lanes = ("worldwide",) + (("local",) if local else ())
     steps = [{"source": name, "role": title, "lane": lane,
              "state": "pending", "found": 0}
@@ -149,8 +156,8 @@ class RunResult:
 
 
 def _default_scrapers() -> dict:
-    from .scrapers import indeed, linkedin, remote_boards
-    return {"Indeed": indeed.scrape, "LinkedIn": linkedin.scrape,
+    from .scrapers import linkedin, remote_boards
+    return {"LinkedIn": linkedin.scrape,
             "Remote boards": remote_boards.scrape}
 
 
@@ -273,6 +280,40 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     return new_jobs, offtopic_total, dropped_total
 
 
+def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
+    """Judge each remote-board row's published reach, in place.
+
+    Remote boards state who they will hire as a FIELD, because being
+    borderless is their product. Run 6 measured what that is worth: across
+    384 roles, mining prose for eligibility found nothing and manufactured
+    three claims, while reading this field found two and manufactured
+    none. It is the only mechanism in this product that has ever proved a
+    role open to a user outside the big markets.
+
+    Board rows only. A LinkedIn `location` is a place, not a reach
+    statement — feeding it to a reach parser would manufacture exactly the
+    fake evidence rule 6a exists to stop. Rows without a `source_board`
+    are left untouched, and an untouched row stores NULL, which the map
+    reads as unverified rather than as closed.
+
+    Lives here rather than in `store/ingest.py`, which the spec suggested:
+    ingest is a pure writer with neither the vocabulary nor the user's
+    profile, and giving it both so it can fill one column would be a worse
+    trade than this. `run_core` holds both already and annotates jobs in
+    exactly this way (`_local_ok`, `_mode_mismatch`).
+    """
+    from .scoring.location_scope import scope_verdict
+
+    country = (profile.get("country") or "").strip().lower()
+    scope_cfg = vocab.get("location_scope") or {}
+    geo_cfg = vocab.get("eligibility") or {}
+    for job in jobs:
+        if not job.get("source_board"):
+            continue
+        job["location_scope"] = scope_verdict(
+            job.get("location") or "", country, scope_cfg, geo_cfg)
+
+
 def execute(conn, user_id: int, run_id: int, config: dict,
             resumes: list[dict], profile: dict,
             on_progress=None, scrapers=None, enrich=None) -> RunResult:
@@ -332,7 +373,9 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                        if m in LANE_MODES)
     steps = plan_steps(titles, sources=sources,
                       local=bool((profile.get("location") or "").strip()),
-                      mode_lanes=mode_lanes)
+                      mode_lanes=mode_lanes,
+                      wants_remote="remote" in {str(m).strip().lower()
+                                                for m in work_modes})
     scraped_total = 0
     dropped_total = 0
     offtopic_total = 0
@@ -402,6 +445,12 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             scraped_total += len(jobs)
         report("scraping")
 
+    # The aggregator advertises ten boards and returned four in run 6.
+    # Recorded per run so a board going quiet is visible; the row count is
+    # not the signal, because 133 rows arrived from those four.
+    boards_seen = sorted({str(job["source_board"]) for job in all_scraped
+                          if job.get("source_board")})
+
     known_urls, known_rows = known_listings(conn, user_id)
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
@@ -411,6 +460,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     new_jobs, offtopic_total, dropped_total = _apply_gates(
         new_jobs, vocab, profile, work_modes)
+    _apply_scope(new_jobs, vocab, profile)
 
     # `user_modes` is also needed below, for the Scorer.
     user_modes = tuple(str(m).strip().lower()
@@ -425,23 +475,19 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                     user_modes=user_modes)
     scored_jobs = []
     for job in new_jobs:
-        # Set by the Indeed scraper when its us-board fallback fired.
-        # Popped — not read — so the transient key can never reach
-        # persist_run, the store, or the terminal path's later steps.
-        scraped_under = job.pop("_scraped_under", None)
         mode_mismatch = job.pop("_mode_mismatch", None)
         local_ok = job.pop("_local_ok", False)
         scored_jobs.append(
             {**job, **scorer.best_match(job["title"],
                                         job.get("description", ""),
                                         resumes,
-                                        scraped_under=scraped_under,
                                         mode_mismatch=mode_mismatch,
                                         local_evidence=local_ok)})
 
     report("storing")
     persist_run(conn, user_id, run_id, scored_jobs, scraped_total,
-               dropped=dropped_total, offtopic=offtopic_total)
+               dropped=dropped_total, offtopic=offtopic_total,
+               boards=boards_seen)
 
     return RunResult(scraped=scraped_total, kept=len(scored_jobs),
                      dropped=dropped_total, offtopic=offtopic_total,

@@ -97,7 +97,9 @@ def test_the_eligibility_section_holds_market_facts():
 def test_the_geo_penalties_are_configured():
     penalties = _vocabulary()["penalties"]
     assert penalties["geo_restricted"] == penalties["clearance"]
-    assert penalties["wrong_board"] < penalties["geo_restricted"]
+    # `wrong_board` is deliberately absent: it scored Indeed's us-board
+    # fallback, and Ship 8 removed both.
+    assert "wrong_board" not in penalties
 
 
 def test_the_work_mode_section_holds_role_anchored_phrases():

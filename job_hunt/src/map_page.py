@@ -412,10 +412,23 @@ def render(maps: list[dict], meta: dict | None = None,
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
     scraped = meta.get("scraped") or datetime.now().strftime("%H:%M")
 
-    # The one policy exception that silently removes postings still has to
-    # say so somewhere the reader will see it — not just the run row.
-    hidden = meta.get("hidden") or 0
+    # Hiding is never silent. The map lists only roles proven open to this
+    # user — a deliberate, user-approved narrowing of flag-never-hide — so
+    # the header carries the full account of what was set aside and why.
+    # Run 6's honest split was 2 open, 66 not open, 316 unverified;
+    # rendering all 384 told the reader there were 384 worth opening.
+    #
+    # Unconditional, unlike the clauses below: "0 OPEN" is the answer when
+    # it is the answer, and suppressing it would make an empty map read as
+    # broken rather than as checked.
     meta_2 = f"SCRAPED {_e(scraped)}"
+    meta_2 = f"{meta_2} &middot; {meta.get('open') or 0} OPEN"
+    meta_2 = f"{meta_2} &middot; {meta.get('closed') or 0} NOT OPEN"
+    meta_2 = f"{meta_2} &middot; {meta.get('unverified') or 0} UNVERIFIED"
+
+    # The other policy exception that removes postings still has to say so
+    # somewhere the reader will see it — not just the run row.
+    hidden = meta.get("hidden") or 0
     if hidden:
         meta_2 = f"{meta_2} &middot; {hidden} HIDDEN (ON-SITE ELSEWHERE)"
 

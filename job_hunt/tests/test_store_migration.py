@@ -250,3 +250,14 @@ def test_location_scope_rejects_values_outside_the_verdict_set(tmp_path):
     init_db(conn)
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE role SET location_scope = 'sideways'")
+
+
+def test_migration_v8_adds_the_boards_column(tmp_path):
+    """The aggregator advertises ten boards and returned four in run 6.
+    Which ones is now a fact the run row carries."""
+    conn = connect(tmp_path / "v8.db")
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(run)")}
+    assert "boards" in cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    conn.close()

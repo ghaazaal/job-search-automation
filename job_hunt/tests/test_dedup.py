@@ -122,3 +122,33 @@ def test_duplicate_with_description_wins():
 
 def test_jobs_without_urls_are_dropped():
     assert dedupe([_job(url="")]) == []
+
+
+def test_a_collapse_keeps_the_challengers_lane_evidence():
+    """The mode lanes run last, so their copy is always the challenger.
+
+    Lane membership is the only work-mode evidence a silent posting has,
+    and dropping the challenger wholesale threw it away for exactly the
+    postings the lane exists to serve.
+    """
+    incumbent = {"url": "https://x/1", "company": "Acme",
+                 "title": "Data Analyst", "description": "body"}
+    challenger = {"url": "https://x/1?src=lane", "company": "Acme",
+                  "title": "Data Analyst", "description": "body",
+                  "_lane_mode": "remote"}
+
+    kept = dedupe([incumbent, challenger])
+
+    assert len(kept) == 1
+    assert kept[0]["_lane_mode"] == "remote"
+
+
+def test_a_collapse_does_not_invent_lane_evidence():
+    incumbent = {"url": "https://x/2", "company": "Acme",
+                 "title": "Data Engineer", "description": "body"}
+    challenger = {"url": "https://x/2?src=other", "company": "Acme",
+                  "title": "Data Engineer", "description": "body"}
+
+    kept = dedupe([incumbent, challenger])
+
+    assert "_lane_mode" not in kept[0]

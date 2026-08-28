@@ -90,6 +90,7 @@ SELECT r.* FROM role r
  WHERE r.user_id = ?
    AND a.id IS NULL
    AND c.user_state != 'HIDDEN'
+   AND r.location_scope = 'open'
    AND r.first_seen_run_id {op} ?
 """
 
@@ -116,6 +117,32 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
         if r["id"] not in listed
     ]
     return {"new": new, "earlier": earlier, "watching": watching}
+
+
+def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
+    """How every stored role divides on the only question that matters.
+
+    `unverified` is a NULL or "unknown" `location_scope` — a row nothing
+    could judge. That is every LinkedIn row, whose location is a place
+    rather than a reach statement, and every board row whose reach field
+    was unparseable. Unverified is neither eligible nor ineligible; the
+    map states the size of that set rather than implying either reading.
+
+    Run 6's split for the working profile was 2 open, 66 closed, 316
+    unverified — which is why the map stopped rendering all 384.
+    """
+    rows = conn.execute(
+        """SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
+                  COUNT(*) AS n
+             FROM role r
+             JOIN company c ON c.id = r.company_id
+            WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
+            GROUP BY verdict""", (user_id,)).fetchall()
+    counts = {row["verdict"]: row["n"] for row in rows}
+    return {"open": counts.get("open", 0),
+            "closed": counts.get("closed", 0),
+            "unverified": (counts.get("unverified", 0)
+                           + counts.get("unknown", 0))}
 
 
 def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:

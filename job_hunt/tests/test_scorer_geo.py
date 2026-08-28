@@ -83,40 +83,13 @@ def test_no_country_on_file_claims_nothing():
     assert not any("restricted" in p for p in evidence["penalties"])
 
 
-def test_the_fallback_board_is_a_softer_flag():
-    flagged = _scorer().score_job("BI Developer", _JD, _RESUME,
-                                  scraped_under="us")
-    clean = _scorer().score_job("BI Developer", _JD, _RESUME)
-    assert _BOARD_CLAUSE in flagged["penalties"]
-    assert flagged["match_score"] <= clean["match_score"]
+def test_the_scorer_takes_no_scraped_under_argument():
+    """Indeed's us-board fallback was its only writer, and Indeed is gone.
 
+    An inert parameter that still looks live is the pattern Ship 7 deleted
+    the probe mechanism to avoid.
+    """
+    import inspect
 
-def test_a_text_restriction_silences_the_board_flag():
-    """Both present -> only the stated restriction fires. No double penalty,
-    and the sentence states the stronger fact."""
-    evidence = _scorer().score_job(
-        "BI Developer", _JD + " US citizens only.", _RESUME,
-        scraped_under="us")
-    assert "remote, but restricted to US" in evidence["penalties"]
-    assert _BOARD_CLAUSE not in evidence["penalties"]
-
-
-def test_eligible_evidence_silences_the_board_flag():
-    """Positive text evidence beats board uncertainty: a worldwide posting
-    fetched via the us fallback needs no warning."""
-    evidence = _scorer().score_job(
-        "BI Developer", _JD + " Open to candidates worldwide.", _RESUME,
-        scraped_under="us")
-    assert _BOARD_CLAUSE not in evidence["penalties"]
-
-
-def test_your_own_board_is_not_flagged():
-    evidence = _scorer(country="us").score_job(
-        "BI Developer", _JD, _RESUME, scraped_under="us")
-    assert _BOARD_CLAUSE not in evidence["penalties"]
-
-
-def test_best_match_passes_the_board_through():
-    evidence = _scorer().best_match("BI Developer", _JD, [_RESUME],
-                                    scraped_under="us")
-    assert _BOARD_CLAUSE in evidence["penalties"]
+    assert "scraped_under" not in inspect.signature(
+        Scorer.best_match).parameters

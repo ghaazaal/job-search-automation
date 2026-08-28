@@ -129,3 +129,28 @@ def test_anywhere_qualified_by_the_user_own_region_is_open():
 def test_bare_anywhere_naming_nowhere_else_is_open(text):
     """Remotive and Jobicy both publish the bare word."""
     assert scope_verdict(text, "am", CFG, GEO) == "open"
+
+
+# --- guards the docstring claimed and the code did not have -------------
+
+def test_the_pronoun_us_names_no_country():
+    """A reach field is short, but "us" is still a pronoun."""
+    assert scope_verdict("Remote - come join us", "am", CFG, GEO) == "unknown"
+
+
+def test_northern_ireland_is_not_ireland():
+    """Word-bounding stops "Irelander", not a preceding word."""
+    assert scope_verdict("Northern Ireland", "am", CFG, GEO) != "closed"
+
+
+def test_an_unreadable_timezone_band_still_lets_the_rest_answer():
+    """timezone_anchors lists six zones. A board writing IST, AEST or BST
+    hits the band branch, fails to resolve it, and must not take the
+    country list in the same string down with it."""
+    text = "Armenia, Poland. Time zone: IST (+/- 3 hours)"
+    assert scope_verdict(text, "am", CFG, GEO) == "open"
+
+
+def test_an_unreadable_band_with_nothing_else_still_claims_nothing():
+    assert scope_verdict("Time zone: XYZ (+/- 3 hours)",
+                         "am", CFG, GEO) == "unknown"

@@ -106,7 +106,6 @@ penalties:
   opt:          20
   exec_penalty: 10
   geo_restricted: 30   # a stated country restriction is the same class of blocker as clearance
-  wrong_board:    10   # softer: results from Indeed's us fallback carry uncertainty, not a stated restriction
   mode_mismatch:  15   # says hybrid/on-site, the user searched remote-only, and the place could not be parsed
 
 # Point values. Kept here rather than in code so the weights can be tuned
@@ -255,12 +254,20 @@ eligibility:
   # settle eligibility: they say where the company operates, not who it
   # will hire, and each has been seen sitting right next to a stated
   # restriction ("... worldwide remote company. US citizens only.").
+  # Standalone worldwide statements. A member of this list returns
+  # eligible on a bare match - no window, no corroboration - so only
+  # phrases that ARE a claim belong here.
+  #
+  # "anywhere in the world" was in this list bare and is not a claim, it
+  # is five words: it fired inside "work together in real time from
+  # anywhere in the world", a live LinkedIn row where the sentence is
+  # about the product the company sells. "candidates from anywhere in
+  # the world" below carries the claim it was standing in for.
   eligible_phrases:
     - "open to candidates worldwide"
     - "open to applicants worldwide"
     - "candidates from anywhere in the world"
     - "work from anywhere in the world"
-    - "anywhere in the world"
   # Regions are eligible-only evidence: membership marks the user eligible;
   # absence stays silent, never flags exclusion — membership is fuzzy at
   # the edges and a wrong exclusion would be fabricated precision.
@@ -302,6 +309,11 @@ eligibility:
 # "on-site only" / "onsite only" (…gym access, …parking — amenity noise,
 # not a role-mode claim).
 work_mode:
+  # "work from home" is deliberately absent. Measured on 384 live roles it
+  # fires 15 times: about five genuinely remote, six benefits boilerplate
+  # ("reimbursement for work from home equipment"), and four saying the
+  # opposite outright ("at least 4 days in the office per week, with the
+  # flexibility to work from home 1 day a week").
   remote_phrases:
     - "fully remote"
     - "100% remote"
@@ -310,7 +322,6 @@ work_mode:
     - "remote-first"
     - "remote-only"
     - "work remotely"
-    - "work from home"
     - "work from anywhere"
     - "telecommute"
     - "location: remote"  # JD header line; rescues perks-list "hybrid work options" via conflict→None

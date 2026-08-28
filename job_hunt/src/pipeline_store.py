@@ -11,7 +11,8 @@ from .store.runs import finish_run
 
 def persist_run(conn: sqlite3.Connection, user_id: int, run_id: int,
                 scored_jobs: list[dict], scraped: int,
-                dropped: int = 0, offtopic: int = 0) -> int:
+                dropped: int = 0, offtopic: int = 0,
+                boards: list[str] | None = None) -> int:
     """Write a completed scrape into a run that already exists.
 
     The caller creates the run. A browser-triggered run needs its id returned
@@ -22,8 +23,8 @@ def persist_run(conn: sqlite3.Connection, user_id: int, run_id: int,
         upsert_jobs(conn, user_id, run_id, scored_jobs)
     except Exception:
         finish_run(conn, run_id, scraped=scraped, kept=0, ok=False,
-                  dropped=dropped, offtopic=offtopic)
+                  dropped=dropped, offtopic=offtopic, boards=boards)
         raise
     finish_run(conn, run_id, scraped=scraped, kept=len(scored_jobs),
-              dropped=dropped, offtopic=offtopic)
+              dropped=dropped, offtopic=offtopic, boards=boards)
     return run_id

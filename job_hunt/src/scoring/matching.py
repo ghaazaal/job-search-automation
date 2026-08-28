@@ -206,6 +206,16 @@ def mismatch_penalty(description: str, market_tools, mine: set[str],
 # that unrelated prose starts counting as candidates.
 _LIST_WINDOW = 400
 
+# A duration immediately after an eligibility phrase takes the claim back:
+# "work from anywhere in the world FOR UP TO 4 WEEKS PER YEAR" is a
+# holiday perk, not a statement about who the employer will hire. Both
+# live examples came from run 6. Anchored at the phrase's own end rather
+# than scanned over a character window, so the rule stays as inspectable
+# as the phrase list it guards. Digits only: every observed instance
+# writes the number as a numeral.
+_DURATION_AFTER = re.compile(
+    r"\s*for\s+(?:up\s+to\s+)?\d+\s+(?:day|week|month)s?\b")
+
 
 def _display_name(name: str) -> str:
     """`uk` -> "UK", `united kingdom` -> "United Kingdom"."""
@@ -435,10 +445,19 @@ def geo_verdict(body: str, user_country: str,
     # Standalone worldwide statements ("open to candidates worldwide") open
     # no list window — the phrase itself is the evidence. Only phrases a
     # following country cannot grammatically narrow belong in this list.
+    #
+    # A following DURATION narrows them just as effectively, which that
+    # rule did not anticipate: run 6 had two rows offering "work from
+    # anywhere in the world for up to 4 weeks per year". Every occurrence
+    # is checked, not just the first, so a body that states the fact once
+    # and offers the perk once still claims what it states.
     for phrase in cfg.get("eligible_phrases") or []:
         phrase = str(phrase).strip().lower()
-        if phrase and has_term(phrase, body):
-            return ("eligible", None)
+        if not phrase:
+            continue
+        for match in re.finditer(bounded(phrase), body):
+            if not _DURATION_AFTER.match(body, match.end()):
+                return ("eligible", None)
 
     for start, limit in windows:
         # Unlimited on purpose — see the docstring. Ambiguous names still

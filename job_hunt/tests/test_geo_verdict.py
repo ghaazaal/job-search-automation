@@ -5,6 +5,8 @@ inlined here rather than loaded from vocabulary.yaml so each test states
 exactly which phrasings it exercises; test_vocabulary.py guards the real
 file, and test_scorer_geo.py proves the shipped file works end to end.
 """
+import pytest
+
 from src.scoring.matching import geo_verdict
 
 _CFG = {
@@ -284,3 +286,66 @@ def test_the_article_form_still_reads_as_the_country():
 def test_the_article_form_can_still_exclude():
     assert geo_verdict("open to candidates in the us and canada.",
                        "am", _CFG) == ("excluded", "US and Canada")
+
+
+# --- eligible_phrases, the two live faults from run 6 -------------------
+#
+# Members of that list return eligible on a bare match: no window, no
+# corroboration. So only phrases that ARE a claim belong in it.
+
+def _real_eligibility_cfg():
+    from pathlib import Path
+
+    import yaml
+    return yaml.safe_load(
+        (Path(__file__).parent.parent / "vocabulary.yaml")
+        .read_text(encoding="utf-8"))["eligibility"]
+
+
+def test_a_sentence_that_merely_contains_the_words_claims_nothing():
+    """Verbatim from run 6: Figma describing the product they sell."""
+    body = ("empowers teams to streamline workflows, move faster, and "
+            "work together in real time from anywhere in the world.")
+    assert geo_verdict(body, "am", _real_eligibility_cfg()) == ("unknown", None)
+
+
+@pytest.mark.parametrize("body", [
+    "we are open to candidates worldwide.",
+    "we hire candidates from anywhere in the world.",
+])
+def test_the_real_worldwide_statements_still_claim_eligible(body):
+    """The fix must not mute the phrases that carry an actual claim."""
+    assert geo_verdict(body, "am", _real_eligibility_cfg()) == ("eligible", None)
+
+
+_ELIGIBLE_CFG = {
+    "countries": {"am": ["armenia"], "us": ["us", "united states"]},
+    "eligible_phrases": ["work from anywhere in the world"],
+}
+
+
+@pytest.mark.parametrize("body", [
+    "work from anywhere in the world for up to 4 weeks per year.",
+    "embrace the freedom to work from anywhere in the world for up to "
+    "30 days a year.",
+    "work from anywhere in the world for 5 days a month.",
+])
+def test_a_duration_after_the_phrase_claims_nothing(body):
+    """Two verbatim from run 6, plus the un-hedged shape.
+
+    A holiday perk is not an eligibility statement.
+    """
+    assert geo_verdict(body, "am", _ELIGIBLE_CFG) == ("unknown", None)
+
+
+def test_the_phrase_without_a_duration_still_claims_eligible():
+    """The guard is a guard, not a mute button."""
+    body = "this role is fully remote - work from anywhere in the world."
+    assert geo_verdict(body, "am", _ELIGIBLE_CFG) == ("eligible", None)
+
+
+def test_one_qualified_mention_does_not_mute_an_unqualified_one():
+    """A body can say it twice, once as a perk and once as a fact."""
+    body = ("work from anywhere in the world for up to 4 weeks per year. "
+            "this role is remote: work from anywhere in the world.")
+    assert geo_verdict(body, "am", _ELIGIBLE_CFG) == ("eligible", None)

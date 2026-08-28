@@ -55,7 +55,6 @@ class Scorer:
                                  for m in user_modes if str(m).strip())
 
     def score_job(self, title: str, description: str, resume: dict,
-                  scraped_under: str | None = None,
                   mode_mismatch: str | None = None,
                   local_evidence: bool = False) -> dict:
         """Evidence for one posting judged against one resume."""
@@ -89,7 +88,7 @@ class Scorer:
                                              vocab.get("mismatch") or {})
 
         penalty, fired, geo_verdict = self._constraints(
-            body, jd_band, my_band, scraped_under, mode_mismatch,
+            body, jd_band, my_band, mode_mismatch,
             local_evidence)
         if mismatch:
             fired.append("little overlap with the tools this post names")
@@ -139,7 +138,6 @@ class Scorer:
 
     def best_match(self, title: str, description: str,
                    resumes: list[dict],
-                   scraped_under: str | None = None,
                    mode_mismatch: str | None = None,
                    local_evidence: bool = False) -> dict:
         """Score against every active resume and keep the strongest.
@@ -155,7 +153,6 @@ class Scorer:
         if not resumes:
             raise ValueError("cannot score without at least one active resume")
         scored = [self.score_job(title, description, resume,
-                                 scraped_under=scraped_under,
                                  mode_mismatch=mode_mismatch,
                                  local_evidence=local_evidence)
                   for resume in resumes]
@@ -163,7 +160,6 @@ class Scorer:
 
     def _constraints(
         self, body: str, jd_band: str, my_band: str,
-        scraped_under: str | None = None,
         mode_mismatch: str | None = None,
         local_evidence: bool = False,
     ) -> tuple[int, list[str], str]:
@@ -195,21 +191,6 @@ class Scorer:
         elif verdict == "excluded":
             penalty += cfg.get("geo_restricted", 30)
             fired.append(f"remote, but open only to {detail}")
-        elif (verdict == "unknown" and scraped_under and self._user_country
-              and scraped_under.strip().lower() != self._user_country
-              and not local_evidence):
-            # The Indeed fallback searched the us board because the actor
-            # rejected the user's country. That is uncertainty, not a stated
-            # restriction — softer penalty, wording that claims no more than
-            # we know, and never on top of anything the text did state.
-            # "eligible" lands here too: positive evidence beats board
-            # uncertainty, so nothing fires at all. And local evidence (the
-            # job is in the user's own place) needs no board warning
-            # either — positive evidence beats board uncertainty, the same
-            # rule the eligible verdict follows.
-            penalty += cfg.get("wrong_board", 10)
-            fired.append("found via Indeed's US board, "
-                         "not verified for your country")
 
         if mode_mismatch:
             # run_core sends this only for the keep-and-flag rung of the

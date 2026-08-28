@@ -8,7 +8,8 @@ from src.store.schema import init_db
 from src.store.ingest import ensure_user, upsert_jobs
 from src.store.runs import start_run, finish_run
 from src.store.tracking import set_role_status, set_company_state
-from src.store.queries import map_sections, activity_board, mark_seen, known_listings
+from src.store.queries import (activity_board, eligibility_counts,
+                               known_listings, map_sections, mark_seen)
 
 
 def _job(url, company="Acme", title="Analytics Engineer", score=9, **kw):
@@ -16,7 +17,11 @@ def _job(url, company="Acme", title="Analytics Engineer", score=9, **kw):
             "location": "Remote, US", "salary": "", "platform": "LinkedIn",
             "date": "2026-08-08", "description": "dbt", "match_score": score,
             "description_captured": True, "band": "STRONG FIT",
-            "reason": "matches dbt", "matched": ["dbt"], "gaps": ["snowflake"]}
+            "reason": "matches dbt", "matched": ["dbt"], "gaps": ["snowflake"],
+            # The map lists only roles proven open, so this is what "a
+            # role the user should see" means now. Tests about the filter
+            # itself override it.
+            "location_scope": "open"}
     return {**base, **kw}
 
 
@@ -229,3 +234,33 @@ def test_verified_companies_outrank_unverified_within_a_section(conn):
     sections = map_sections(conn, u, shortlist_min=5)
     names = [m["name"] for m in sections["new"]]
     assert names.index("Verified Ltd") < names.index("Unverified Corp")
+
+
+# --- the map lists what the user can act on -----------------------------
+
+def test_the_map_lists_only_roles_proven_open(conn):
+    """384 rendered roles told the user there were 384 worth reading.
+    Two were open."""
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [
+        _job("https://x/open", company="Open Co", location_scope="open"),
+        _job("https://x/closed", company="Closed Co", location_scope="closed"),
+        _job("https://x/null", company="Null Co", location_scope=None),
+    ])
+    sections = map_sections(conn, u, 7)
+    urls = {r["url"] for m in sections["new"] + sections["earlier"]
+            for r in m["roles"]}
+    assert urls == {"https://x/open"}
+
+
+def test_the_counts_account_for_every_stored_role(conn):
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [
+        _job("https://x/o", company="A", location_scope="open"),
+        _job("https://x/c1", company="B", location_scope="closed"),
+        _job("https://x/c2", company="C", location_scope="closed"),
+        _job("https://x/u", company="D", location_scope=None),
+        _job("https://x/k", company="E", location_scope="unknown"),
+    ])
+    assert eligibility_counts(conn, u) == {
+        "open": 1, "closed": 2, "unverified": 2}

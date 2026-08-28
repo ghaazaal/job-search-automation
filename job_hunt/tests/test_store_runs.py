@@ -187,3 +187,16 @@ def test_the_stale_window_clears_a_realistic_run():
     assert runs.STALE_AFTER_MINUTES * 60 > slowest_single_source, (
         "a run can legitimately outlive the staleness window - raise "
         "STALE_AFTER_MINUTES or lower a scraper's timeout floor")
+
+
+def test_finish_run_records_the_boards_seen(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=10, kept=5,
+                    boards=["jobicy", "himalayas"])
+    assert runs.get_run(conn, run_id)["boards"] == ["himalayas", "jobicy"]
+
+
+def test_a_run_that_saw_no_boards_records_an_empty_list(conn, user):
+    run_id = runs.start_run(conn, user)
+    runs.finish_run(conn, run_id, scraped=0, kept=0)
+    assert runs.get_run(conn, run_id)["boards"] == []
