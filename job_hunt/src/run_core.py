@@ -324,7 +324,7 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
     exactly this way (`_local_ok`, `_mode_mismatch`).
     """
     from .scoring.location_scope import scope_verdict
-    from .scoring.matching import geo_verdict
+    from .scoring.matching import geo_verdict, location_country
 
     country = (profile.get("country") or "").strip().lower()
     scope_cfg = vocab.get("location_scope") or {}
@@ -370,6 +370,26 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
             scope = "closed"
         elif verdict == "eligible" and scope == "unknown":
             scope = "open"
+
+        # A posting anchored to a foreign country is not this user's,
+        # whatever mode it claims.
+        #
+        # "Remote" on a posting whose location says Canada means remote
+        # FROM Canada — the Celestir row read "location: canada / remote"
+        # in its own description. 246 of 349 listed roles were anchored
+        # to a country that was not the user's and shown anyway, because
+        # nothing but a stated restriction could close a row.
+        #
+        # This is the weakest kind of evidence in the ladder, so it only
+        # applies where nothing stronger spoke: a reach field or a
+        # description saying the employer hires beyond its own address
+        # still wins. And an unreadable location claims nothing at all,
+        # which is why `location_country` refuses to guess.
+        if scope != "open" and country:
+            place = location_country(job.get("location") or "", geo_cfg)
+            if place and place != country:
+                scope = "closed"
+
         if scope is not None:
             job["location_scope"] = scope
 

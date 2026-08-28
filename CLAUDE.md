@@ -94,6 +94,15 @@ the authority, including their correction notes and accepted residuals):
   postings are silent and the field is then all there is. This is NOT the
   usual conflict-claims-nothing rule — the two sources are not of equal
   standing.
+- A posting anchored to a foreign country is not this user's, whatever
+  mode it claims: "remote" on a posting whose location says Canada means
+  remote FROM Canada. This is the weakest rung of the ladder, so a reach
+  field or a description stating wider hiring still beats it, and an
+  unreadable location claims nothing. `eligibility.cities` maps city and
+  metro names to countries because LinkedIn writes "New York City
+  Metropolitan Area" far more often than it writes a country; it is
+  seeded from observed data and excludes ambiguous names (no "Dublin",
+  no "Georgia") because a wrong country there drops a real job.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name

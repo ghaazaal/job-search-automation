@@ -73,9 +73,19 @@ def test_the_eligibility_section_holds_market_facts():
     assert eligibility["regions"]
     assert eligibility["us_state_names"]
     assert all(isinstance(s, str) for s in eligibility["us_state_names"])
-    assert {"countries", "templates", "list_phrases", "anywhere_words",
-            "eligible_phrases", "ambiguous_names", "regions",
-            "us_states", "us_state_names"} == set(eligibility)
+    assert {"countries", "cities", "templates", "list_phrases",
+            "anywhere_words", "eligible_phrases", "ambiguous_names",
+            "regions", "us_states", "us_state_names"} == set(eligibility)
+    # Cities are a market fact like country names: which place sits in
+    # which country. A name here is a claim, so ambiguous ones stay out.
+    assert eligibility["cities"]
+    assert all(isinstance(c, str) and len(c) == 2
+               for c in eligibility["cities"])
+    every_city = [c for names in eligibility["cities"].values() for c in names]
+    assert all(isinstance(c, str) and c == c.lower() for c in every_city)
+    assert len(every_city) == len(set(every_city)), "a city names one country"
+    assert "dublin" not in every_city, "Dublin is in Ireland and California"
+    assert "georgia" not in every_city, "Georgia is a country and a US state"
     assert all("{country}" in t for t in eligibility["templates"])
     # A list phrase introduces a list — it must not carry the slot itself.
     assert all("{country}" not in p for p in eligibility["list_phrases"])
