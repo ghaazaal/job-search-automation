@@ -237,9 +237,24 @@ eligibility:
     - "work authorization in {country}"
     - "{country} citizens only"
     - "{country} residents only"
+    # Added after a live over-claim: We Work Remotely tagged a Doximity
+    # role "Anywhere in the World" while its own text read "headquarters:
+    # san francisco, ca or remote (u.s.)" and "can be filled ... or
+    # remotely in the u.s.". The board's tag is a categorisation; the
+    # posting's words are the employer's. {country} is filled with every
+    # alias of every country, so these generalise past the US.
+    - "remote ({country})"
+    - "remotely in {country}"
+    - "remote in {country}"
+    - "{country}-based"
+    - "remote - {country}"
   list_phrases:         # introduce a list of eligible countries/regions
     - "open to candidates in"
     - "open to applicants in"
+    # Faire, same board, same tag: "this is a remote role open to
+    # candidates located in arizona, california, colorado, ...".
+    - "open to candidates located in"
+    - "open to applicants located in"
     - "eligible countries"
     - "we can hire in"
     - "able to hire in"

@@ -303,6 +303,7 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
     exactly this way (`_local_ok`, `_mode_mismatch`).
     """
     from .scoring.location_scope import scope_verdict
+    from .scoring.matching import geo_verdict
 
     country = (profile.get("country") or "").strip().lower()
     scope_cfg = vocab.get("location_scope") or {}
@@ -310,8 +311,30 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
     for job in jobs:
         if not job.get("source_board"):
             continue
-        job["location_scope"] = scope_verdict(
+        scope = scope_verdict(
             job.get("location") or "", country, scope_cfg, geo_cfg)
+
+        # The employer's own words outrank the board's tag.
+        #
+        # These are not two opinions of equal standing, so this is not the
+        # usual conflict-claims-nothing rule. The reach field is the
+        # BOARD's categorisation of a posting; the description is what the
+        # employer wrote. We Work Remotely tagged a Doximity role
+        # "Anywhere in the World" whose own text read "headquarters: san
+        # francisco, ca or remote (u.s.)", and a Faire role the same way
+        # while it enumerated the eleven US states it would hire in. Both
+        # reached the map claiming to be open to an Armenian user.
+        #
+        # Only a restriction overrides. A body that says nothing leaves
+        # the field standing, because most postings say nothing and the
+        # field is then the only evidence there is.
+        verdict, _ = geo_verdict((job.get("description") or "").lower(),
+                                 country, geo_cfg)
+        if verdict in ("restricted", "excluded"):
+            scope = "closed"
+        elif verdict == "eligible" and scope == "unknown":
+            scope = "open"
+        job["location_scope"] = scope
 
 
 def execute(conn, user_id: int, run_id: int, config: dict,

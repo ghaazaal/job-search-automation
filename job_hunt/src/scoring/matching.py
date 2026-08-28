@@ -358,6 +358,31 @@ def _window_hits(body: str, start: int, limit: int, countries: dict,
     return hits
 
 
+def _states_named(body: str, start: int, limit: int, cfg: dict) -> int | None:
+    """Position of the first US state name, if the window enumerates them.
+
+    Returns None unless at least TWO distinct state names appear. One is
+    not an enumeration, and several state names are also something else —
+    "georgia" is a country, "washington" a capital — so a single hit is
+    far more likely to be an office location than a hiring restriction.
+    Two or more together is a states list, which no other kind of place
+    list looks like.
+
+    Only the full names are used, never the two-letter codes: `us_states`
+    carries "in", "or", "me", "hi", "ok" and "de", which are ordinary
+    English words, and a window is prose.
+    """
+    names = {str(s).strip().lower() for s in cfg.get("us_state_names") or []}
+    found: list[int] = []
+    for name in names:
+        if not name:
+            continue
+        match = _find_bounded(name, body, start)
+        if match and match.start() < limit:
+            found.append(match.start())
+    return min(found) if len(found) >= 2 else None
+
+
 def geo_verdict(body: str, user_country: str,
                 cfg: dict) -> tuple[str, str | None]:
     """What a posting says about where it hires, judged for one user.
@@ -525,6 +550,18 @@ def geo_verdict(body: str, user_country: str,
                 continue
             window_hits = _window_hits(body, start, limit, countries,
                                        user_country, ambiguous_names)
+            # A window enumerating US STATES names no country at all, but
+            # it is a US-only role by construction: Faire's "remote role
+            # open to candidates located in arizona, california, colorado,
+            # ..." was tagged "Anywhere in the World" by its board. Two
+            # states, not one — "georgia" and "washington" are also a
+            # country and a capital, and one place name is not an
+            # enumeration. Recorded at the first state's position so it
+            # orders with the country hits.
+            if user_country != "us" and "us" in countries:
+                state_at = _states_named(body, start, limit, cfg)
+                if state_at is not None:
+                    window_hits.setdefault("us", (state_at, state_at))
             if window_hits:
                 if limit < len(body):
                     maybe_more = True
