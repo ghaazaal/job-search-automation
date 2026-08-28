@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS role (
     -- until that ship decides where the call belongs. Not a bug.
     location_scope       TEXT CHECK (location_scope IN ('open','closed','unknown')),
     source_board         TEXT,
+    -- Soft drop. A role we no longer want on the map but will not
+    -- DELETE: the run that stored it is history, and a hard delete
+    -- makes a wrong rule unrecoverable.
+    dropped_at           TEXT,
     eligibility_verified INTEGER NOT NULL DEFAULT 0,
     description          TEXT,
     description_captured INTEGER NOT NULL DEFAULT 0,
@@ -199,6 +203,12 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         # two consecutive runs is the signal; the row count is not.
         ("run", "boards",
          "ALTER TABLE run ADD COLUMN boards TEXT NOT NULL DEFAULT '[]'"),
+    ),
+    9: (
+        # Soft drop, never DELETE. The 800 roles stored before the
+        # relevance gate existed are off-target, not fictional, and a rule
+        # that turns out wrong has to be recoverable.
+        ("role", "dropped_at", "ALTER TABLE role ADD COLUMN dropped_at TEXT"),
     ),
 }
 

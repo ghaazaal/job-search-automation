@@ -6,8 +6,13 @@ dropped — it must not reach a template or a JSON response.
 """
 import json
 import sqlite3
+from datetime import datetime, timezone
 
 from .db import transaction
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 _ACTIVITY_COLUMNS = ("SAVED", "APPLIED", "INTERVIEWING", "OFFER", "CLOSED")
 
@@ -29,6 +34,7 @@ def _role_view(row: sqlite3.Row) -> dict:
         "platform":             row["platform"],
         "work_mode":            row["work_mode"],
         "eligibility_verified": bool(row["eligibility_verified"]),
+        "location_scope":       row["location_scope"],
         "date":                 row["posted_date"],
         "url":                  row["url"],
         "description":          row["description"],
@@ -63,8 +69,18 @@ def _group(conn, rows, shortlist_min) -> list[dict]:
     for company_id, group in by_company.items():
         group.sort(key=lambda r: -(r["match_score"] or 0))
         best = group[0]["match_score"] or 0
-        verified = max((1 if r["eligibility_verified"] else 0)
-                       for r in group)
+        # Two independent rungs, not one scale. Reach comes first — a
+        # role proven open to this user outranks one we merely could not
+        # disprove — and the older eligibility_verified flag still breaks
+        # ties beneath it. Collapsing them into a single number let a
+        # proven-open company swamp the verified/unverified distinction
+        # entirely, which is a different question about a different fact.
+        #
+        # Ship 8 hid everything below the top rung; showing it again only
+        # works if it sorts beneath.
+        open_reach = max(1 if r["location_scope"] == "open" else 0
+                         for r in group)
+        verified = max(1 if r["eligibility_verified"] else 0 for r in group)
         name = conn.execute("SELECT name FROM company WHERE id = ?",
                             (company_id,)).fetchone()["name"]
         maps.append({
@@ -74,10 +90,11 @@ def _group(conn, rows, shortlist_min) -> list[dict]:
             "why":   _why(group),
             "roles": [_role_view(r) for r in group],
             "_rank": best,
-            "_tier": verified,
+            "_tier": (open_reach, verified),
         })
     maps.sort(key=lambda m: (0 if m["state"] == "ACT_NOW" else 1,
-                             -m["_tier"], -m["_rank"], m["name"].lower()))
+                             -m["_tier"][0], -m["_tier"][1],
+                             -m["_rank"], m["name"].lower()))
     for m in maps:
         del m["_rank"], m["_tier"]
     return maps
@@ -90,7 +107,8 @@ SELECT r.* FROM role r
  WHERE r.user_id = ?
    AND a.id IS NULL
    AND c.user_state != 'HIDDEN'
-   AND r.location_scope = 'open'
+   AND r.dropped_at IS NULL
+   AND (r.location_scope IS NULL OR r.location_scope != 'closed')
    AND r.first_seen_run_id {op} ?
 """
 
@@ -119,6 +137,34 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
     return {"new": new, "earlier": earlier, "watching": watching}
 
 
+def drop_roles_from_runs(conn: sqlite3.Connection, user_id: int, *,
+                         through_run_id: int) -> int:
+    """Soft-drop every role first seen in a run at or before `through_run_id`.
+
+    Soft, never DELETE. The 800 roles this was written for were stored
+    before the relevance gate existed - Nurse Practitioner, Travel
+    Advisor, Fleet Parking Specialist - so they are off-target, not
+    fictional. A cleanup rule that turns out to be wrong has to be
+    recoverable, and `dropped_at` makes it a column change rather than a
+    restore from backup.
+
+    A role the user has acted on is never dropped. Whatever the rules say
+    about a posting, a job they applied to is part of their history.
+    Returns the number newly dropped, so running it twice reports 0 the
+    second time rather than silently re-stamping.
+    """
+    with transaction(conn):
+        cursor = conn.execute(
+            """UPDATE role SET dropped_at = ?
+                WHERE user_id = ?
+                  AND first_seen_run_id <= ?
+                  AND dropped_at IS NULL
+                  AND id NOT IN (SELECT role_id FROM application
+                                  WHERE user_id = ?)""",
+            (_now(), user_id, through_run_id, user_id))
+        return cursor.rowcount
+
+
 def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
     """How every stored role divides on the only question that matters.
 
@@ -137,6 +183,7 @@ def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
              FROM role r
              JOIN company c ON c.id = r.company_id
             WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
+              AND r.dropped_at IS NULL
             GROUP BY verdict""", (user_id,)).fetchall()
     counts = {row["verdict"]: row["n"] for row in rows}
     return {"open": counts.get("open", 0),

@@ -412,11 +412,17 @@ def render(maps: list[dict], meta: dict | None = None,
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
     scraped = meta.get("scraped") or datetime.now().strftime("%H:%M")
 
-    # Hiding is never silent. The map lists only roles proven open to this
-    # user — a deliberate, user-approved narrowing of flag-never-hide — so
-    # the header carries the full account of what was set aside and why.
-    # Run 6's honest split was 2 open, 66 not open, 316 unverified;
-    # rendering all 384 told the reader there were 384 worth opening.
+    # Hiding is never silent. The map lists roles proven open to this user
+    # AND roles whose reach we simply could not judge; it hides only the
+    # ones a posting's own words rule out. So the header carries the full
+    # account of what was set aside and why.
+    #
+    # Ship 8 hid the unverified too. On the real store that was 1055
+    # LinkedIn rows the user could see on LinkedIn itself — jobs they
+    # could act on, behind a bare number. Unverified is not closed: a
+    # LinkedIn location is a place, not a reach statement, so those roles
+    # were never judged rather than judged and rejected. They rank below
+    # the proven-open ones and say so on the card.
     #
     # Unconditional, unlike the clauses below: "0 OPEN" is the answer when
     # it is the answer, and suppressing it would make an empty map read as

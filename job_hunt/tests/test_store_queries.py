@@ -8,8 +8,9 @@ from src.store.schema import init_db
 from src.store.ingest import ensure_user, upsert_jobs
 from src.store.runs import start_run, finish_run
 from src.store.tracking import set_role_status, set_company_state
-from src.store.queries import (activity_board, eligibility_counts,
-                               known_listings, map_sections, mark_seen)
+from src.store.queries import (activity_board, drop_roles_from_runs,
+                               eligibility_counts, known_listings,
+                               map_sections, mark_seen)
 
 
 def _job(url, company="Acme", title="Analytics Engineer", score=9, **kw):
@@ -238,21 +239,6 @@ def test_verified_companies_outrank_unverified_within_a_section(conn):
 
 # --- the map lists what the user can act on -----------------------------
 
-def test_the_map_lists_only_roles_proven_open(conn):
-    """384 rendered roles told the user there were 384 worth reading.
-    Two were open."""
-    u = ensure_user(conn, "default")
-    _run_with(conn, u, [
-        _job("https://x/open", company="Open Co", location_scope="open"),
-        _job("https://x/closed", company="Closed Co", location_scope="closed"),
-        _job("https://x/null", company="Null Co", location_scope=None),
-    ])
-    sections = map_sections(conn, u, 7)
-    urls = {r["url"] for m in sections["new"] + sections["earlier"]
-            for r in m["roles"]}
-    assert urls == {"https://x/open"}
-
-
 def test_the_counts_account_for_every_stored_role(conn):
     u = ensure_user(conn, "default")
     _run_with(conn, u, [
@@ -264,3 +250,91 @@ def test_the_counts_account_for_every_stored_role(conn):
     ])
     assert eligibility_counts(conn, u) == {
         "open": 1, "closed": 2, "unverified": 2}
+
+
+# --- Ship 9: unverified roles are shown, ranked below proven-open -------
+#
+# Ship 8 listed only roles proven open. On the real store that hid 1055
+# LinkedIn roles the user could see on LinkedIn itself - jobs they could
+# act on, behind a bare number. Hiding what we merely cannot verify is a
+# different thing from hiding what we know is closed.
+
+def test_the_map_shows_unverified_roles_but_not_closed_ones(conn):
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [
+        _job("https://x/open", company="Open Co", location_scope="open"),
+        _job("https://x/unknown", company="Unknown Co", location_scope="unknown"),
+        _job("https://x/null", company="Null Co", location_scope=None),
+        _job("https://x/closed", company="Closed Co", location_scope="closed"),
+    ])
+    urls = {r["url"] for m in map_sections(conn, u, 7)["new"] for r in m["roles"]}
+    assert urls == {"https://x/open", "https://x/unknown", "https://x/null"}
+
+
+def test_a_proven_open_company_outranks_an_unverified_one(conn):
+    """The existing verified-outranks-unverified rule, extended to reach."""
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [
+        _job("https://x/unv", company="Unverified Co", score=9,
+             location_scope=None),
+        _job("https://x/opn", company="Proven Co", score=9,
+             location_scope="open"),
+    ])
+    names = [m["name"] for m in map_sections(conn, u, 7)["new"]]
+    assert names.index("Proven Co") < names.index("Unverified Co")
+
+
+def test_the_card_carries_its_reach_verdict(conn):
+    """The renderer has to be able to say which it is."""
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [_job("https://x/1", location_scope="open")])
+    role = map_sections(conn, u, 7)["new"][0]["roles"][0]
+    assert role["location_scope"] == "open"
+
+
+# --- Ship 9: soft-dropped rows leave the map and the counts ------------
+
+def test_a_dropped_role_is_not_listed_or_counted(conn):
+    u = ensure_user(conn, "default")
+    _run_with(conn, u, [
+        _job("https://x/keep", company="Keep Co", location_scope="open"),
+        _job("https://x/gone", company="Gone Co", location_scope="open"),
+    ])
+    conn.execute("UPDATE role SET dropped_at = ? WHERE url = ?",
+                 ("2026-08-28T00:00:00+00:00", "https://x/gone"))
+    conn.commit()
+    urls = {r["url"] for m in map_sections(conn, u, 7)["new"] for r in m["roles"]}
+    assert urls == {"https://x/keep"}
+    assert eligibility_counts(conn, u)["open"] == 1
+
+
+def test_dropping_stale_runs_leaves_newer_ones_alone(conn):
+    u = ensure_user(conn, "default")
+    first = _run_with(conn, u, [_job("https://x/old", company="Old Co")])
+    _run_with(conn, u, [_job("https://x/new", company="New Co")])
+    n = drop_roles_from_runs(conn, u, through_run_id=first)
+    assert n == 1
+    urls = {r["url"] for m in map_sections(conn, u, 7)["new"] for r in m["roles"]}
+    assert urls == {"https://x/new"}
+
+
+def test_a_role_the_user_acted_on_is_never_dropped(conn):
+    """A job they applied to stays, whatever the rules say."""
+    u = ensure_user(conn, "default")
+    run = _run_with(conn, u, [_job("https://x/applied", company="Applied Co"),
+                              _job("https://x/other", company="Other Co")])
+    role_id = conn.execute("SELECT id FROM role WHERE url = ?",
+                           ("https://x/applied",)).fetchone()["id"]
+    set_role_status(conn, u, role_id, "APPLIED")
+    assert drop_roles_from_runs(conn, u, through_run_id=run) == 1
+    kept = conn.execute(
+        "SELECT dropped_at FROM role WHERE url = ?",
+        ("https://x/applied",)).fetchone()["dropped_at"]
+    assert kept is None
+
+
+def test_dropping_is_idempotent(conn):
+    u = ensure_user(conn, "default")
+    run = _run_with(conn, u, [_job("https://x/1", company="A")])
+    assert drop_roles_from_runs(conn, u, through_run_id=run) == 1
+    assert drop_roles_from_runs(conn, u, through_run_id=run) == 0
