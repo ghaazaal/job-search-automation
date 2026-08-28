@@ -195,3 +195,24 @@ def test_linkedin_prefers_html_over_a_prefused_plain_field(monkeypatch):
     job = _scrape(linkedin, monkeypatch, item)
     assert "RemoteTravel" not in job["description"]
     assert "Location: Remote" in job["description"]
+
+
+def test_linkedin_filters_titles_at_the_source(monkeypatch):
+    """Ship 7's spec noted titleInclude/titleExclude are "already paid for
+    and currently unused". Run 8 rejected 110 of 300 deduped roles AFTER
+    buying them; LinkedIn can refuse them before we do."""
+    seen = _capture(monkeypatch, linkedin, [[_MINIMAL]])
+    linkedin.scrape("Data Analyst", "remote Data Analyst", "actor~id",
+                    title_include=("Data Analyst", "BI Developer"),
+                    title_exclude=("data center", "data entry"))
+    assert seen[0]["titleInclude"] == ["Data Analyst", "BI Developer"]
+    assert seen[0]["titleExclude"] == ["data center", "data entry"]
+
+
+def test_linkedin_omits_the_title_filters_when_none_are_given(monkeypatch):
+    """An empty filter must be absent, not an empty array - an actor that
+    reads [] as "match nothing" would silently return zero rows."""
+    seen = _capture(monkeypatch, linkedin, [[_MINIMAL]])
+    linkedin.scrape("Data Analyst", "Data Analyst", "actor~id")
+    assert "titleInclude" not in seen[0]
+    assert "titleExclude" not in seen[0]

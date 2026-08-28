@@ -330,10 +330,14 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
     scope_cfg = vocab.get("location_scope") or {}
     geo_cfg = vocab.get("eligibility") or {}
     for job in jobs:
-        if not job.get("source_board"):
-            continue
-        scope = scope_verdict(
-            job.get("location") or "", country, scope_cfg, geo_cfg)
+        # The reach FIELD is board-specific — only a remote board publishes
+        # one. The employer's own words are not: every source carries a
+        # description, and a posting that says where it hires says it
+        # whoever we read it from.
+        scope = None
+        if job.get("source_board"):
+            scope = scope_verdict(
+                job.get("location") or "", country, scope_cfg, geo_cfg)
 
         # The employer's own words outrank the board's tag.
         #
@@ -349,13 +353,25 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
         # Only a restriction overrides. A body that says nothing leaves
         # the field standing, because most postings say nothing and the
         # field is then the only evidence there is.
+        # Prose may CLOSE a row from any source. "Remote in the
+        # Philippines" is remote WITHIN a country, not remote to anywhere,
+        # and 34 of 383 listed roles said something of that shape while
+        # nothing read them — this check used to run on board rows only.
+        #
+        # Prose may NOT open a row that has no reach field. Measured over
+        # 384 live roles, mining prose for positive eligibility found 0
+        # real matches and manufactured 3; it is trustworthy for
+        # restrictions, which are stated deliberately, and not for
+        # permissions, which are inferred from absence. So promotion stays
+        # where a board field already made a claim to corroborate.
         verdict, _ = geo_verdict((job.get("description") or "").lower(),
                                  country, geo_cfg)
         if verdict in ("restricted", "excluded"):
             scope = "closed"
         elif verdict == "eligible" and scope == "unknown":
             scope = "open"
-        job["location_scope"] = scope
+        if scope is not None:
+            job["location_scope"] = scope
 
 
 def execute(conn, user_id: int, run_id: int, config: dict,
@@ -420,6 +436,13 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                       mode_lanes=mode_lanes,
                       wants_remote="remote" in {str(m).strip().lower()
                                                 for m in work_modes})
+    # Loaded before the scrape rather than after it: the relevance gate's
+    # exclusion list is now also sent to LinkedIn as titleExclude, so it
+    # has to exist before the first call rather than after the last.
+    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
+        vocab = yaml.safe_load(handle)
+    role_excludes = ((vocab.get("roles") or {}).get("exclude") or [])
+
     scraped_total = 0
     dropped_total = 0
     offtopic_total = 0
@@ -466,6 +489,17 @@ def execute(conn, user_id: int, run_id: int, config: dict,
             lane_location = _LANE_WORLDWIDE
             lane_modes = work_modes
             lane_kwargs = {}
+        if name == "LinkedIn":
+            # LinkedIn answers a free-text title however its relevance
+            # matcher likes, so the same filter the gate applies after
+            # billing is applied at the source instead. The include list
+            # is the USER's roles, from their resumes: vocabulary.yaml
+            # names the market's data titles, which is a different and
+            # deliberately impersonal thing. The exclude list is the
+            # gate's own measured traps, which are market facts.
+            lane_kwargs = {**lane_kwargs,
+                           "title_include": tuple(titles),
+                           "title_exclude": tuple(role_excludes)}
         try:
             jobs = scrapers[name](
                 step["role"], lane_title,
@@ -498,9 +532,6 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     known_urls, known_rows = known_listings(conn, user_id)
     new_jobs = dedupe(all_scraped,
                       existing_urls=known_urls, existing_rows=known_rows)
-
-    with open(VOCABULARY_PATH, encoding="utf-8") as handle:
-        vocab = yaml.safe_load(handle)
 
     new_jobs, offtopic_total, dropped_total = _apply_gates(
         new_jobs, vocab, profile, work_modes)

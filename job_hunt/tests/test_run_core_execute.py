@@ -947,3 +947,77 @@ def test_a_remote_role_abroad_is_untouched_by_the_presence_rule(conn):
            "description": "this role is fully remote."}
     kept, offtopic, dropped = _gates([job], profile, ["remote", "hybrid"])
     assert len(kept) == 1 and dropped == 0
+
+
+# --- the employer's words are read on EVERY row, not just board rows ---
+
+def test_a_linkedin_role_restricted_in_its_own_text_is_closed():
+    """"Remote in the Philippines" is remote WITHIN a country, not remote
+    to anywhere. 34 of 383 listed roles said something like it, and none
+    were checked: _apply_scope only read descriptions on board rows."""
+    from src.run_core import _apply_scope
+
+    vocab = {
+        "location_scope": {},
+        "eligibility": {"countries": {"am": ["armenia"],
+                                      "ph": ["philippines"]},
+                        "templates": ["remote in {country}"], "regions": []},
+    }
+    jobs = [{"title": "Lead Power BI Developer", "platform": "LinkedIn",
+             "location": "Manila", "work_mode": "remote",
+             "description": "this is a remote in philippines position."}]
+    _apply_scope(jobs, vocab, {"country": "am"})
+    assert jobs[0]["location_scope"] == "closed"
+
+
+def test_a_silent_linkedin_role_still_claims_nothing():
+    """Prose may CLOSE any row. It may not open one: measured over 384
+    live roles, prose mining found 0 real matches and manufactured 3."""
+    from src.run_core import _apply_scope
+
+    vocab = {"location_scope": {},
+             "eligibility": {"countries": {"am": ["armenia"]},
+                             "eligible_phrases": ["open to candidates worldwide"],
+                             "regions": []}}
+    jobs = [
+        {"title": "Data Engineer", "platform": "LinkedIn",
+         "description": "we build pipelines with dbt."},
+        {"title": "Data Analyst", "platform": "LinkedIn",
+         "description": "we are open to candidates worldwide."},
+    ]
+    _apply_scope(jobs, vocab, {"country": "am"})
+    assert "location_scope" not in jobs[0]
+    assert "location_scope" not in jobs[1], "prose must not promote to open"
+
+
+def test_linkedin_is_asked_for_the_users_own_titles(conn, user, resume):
+    """The include list is the user's roles, not the vocabulary's - the
+    vocabulary names the market's data titles, the resume names theirs."""
+    seen = []
+
+    def spy(category, title, actor_id, *args, **kwargs):
+        seen.append(kwargs)
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"LinkedIn": spy, "Remote boards": lambda *a, **k: []})
+
+    assert seen, "LinkedIn should have been called"
+    assert all(c["title_include"] == ("BI Developer",) for c in seen)
+    assert all("data center" in c["title_exclude"] for c in seen)
+
+
+def test_the_remote_boards_are_not_sent_title_filters(conn, user, resume):
+    """Their own searchTerms already match titles, and they are a
+    different actor with a different schema."""
+    seen = []
+
+    def boards(category, title, actor_id, *args, **kwargs):
+        seen.append(kwargs)
+        return []
+
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            scrapers={"LinkedIn": lambda *a, **k: [], "Remote boards": boards})
+    assert seen and all("title_include" not in c for c in seen)

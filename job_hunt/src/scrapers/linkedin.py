@@ -20,7 +20,8 @@ def scrape(category: str, title: str,
            location: str = _LEGACY_LOCATION,
            country: str = "us",
            work_modes=("remote",),
-           allow_fallback: bool = True) -> list[dict]:
+           allow_fallback: bool = True,
+           title_include=(), title_exclude=()) -> list[dict]:
     where = (location or "").strip() or _LEGACY_LOCATION
     payload = {
         "title":      title,
@@ -28,6 +29,20 @@ def scrape(category: str, title: str,
         "datePosted": _DATE_MAP.get(days_posted, "r604800"),
         "limit":      jobs_per_category,
     }
+    # Filter at LinkedIn rather than after paying for the rows. `title` is
+    # free text that LinkedIn's relevance matcher answers however it
+    # likes - every lane in run 8 came back at the 50-row cap - and the
+    # relevance gate then rejected 110 of 300 deduped roles we had already
+    # bought. These two parameters were noted in Ship 7's spec as
+    # "already paid for and currently unused".
+    #
+    # Omitted entirely when empty, never sent as []: an actor that reads
+    # an empty array as "match nothing" would return zero rows and look
+    # exactly like a search that found nothing.
+    if title_include:
+        payload["titleInclude"] = list(title_include)
+    if title_exclude:
+        payload["titleExclude"] = list(title_exclude)
     raw = call_actor(actor_id, payload, f"LinkedIn/{category}", run_timeout)
 
     # See the note in indeed.py: a rejected payload is indistinguishable from
