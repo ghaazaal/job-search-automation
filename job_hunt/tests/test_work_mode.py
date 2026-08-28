@@ -184,3 +184,54 @@ def test_work_from_home_is_not_remote_evidence():
     body = ("at least 4 days in the office per week, with the flexibility "
             "to work from home 1 day a week.")
     assert work_mode(body, cfg) != "remote"
+
+
+# --- rule 5: a city can name its country ------------------------------
+
+def _real_geo_cfg():
+    from pathlib import Path
+
+    import yaml
+    return yaml.safe_load(
+        (Path(__file__).parent.parent / "vocabulary.yaml")
+        .read_text(encoding="utf-8"))["eligibility"]
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("location,expected", [
+    # Every one of these is a real value from the live store that the
+    # parser could not read.
+    ("New York City Metropolitan Area", "us"),
+    ("Greater Seattle Area", "us"),
+    ("San Francisco Bay Area", "us"),
+    ("Greater Hyderabad Area", "in"),
+    ("Greater Vancouver Metropolitan Area", "ca"),
+    ("Greater Melbourne Area", "au"),
+    ("Warsaw Metropolitan Area", "pl"),
+    ("Amsterdam Area", "nl"),
+    ("Greater Paris Metropolitan Region", "fr"),
+    ("Greater Buenos Aires", "ar"),
+    ("Hanoi Capital Region", "vn"),
+    # Countries simply missing from the table until now.
+    ("Tunis, Tunis, Tunisia", "tn"),
+    ("Casablanca, Casablanca-Settat, Morocco", "ma"),
+    ("Lima, Peru", "pe"),
+    ("Montevideo, Montevideo, Uruguay", "uy"),
+    ("Santiago, Santiago Metropolitan Region, Chile", "cl"),
+])
+def test_a_city_or_missing_country_now_resolves(location, expected):
+    assert location_country(location, _real_geo_cfg()) == expected
+
+
+@pytest.mark.parametrize("location", [
+    "Flexible / Remote",
+    "Anywhere in the World",
+    "Time zone: CET (+/- 3 hours)",
+    "Europe, North America, Latin America, APAC",
+])
+def test_a_reach_expression_is_still_not_a_place(location):
+    """These are board reach fields, not locations. A city table must not
+    start reading them as somewhere."""
+    assert location_country(location, _real_geo_cfg()) is None

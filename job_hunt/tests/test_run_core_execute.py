@@ -1021,3 +1021,56 @@ def test_the_remote_boards_are_not_sent_title_filters(conn, user, resume):
     execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
             scrapers={"LinkedIn": lambda *a, **k: [], "Remote boards": boards})
     assert seen and all("title_include" not in c for c in seen)
+
+
+# --- a posting anchored to a foreign country is not yours --------------
+
+_ANCHOR_VOCAB = {
+    "location_scope": {"worldwide": ["anywhere in the world"]},
+    "eligibility": {"countries": {"am": ["armenia"], "ca": ["canada"]},
+                    "cities": {}, "regions": []},
+}
+
+
+def test_a_remote_role_anchored_to_a_foreign_country_is_closed():
+    """Celestir: location "Canada", mode remote, description reading
+    "location: canada / remote". That is remote WITHIN Canada."""
+    from src.run_core import _apply_scope
+
+    jobs = [{"title": "Data Analyst", "platform": "LinkedIn",
+             "location": "Canada", "work_mode": "remote",
+             "description": "data analyst / analytics consultant."}]
+    _apply_scope(jobs, _ANCHOR_VOCAB, {"country": "am"})
+    assert jobs[0]["location_scope"] == "closed"
+
+
+def test_a_role_in_the_users_own_country_is_not_closed():
+    from src.run_core import _apply_scope
+
+    jobs = [{"title": "Data Analyst", "platform": "LinkedIn",
+             "location": "Yerevan, Armenia", "work_mode": "hybrid",
+             "description": "join our team."}]
+    _apply_scope(jobs, _ANCHOR_VOCAB, {"country": "am"})
+    assert jobs[0].get("location_scope") != "closed"
+
+
+def test_proven_reach_outranks_the_country_the_posting_sits_in():
+    """A board row whose reach field says worldwide keeps its claim even
+    though the company has an address somewhere."""
+    from src.run_core import _apply_scope
+
+    jobs = [{"title": "Data Engineer", "source_board": "weworkremotely",
+             "location": "Anywhere in the World", "work_mode": "remote",
+             "description": "we hire globally."}]
+    _apply_scope(jobs, _ANCHOR_VOCAB, {"country": "am"})
+    assert jobs[0]["location_scope"] == "open"
+
+
+def test_an_unreadable_location_still_claims_nothing():
+    from src.run_core import _apply_scope
+
+    jobs = [{"title": "Data Analyst", "platform": "LinkedIn",
+             "location": "Flexible / Remote", "work_mode": "remote",
+             "description": "join our team."}]
+    _apply_scope(jobs, _ANCHOR_VOCAB, {"country": "am"})
+    assert "location_scope" not in jobs[0]

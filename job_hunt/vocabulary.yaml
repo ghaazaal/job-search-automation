@@ -197,6 +197,18 @@ eligibility:
     th: [thailand]
     jp: [japan]
     kr: [south korea, korea]
+    # Added from live locations the parser could not read. Each one
+    # appeared in the store as a plain country name that resolved to
+    # nothing, so every posting in it was treated as unknown reach.
+    tn: [tunisia]
+    ma: [morocco]
+    pe: [peru]
+    cl: [chile]
+    uy: [uruguay]
+    ec: [ecuador]
+    cr: [costa rica]
+    mk: [north macedonia]
+    hk: [hong kong]
     cn: [china]
     mx: [mexico]
     br: [brazil]
@@ -207,6 +219,49 @@ eligibility:
   # occurrence poisons that window's exclusion claim — we cannot tell the
   # country from the pronoun. Restriction templates are exempt: their
   # surrounding text ("us citizens only") disambiguates on its own.
+  # City and metro names, for locations that name a place but no country.
+  # LinkedIn writes "New York City Metropolitan Area" and "Greater
+  # Hyderabad Area" far more often than it writes a country, and every one
+  # of those read as unknown reach until this table existed.
+  #
+  # Seeded from the locations actually present in the store, not from a
+  # world gazetteer: a name here is a claim, and a wrong claim drops a real
+  # job. Anything ambiguous is left out on purpose — "Dublin" is in both
+  # Ireland and California, "Georgia" is a country and a US state — and an
+  # unknown city still resolves to nothing, which claims nothing.
+  #
+  # Checked last, after country names, state codes and state names, so it
+  # can never override a location that already said where it is.
+  cities:
+    us: [new york, chicago, san francisco, san diego, sacramento, burbank,
+         los angeles, oakland, palo alto, foster city, denver, dallas,
+         schaumburg, seattle, philadelphia, boston, salt lake city,
+         washington dc, austin, atlanta, houston, phoenix, portland,
+         san jose, miami, minneapolis, detroit, tampa]
+    in: [hyderabad, kolkata, bengaluru, bangalore, chennai, pune, gurugram,
+         mumbai, noida, ahmedabad]
+    gb: [london, manchester, leeds, birmingham, glasgow, edinburgh, bristol,
+         darwen, basingstoke, burgess hill]
+    ca: [toronto, vancouver, montreal, calgary, ottawa]
+    au: [sydney, melbourne, brisbane, perth]
+    pl: [warsaw, krakow, gdansk, wroclaw]
+    nl: [amsterdam, rotterdam, utrecht]
+    fr: [paris, lyon, toulouse]
+    de: [berlin, munich, hamburg, frankfurt]
+    es: [madrid, barcelona, valencia]
+    be: [brussels, antwerp]
+    ar: [buenos aires]
+    br: [sao paulo, recife, rio de janeiro]
+    vn: [hanoi, ho chi minh]
+    ph: [manila, cebu]
+    ua: [kyiv, lviv]
+    ge: [tbilisi]
+    am: [yerevan]
+    ae: [dubai, abu dhabi]
+    pt: [lisbon, porto]
+    ro: [bucharest]
+    cz: [prague]
+    ie: [cork, galway]
   ambiguous_names: [us]
   # For parsing stored location strings ("New York, NY" -> us). Two-letter
   # state codes; none collide with YAML booleans today, and the guard test
