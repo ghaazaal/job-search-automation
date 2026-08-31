@@ -179,7 +179,8 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
     Returns (kept, offtopic_count, dropped_count). Both counts are
     reported and persisted — nothing here disappears silently.
     """
-    from .scoring.matching import has_term, location_country, work_mode
+    from .scoring.geo import location_relation
+    from .scoring.matching import has_term, work_mode
     from .scoring.relevance import is_target_role
 
     # Relevance gate. 41% of what these actors return is not a data role
@@ -247,10 +248,14 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
             job["work_mode"] = mode
 
         raw_location = (job.get("location") or "").strip().lower()
-        place = location_country(job.get("location") or "", loc_cfg)
+        # Membership, not resolution: "is this place the user's?" The
+        # dataset behind it never has to decide WHICH Dublin a posting
+        # means, because every Dublin is equally not-Armenia.
+        relation = location_relation(job.get("location"), user_country,
+                                     loc_cfg)
         local_ok = bool(
             (profile_city and has_term(profile_city, raw_location))
-            or (place and user_country and place == user_country))
+            or relation == "local")
         if local_ok:
             # Positive evidence the job is in the user's own place —
             # popped before scoring, handed to the scorer explicitly.
@@ -290,10 +295,10 @@ def _apply_gates(new_jobs: list[dict], vocab: dict, profile: dict,
                 # Toronto).
                 kept_jobs.append(job)
                 continue
-            if place and user_country and place != user_country:
+            if relation == "foreign":
                 dropped_total += 1
                 continue
-            if not (place and user_country):
+            if relation is None:
                 job["_mode_mismatch"] = mode
         kept_jobs.append(job)
     new_jobs = kept_jobs
@@ -323,8 +328,9 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
     trade than this. `run_core` holds both already and annotates jobs in
     exactly this way (`_local_ok`, `_mode_mismatch`).
     """
+    from .scoring.geo import location_relation
     from .scoring.location_scope import scope_verdict
-    from .scoring.matching import geo_verdict, location_country
+    from .scoring.matching import geo_verdict
 
     country = (profile.get("country") or "").strip().lower()
     scope_cfg = vocab.get("location_scope") or {}
@@ -386,8 +392,8 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
         # still wins. And an unreadable location claims nothing at all,
         # which is why `location_country` refuses to guess.
         if scope != "open" and country:
-            place = location_country(job.get("location") or "", geo_cfg)
-            if place and place != country:
+            if location_relation(job.get("location"), country,
+                                 geo_cfg) == "foreign":
                 scope = "closed"
 
         if scope is not None:

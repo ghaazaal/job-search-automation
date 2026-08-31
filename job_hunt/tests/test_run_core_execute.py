@@ -314,8 +314,12 @@ def test_a_local_hybrid_job_is_kept_without_penalty(conn, user, resume):
 
 
 def test_an_unplaceable_mode_mismatch_is_flagged_not_dropped(conn, user, resume):
+    """The fixture used to be "Jakarta Metropolitan Area", chosen as
+    unplaceable - the dataset now places Jakarta correctly, which would
+    rightly DROP it. The intent of this test needs a place nothing can
+    read."""
     job = _job("https://x/22")
-    job["location"] = "Jakarta Metropolitan Area"
+    job["location"] = "Greater Nowhere Area"
     job["description"] += " Hybrid work, 2 days a week in the office."
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,

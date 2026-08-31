@@ -729,26 +729,4 @@ def location_country(location: str, cfg: dict) -> str | None:
     if best:
         return best[1]
 
-    # 5. CITY NAMES. Checked last, so it can never override a location
-    # that already said which country it is in. LinkedIn writes "New York
-    # City Metropolitan Area" and "Greater Hyderabad Area" far more often
-    # than it writes a country, and every one of those read as unknown
-    # reach before this rule existed.
-    #
-    # Longest match wins, so "san francisco" beats a hypothetical "san"
-    # and a two-word city is never shadowed by a one-word one. Word
-    # bounded, like everything else here. `cities` is deliberately seeded
-    # from observed data and excludes ambiguous names, because a wrong
-    # country here drops a real job — the same reason rules 1 to 4 stay
-    # silent on "Georgia" and on state codes that double as country codes.
-    city_hit: tuple[int, str] | None = None
-    for code, names in (cfg.get("cities") or {}).items():
-        code = str(code).strip().lower()
-        for name in names or ():
-            name = str(name).strip().lower()
-            if name and re.search(bounded(name), location):
-                if city_hit is None or len(name) > city_hit[0]:
-                    city_hit = (len(name), code)
-    if city_hit:
-        return city_hit[1]
     return None
