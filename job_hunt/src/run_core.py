@@ -161,6 +161,11 @@ class RunResult:
     titles: list[str] = field(default_factory=list)
 
 
+def _default_watched_fetch(conn, user_id, lane, config):
+    from .scrapers.watched import fetch
+    return fetch(conn, user_id, lane, config)
+
+
 def _default_scrapers() -> dict:
     from .scrapers import linkedin, remote_boards
     return {"LinkedIn": linkedin.scrape,
@@ -402,7 +407,8 @@ def _apply_scope(jobs: list[dict], vocab: dict, profile: dict) -> None:
 
 def execute(conn, user_id: int, run_id: int, config: dict,
             resumes: list[dict], profile: dict,
-            on_progress=None, scrapers=None, enrich=None) -> RunResult:
+            on_progress=None, scrapers=None, enrich=None,
+            watched_fetch=None) -> RunResult:
     """Scrape, dedupe, score and store one run.
 
     Args:
@@ -469,6 +475,18 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         vocab = yaml.safe_load(handle)
     role_excludes = ((vocab.get("roles") or {}).get("exclude") or [])
 
+    # Watched companies: two extra steps, planned only when the user
+    # watches anything. Resolution runs lazily inside the ats step (never
+    # in a Flask request), then one batched call per rung. Rows join the
+    # stream BEFORE dedupe and pass every gate unchanged: watching a
+    # company changes where we search, not what qualifies as a job for
+    # the user.
+    from .store.watchlist import list_watched
+    if list_watched(conn, user_id):
+        steps += [{"source": "Watched companies", "role": "watchlist",
+                   "lane": lane, "state": "pending", "found": 0}
+                  for lane in ("ats", "linkedin")]
+
     scraped_total = 0
     dropped_total = 0
     offtopic_total = 0
@@ -487,6 +505,29 @@ def execute(conn, user_id: int, run_id: int, config: dict,
         report("scraping")
 
         name = step["source"]
+        if name == "Watched companies":
+            try:
+                if step["lane"] == "ats":
+                    # Lazy resolution: one attempt per unresolved row,
+                    # before the first fetch of the run.
+                    from .scrapers.watched import resolve_pending
+                    resolve_pending(conn, user_id, config)
+                fetch = watched_fetch or _default_watched_fetch
+                jobs = fetch(conn, user_id, step["lane"], config)
+            except Exception as exc:
+                # One rung failing must not throw away the other's rows,
+                # or any other source's.
+                logger.warning("Watched/%s failed: %s", step["lane"], exc)
+                step["state"] = "failed"
+                step["found"] = 0
+            else:
+                step["state"] = "done"
+                step["found"] = len(jobs)
+                all_scraped.extend(jobs)
+                scraped_total += len(jobs)
+            report("scraping")
+            continue
+
         actor_key, actor_default = next(
             (key, default) for source, key, default in sources
             if source == name)

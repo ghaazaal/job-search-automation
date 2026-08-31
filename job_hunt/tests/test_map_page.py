@@ -274,3 +274,14 @@ def test_an_empty_map_reads_as_checked_not_broken():
                             "open": 0, "closed": 87, "unverified": 297})
     assert "0 OPEN" in html
     assert "87 NOT OPEN" in html
+
+
+def test_a_watched_company_shows_the_watchlist_chip():
+    base = {"id": 1, "name": "Open Co", "state": "DISCOVER", "why": "",
+            "roles": [dict(_ROLE)], "section": "new"}
+    html = render([{**base, "watched": True}],
+                  meta={"companies": 1, "roles": 1})
+    assert "WATCHLIST" in html
+    html2 = render([{**base, "watched": False}],
+                   meta={"companies": 1, "roles": 1})
+    assert "WATCHLIST" not in html2

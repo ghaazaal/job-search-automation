@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -119,6 +119,35 @@ CREATE TABLE IF NOT EXISTS application (
     notes      TEXT
 );
 
+-- Company Watchlist v1 (spec: 2026-08-31-company-watchlist-v1-design.md).
+-- Three concept groups, one table: identity / resolution / execution.
+-- `custom` sits inert in the CHECK because SQLite cannot extend a CHECK
+-- without a table rebuild; v1 code never writes it. The linkedin
+-- invariant lives HERE, not in Python: a status typo should be rejected
+-- by the database, not caught by whichever caller remembered to check.
+CREATE TABLE IF NOT EXISTS watched_company (
+    id                  INTEGER PRIMARY KEY,
+    -- identity
+    user_id             INTEGER NOT NULL REFERENCES user(id),
+    company_name        TEXT NOT NULL,
+    company_fingerprint TEXT NOT NULL,
+    domain              TEXT,
+    -- resolution (a source strategy, never authority)
+    resolution          TEXT NOT NULL DEFAULT 'unresolved'
+                        CHECK (resolution IN ('ats','linkedin','custom','unresolved')),
+    resolution_note     TEXT,
+    linkedin_name       TEXT,
+    linkedin_slug       TEXT,
+    resolved_at         TEXT,
+    -- execution
+    last_fetched_at     TEXT,
+    last_yield_count    INTEGER,
+    created_at          TEXT NOT NULL,
+    UNIQUE (user_id, company_fingerprint),
+    CHECK (resolution != 'linkedin'
+           OR linkedin_name IS NOT NULL OR linkedin_slug IS NOT NULL)
+);
+
 CREATE TABLE IF NOT EXISTS event (
     id          INTEGER PRIMARY KEY,
     user_id     INTEGER NOT NULL REFERENCES user(id),
@@ -204,6 +233,10 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         ("run", "boards",
          "ALTER TABLE run ADD COLUMN boards TEXT NOT NULL DEFAULT '[]'"),
     ),
+    # 10 has no entries: watched_company is a NEW table, and _DDL runs on
+    # every init, so CREATE TABLE IF NOT EXISTS reaches old databases
+    # without an ALTER. The version still bumps so a newer store is never
+    # mistaken for an older one.
     9: (
         # Soft drop, never DELETE. The 800 roles stored before the
         # relevance gate existed are off-target, not fictional, and a rule

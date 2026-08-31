@@ -320,7 +320,86 @@ document.addEventListener('click', async function(e){
   const r = await fetch('/api/resumes/' + d.dataset.delete, {method:'DELETE'});
   if(r.ok){ location.reload(); } else { alert('That did not delete.'); }
 });
+async function addWatch(name, domain, url){
+  const r = await fetch('/api/watchlist', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:name, domain:domain, linkedin_url:url})});
+  if(r.ok){ location.reload(); }
+  else { const b = await r.json().catch(()=>({})); alert(b.error || 'That did not save.'); }
+}
+document.addEventListener('click', async function(e){
+  const u = e.target.closest('[data-unwatch]');
+  if(u){
+    const r = await fetch('/api/watchlist/' + u.dataset.unwatch, {method:'DELETE'});
+    if(r.ok){ location.reload(); }
+    return;
+  }
+  const sg = e.target.closest('[data-suggest]');
+  if(sg){ addWatch(sg.dataset.suggest, sg.dataset.suggestDomain, ''); return; }
+  if(e.target.id === 'w-add'){
+    addWatch(document.getElementById('w-name').value,
+             document.getElementById('w-domain').value,
+             document.getElementById('w-url').value);
+  }
+});
 """
+
+
+# Remote-first companies known to hire globally — market facts, offered
+# as one-click adds and never pre-added. This list describes companies,
+# not the user, so it may live in code.
+_SUGGESTIONS = [
+    ("GitLab", "gitlab.com"), ("Supabase", "supabase.com"),
+    ("Wikimedia", "wikimedia.org"), ("Zapier", "zapier.com"),
+    ("Deel", "deel.com"), ("Remote.com", "remote.com"),
+    ("PostHog", "posthog.com"), ("Buffer", "buffer.com"),
+    ("Doist", "doist.com"),
+]
+
+
+def _watch_item(row: dict) -> str:
+    state = row.get("resolution") or "unresolved"
+    note = row.get("resolution_note")
+    yield_n = row.get("last_yield_count")
+    meta = state.upper()
+    if yield_n is not None:
+        meta += f" &middot; {int(yield_n)} LAST FETCH"
+    if state == "unresolved" and note:
+        meta += f" &middot; {_e(note)}"
+    return (
+        f'<div class="ritem"><div class="rname">{_e(row["company_name"])}'
+        f'</div><div class="rmeta">{meta}</div>'
+        f'<button type="button" class="btn-q" '
+        f'data-unwatch="{int(row["id"])}">REMOVE</button></div>'
+    )
+
+
+def _watchlist_card(watched: list[dict]) -> str:
+    """The companies this user watches, and what resolution knows.
+
+    Watching a company changes where we search, not what qualifies as a
+    job — so this card manages fetch targets, nothing about scoring.
+    """
+    listing = (f'<div class="rlist">'
+               f'{"".join(_watch_item(w) for w in watched)}</div>'
+               if watched else
+               '<div class="note">No companies watched yet.</div>')
+    already = {w["company_name"].strip().lower() for w in watched}
+    chips = "".join(
+        f'<button type="button" class="btn-q" data-suggest="{_e(name)}" '
+        f'data-suggest-domain="{_e(domain)}">{_e(name)}</button>'
+        for name, domain in _SUGGESTIONS
+        if name.lower() not in already)
+    suggest = (f'<div class="note">Suggestions: {chips}</div>' if chips else "")
+    form = (
+        '<div class="note">'
+        '<input id="w-name" placeholder="Company name">'
+        '<input id="w-domain" placeholder="domain (optional)">'
+        '<input id="w-url" placeholder="LinkedIn company URL (optional)">'
+        '<button type="button" class="btn-p" id="w-add">WATCH</button>'
+        '</div>')
+    return ('<div class="card"><span class="lab">YOUR WATCHLIST</span>'
+            f'{listing}{form}{suggest}</div>')
 
 
 def _resume_item(resume: dict) -> str:
@@ -338,7 +417,8 @@ def _resume_item(resume: dict) -> str:
     )
 
 
-def render_profile(resumes: list[dict], profile: dict) -> str:
+def render_profile(resumes: list[dict], profile: dict,
+                   watched: list[dict] | None = None) -> str:
     """One person, many resumes. Each active one adds its roles to the search."""
     if resumes:
         listing = (f'<div class="rlist">'
@@ -366,7 +446,8 @@ def render_profile(resumes: list[dict], profile: dict) -> str:
         '<div class="foot"><a class="btn-p" href="/setup">ADD A RESUME</a>'
         f'{search}</div></div>'
         '<div class="card"><span class="lab">WHERE YOU ARE LOOKING</span>'
-        f'{where_note}</div></div>'
+        f'{where_note}</div>'
+        f'{_watchlist_card(watched or [])}</div>'
     )
     return _shell(
         "Your profile", "your profile",

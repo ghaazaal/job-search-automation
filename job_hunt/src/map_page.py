@@ -218,13 +218,21 @@ def _actions(company_key: str, company_id=None, role_id=None,
     )
 
 
+def _watch_chip(m: dict) -> str:
+    """Marker only — watching changed what was fetched, never a rank."""
+    if not m.get("watched"):
+        return ""
+    return ('<span style="color:#00D4FF;font-size:10px;'
+            'letter-spacing:1px;margin-left:8px">WATCHLIST</span>')
+
+
 def _lead_card(m: dict, key: str) -> str:
     role = m["roles"][0]
     n = len(m["roles"])
     noun = "ROLE" if n == 1 else "ROLES"
     return (
         f'<div class="lead"><div class="crow">'
-        f'<div class="cname">{_e(m["name"])}</div>'
+        f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
         f'<div class="cmeta">{n} {noun} OPEN</div></div>'
         f'<div class="cwhy">{_e(m["why"])}</div>'
         f'<hr class="rule">'
@@ -244,7 +252,7 @@ def _compact_card(m: dict, key: str) -> str:
     meta = f'{tag}{n} {noun}' + (f' · {age}' if age else "")
     return (
         f'<div class="card"><div class="crow">'
-        f'<div class="cname">{_e(m["name"])}</div>'
+        f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
         f'<div class="cmeta">{_e(meta.upper())}</div></div>'
         f'<div class="cwhy">{_e(m["why"])}</div>'
         f'{_fit_block(role, False)}'

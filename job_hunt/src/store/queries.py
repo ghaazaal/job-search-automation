@@ -59,7 +59,7 @@ def _why(roles: list[sqlite3.Row]) -> str:
     return lead
 
 
-def _group(conn, rows, shortlist_min) -> list[dict]:
+def _group(conn, rows, shortlist_min, watched_fps=frozenset()) -> list[dict]:
     """Group role rows into ranked company maps."""
     by_company: dict[int, list] = {}
     for row in rows:
@@ -81,11 +81,16 @@ def _group(conn, rows, shortlist_min) -> list[dict]:
         open_reach = max(1 if r["location_scope"] == "open" else 0
                          for r in group)
         verified = max(1 if r["eligibility_verified"] else 0 for r in group)
-        name = conn.execute("SELECT name FROM company WHERE id = ?",
-                            (company_id,)).fetchone()["name"]
+        company = conn.execute(
+            "SELECT name, fingerprint FROM company WHERE id = ?",
+            (company_id,)).fetchone()
+        name = company["name"]
         maps.append({
             "id":    company_id,
             "name":  name,
+            # Marker only: watching changed what was FETCHED, never how
+            # anything here ranks or scores.
+            "watched": company["fingerprint"] in watched_fps,
             "state": "ACT_NOW" if best >= shortlist_min else "DISCOVER",
             "why":   _why(group),
             "roles": [_role_view(r) for r in group],
@@ -122,8 +127,13 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
     new_rows = conn.execute(_OPEN_ROLES.format(op=">"), (user_id, seen)).fetchall()
     old_rows = conn.execute(_OPEN_ROLES.format(op="<="), (user_id, seen)).fetchall()
 
-    new = _group(conn, new_rows, shortlist_min) if new_rows else []
-    earlier = _group(conn, old_rows, shortlist_min) if old_rows else []
+    from .watchlist import watched_fingerprints
+    watched_fps = watched_fingerprints(conn, user_id)
+
+    new = (_group(conn, new_rows, shortlist_min, watched_fps)
+           if new_rows else [])
+    earlier = (_group(conn, old_rows, shortlist_min, watched_fps)
+               if old_rows else [])
     listed = {m["id"] for m in new} | {m["id"] for m in earlier}
 
     watching = [

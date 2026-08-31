@@ -271,3 +271,16 @@ def test_migration_v9_adds_the_dropped_at_column(tmp_path):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(role)")}
     assert "dropped_at" in cols
     conn.close()
+
+
+def test_migration_v10_adds_watched_company(tmp_path):
+    """A new table reaches old databases through _DDL itself - the version
+    still bumps so a newer store is never mistaken for an older one."""
+    conn = connect(tmp_path / "v10.db")
+    init_db(conn)
+    cols = {r["name"] for r in conn.execute(
+        "PRAGMA table_info(watched_company)")}
+    assert {"company_fingerprint", "resolution", "linkedin_slug",
+            "resolved_at", "last_yield_count"} <= cols
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    conn.close()

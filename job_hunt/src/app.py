@@ -302,6 +302,36 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.post("/api/watchlist")
+    def watch_company():
+        """Fast by construction: only the store is imported here, never
+        scrapers.watched — a POST handler must not be able to probe."""
+        from .store import watchlist as wl
+        payload = request.get_json(silent=True) or {}
+        conn = _conn()
+        try:
+            wid = wl.add(conn, _user(conn),
+                         name=str(payload.get("name") or ""),
+                         domain=str(payload.get("domain") or ""),
+                         linkedin_url=str(payload.get("linkedin_url") or ""))
+            return jsonify(wl.get(conn, _user(conn), wid)), 201
+        except wl.AlreadyWatched:
+            return jsonify({"error": "Already on your watchlist."}), 409
+        except ValueError as bad:
+            return jsonify({"error": str(bad)}), 400
+        finally:
+            conn.close()
+
+    @app.delete("/api/watchlist/<int:watch_id>")
+    def unwatch_company(watch_id: int):
+        from .store import watchlist as wl
+        conn = _conn()
+        try:
+            wl.remove(conn, _user(conn), watch_id)
+            return "", 204
+        finally:
+            conn.close()
+
     @app.post("/api/runs")
     def start_scrape():
         conn = _conn()
@@ -388,8 +418,10 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         conn = _conn()
         try:
             user_id = _user(conn)
+            from .store.watchlist import list_watched
             return render_profile(list_resumes(conn, user_id),
-                                  get_profile(conn, user_id))
+                                  get_profile(conn, user_id),
+                                  watched=list_watched(conn, user_id))
         finally:
             conn.close()
 

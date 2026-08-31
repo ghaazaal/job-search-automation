@@ -452,3 +452,50 @@ def test_the_profile_screen_hides_search_when_setup_is_incomplete(client):
     body = client.get("/profile").get_data(as_text=True)
     assert "search now" not in body.lower()
     assert "/setup/confirm/" in body
+
+
+# --- Company Watchlist v1 ----------------------------------------------
+
+def test_watchlist_add_is_fast_and_returns_pending(client):
+    resp = client.post("/api/watchlist",
+                       json={"name": "DataArt", "domain": "dataart.com"})
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["resolution"] == "unresolved"
+    assert body["resolution_note"] == "pending next run"
+
+
+def test_watchlist_rejects_a_duplicate(client):
+    client.post("/api/watchlist", json={"name": "DataArt"})
+    resp = client.post("/api/watchlist", json={"name": "DataArt Inc"})
+    assert resp.status_code == 409
+
+
+def test_watchlist_rejects_a_nameless_company(client):
+    assert client.post("/api/watchlist", json={}).status_code == 400
+
+
+def test_watchlist_delete(client):
+    # Not a suggestion-list name: those stay on the page as chips, so a
+    # deleted GitLab would still legitimately appear there.
+    wid = client.post("/api/watchlist",
+                      json={"name": "DataArt"}).get_json()["id"]
+    assert client.delete(f"/api/watchlist/{wid}").status_code == 204
+    page = client.get("/profile").data.decode()
+    assert "DataArt" not in _visible(page)
+
+
+def test_a_pasted_url_resolves_at_add_time(client):
+    resp = client.post("/api/watchlist", json={
+        "name": "Andersen",
+        "linkedin_url": "https://www.linkedin.com/company/andersenus/"})
+    assert resp.get_json()["resolution"] == "linkedin"
+    assert resp.get_json()["linkedin_slug"] == "andersenus"
+
+
+def test_the_profile_page_lists_watched_companies(client):
+    client.post("/api/watchlist", json={"name": "DataArt"})
+    page = _visible(client.get("/profile").data.decode())
+    assert "DataArt" in page
+    assert "UNRESOLVED" in page
+    assert "pending next run" in page
