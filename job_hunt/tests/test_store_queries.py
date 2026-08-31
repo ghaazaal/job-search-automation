@@ -338,3 +338,19 @@ def test_dropping_is_idempotent(conn):
     run = _run_with(conn, u, [_job("https://x/1", company="A")])
     assert drop_roles_from_runs(conn, u, through_run_id=run) == 1
     assert drop_roles_from_runs(conn, u, through_run_id=run) == 0
+
+
+def test_a_watched_companys_map_is_marked(conn):
+    """Marker only: `watched` rides the map dict so the renderer can chip
+    it. It takes no part in ranking - watching changes what we fetch,
+    never what a role is worth."""
+    u = ensure_user(conn, "default")
+    from src.store import watchlist
+    watchlist.add(conn, u, name="Open Co")
+    _run_with(conn, u, [
+        _job("https://x/w1", company="Open Co", location_scope="open"),
+        _job("https://x/w2", company="Other Co", location_scope="open"),
+    ])
+    maps = {m["name"]: m for m in map_sections(conn, u, 7)["new"]}
+    assert maps["Open Co"]["watched"] is True
+    assert maps["Other Co"]["watched"] is False

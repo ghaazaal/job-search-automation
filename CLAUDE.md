@@ -107,6 +107,13 @@ the authority, including their correction notes and accepted residuals):
   then the answer is silence. Reference data does not belong in
   `vocabulary.yaml`; that file keeps only judgment (phrases, aliases,
   weights).
+- Watching a company (Ship 10, `watched_company` table) changes WHERE we
+  search, not what qualifies as a job for the user. Watched rows pass
+  every gate; `if watched: include = True` is a spec violation
+  (`2026-08-31-company-watchlist-v1-design.md`). Resolution (ats /
+  linkedin / unresolved) is a source strategy, never authority; the
+  LinkedIn actor's `companyId` is dead - batch by exact `companyName`
+  and verify the `companyUrl` slug.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name

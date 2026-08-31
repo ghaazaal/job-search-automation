@@ -14,11 +14,17 @@ search:
   days_posted: 30
   jobs_per_category: 50
   run_timeout: 120
+  # Per-company cap on the watched-company fetch; the LinkedIn rung's
+  # batched call sends limit = this x company count.
+  watched_jobs_per_company: 25
 
 apify:
   linkedin_actor:       "valig~linkedin-jobs-scraper"
   remote_boards_actor:  "flash_scraper~remote-job-aggregator"
   company_actor:        "curious_coder~linkedin-company-scraper"
+  # Resolves a domain to its Greenhouse/Lever/Ashby/Workable/etc. board
+  # and returns normalized jobs. The `ats` rung of the company watchlist.
+  careers_actor:        "fabro.dev~company-career-page-jobs"
 
 scoring:
   bands:
