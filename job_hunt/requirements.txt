@@ -6,6 +6,13 @@ pyyaml>=6.0
 requests>=2.31.0
 pytest>=8.0.0
 
+# Geography reference data, offline - no API, no key, reproducible runs.
+# pycountry is ISO 3166 (249 countries); geonamescache is cities over
+# 15k population. src/scoring/geo.py wraps both behind one question:
+# "is this place the user's?"
+pycountry>=24.0
+geonamescache>=2.0
+
 # LLM providers — install the one matching your LLM_PROVIDER setting.
 # You only need ONE of these.
 

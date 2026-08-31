@@ -98,11 +98,15 @@ the authority, including their correction notes and accepted residuals):
   mode it claims: "remote" on a posting whose location says Canada means
   remote FROM Canada. This is the weakest rung of the ladder, so a reach
   field or a description stating wider hiring still beats it, and an
-  unreadable location claims nothing. `eligibility.cities` maps city and
-  metro names to countries because LinkedIn writes "New York City
-  Metropolitan Area" far more often than it writes a country; it is
-  seeded from observed data and excludes ambiguous names (no "Dublin",
-  no "Georgia") because a wrong country there drops a real job.
+  unreadable location claims nothing. Place knowledge comes from offline
+  reference datasets (pycountry, geonamescache — 249 countries, 34k
+  cities) wrapped by `src/scoring/geo.py`, which answers MEMBERSHIP, not
+  resolution: "is this place the user's?" Eligibility never needs to know
+  WHICH Dublin a posting means — every Dublin is equally not-Armenia — so
+  ambiguity is only fatal when a candidate IS the user's own country, and
+  then the answer is silence. Reference data does not belong in
+  `vocabulary.yaml`; that file keeps only judgment (phrases, aliases,
+  weights).
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name
