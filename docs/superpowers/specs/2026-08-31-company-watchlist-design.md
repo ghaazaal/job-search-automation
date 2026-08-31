@@ -1,7 +1,8 @@
 # Company watchlist — Ship 10 design
 
 Date: 2026-08-31
-Status: proposed
+Status: superseded by `2026-08-31-company-watchlist-v1-design.md`
+(review found ten unsupported assumptions; v1 is probe-verified)
 
 ## Why
 
