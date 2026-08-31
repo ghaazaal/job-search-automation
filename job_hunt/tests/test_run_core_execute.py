@@ -1078,3 +1078,71 @@ def test_an_unreadable_location_still_claims_nothing():
              "description": "join our team."}]
     _apply_scope(jobs, _ANCHOR_VOCAB, {"country": "am"})
     assert "location_scope" not in jobs[0]
+
+
+# --- Company Watchlist v1 ----------------------------------------------
+
+def _watch(conn, user, name, resolution, **kw):
+    from src.store import watchlist
+    wid = watchlist.add(conn, user, name=name, domain=kw.pop("domain", ""))
+    watchlist.set_resolution(conn, user, wid, resolution, **kw)
+
+
+def test_watched_steps_appear_only_when_the_list_is_non_empty(conn, user,
+                                                             resume):
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers())
+    assert not [s for s in seen[0]["steps"]
+                if s["source"] == "Watched companies"]
+
+    _watch(conn, user, "GitLab", "ats", domain="gitlab.com")
+    seen2 = []
+    run2 = start_run(conn, user)
+    execute(conn, user, run2, _CONFIG, [resume], _PROFILE,
+            on_progress=seen2.append, scrapers=_scrapers(),
+            watched_fetch=lambda *a, **k: [])
+    lanes = [s["lane"] for s in seen2[0]["steps"]
+             if s["source"] == "Watched companies"]
+    assert lanes == ["ats", "linkedin"]
+
+
+def test_watched_rows_ride_the_existing_pipeline(conn, user, resume):
+    """THE invariant: a watched hybrid role in a foreign country is
+    dropped by the same presence rule as anything else. Watching changes
+    where we search, not what qualifies."""
+    _watch(conn, user, "Acme", "ats", domain="acme.com")
+    good = _job("https://w/keep")
+    # A different title, so dedupe's company|title fingerprint cannot
+    # collapse it into `good` before the gate ever sees it.
+    bad = {**_job("https://w/drop", company="Acme", title="Data Analyst"),
+           "location": "Bengaluru, Karnataka, India",
+           "description": "hybrid work, three days in the office."}
+
+    def watched_fetch(conn_, uid, lane, config):
+        return [good, bad] if lane == "ats" else []
+
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(), watched_fetch=watched_fetch)
+    urls = {j["url"] for j in result.scored_jobs}
+    assert "https://w/keep" in urls
+    assert "https://w/drop" not in urls
+    assert result.dropped >= 1
+
+
+def test_a_failing_watched_rung_does_not_take_the_run_down(conn, user,
+                                                           resume):
+    _watch(conn, user, "Acme", "ats", domain="acme.com")
+
+    def watched_fetch(conn_, uid, lane, config):
+        raise RuntimeError("actor down")
+
+    run_id = start_run(conn, user)
+    result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+                     scrapers=_scrapers(
+                         linkedin_jobs=[_job("https://ok/1")]),
+                     watched_fetch=watched_fetch)
+    assert result.kept == 1
+    assert get_run(conn, run_id)["status"] == "OK"
