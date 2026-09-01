@@ -109,6 +109,13 @@ def scrape(country_display: str, get=None) -> list[dict]:
                 "cat":      "watchlist",
                 "title":    item.get("title") or "",
                 "company":  "DataArt",
+                # countriesTags is the EMPLOYER's own enumeration of where
+                # this vacancy hires - the same evidence shape as a remote
+                # board's reach field, so it is marked as one
+                # (source_board) and scope_verdict judges it. This is
+                # reach evidence, not a bypass: a list without the user's
+                # country still comes out closed.
+                "source_board": "dataart",
                 "location": ", ".join(p for p in places if p),
                 "platform": "DataArt careers",
                 "date":     today,   # the API publishes no posting date

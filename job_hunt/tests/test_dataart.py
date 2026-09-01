@@ -42,6 +42,9 @@ def test_resolves_the_country_id_by_display_name():
     assert jobs[0]["title"] == "Platform Engineer with Python"
     assert jobs[0]["company"] == "DataArt"
     assert jobs[0]["location"] == "Armenia"
+    # The employer's own country enumeration is reach evidence - marked
+    # like a board's field so scope_verdict judges it.
+    assert jobs[0]["source_board"] == "dataart"
     assert jobs[0]["url"].endswith("/de00320")
 
 
