@@ -84,7 +84,12 @@ def test_a_timeout_is_reported_without_the_token(token, monkeypatch, caplog):
 
 
 def test_a_missing_token_is_still_reported_and_skipped(monkeypatch, caplog):
+    # All three slots: the machine running the tests may genuinely have
+    # failover tokens configured, and one lingering would turn "no token"
+    # into a real (billed!) request.
     monkeypatch.delenv("APIFY_TOKEN", raising=False)
+    monkeypatch.delenv("APIFY_TOKEN_2", raising=False)
+    monkeypatch.delenv("APIFY_TOKEN_3", raising=False)
     with caplog.at_level(logging.WARNING):
         assert base.call_actor("kaix~indeed-scraper", {}, "Indeed/x") == []
     assert "APIFY_TOKEN not set" in caplog.text
