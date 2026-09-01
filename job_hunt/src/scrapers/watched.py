@@ -61,7 +61,8 @@ def _resolve_one(conn, user_id, row, careers_actor, linkedin_actor, call):
     if row["domain"]:
         hits = call(careers_actor,
                     {"companies": [row["domain"]], "maxJobsPerCompany": 1},
-                    f"Watched/resolve-ats/{row['company_name']}", 180) or []
+                    f"Watched/resolve-ats/{row['company_name']}", 180,
+                    strict=True) or []
         if hits:
             watchlist.set_resolution(conn, user_id, row["id"], "ats")
             return
@@ -70,7 +71,7 @@ def _resolve_one(conn, user_id, row, careers_actor, linkedin_actor, call):
     rows = call(linkedin_actor,
                 {"companyName": [name], "limit": 10,
                  "datePosted": "r2592000"},
-                f"Watched/resolve-li/{name}", 120) or []
+                f"Watched/resolve-li/{name}", 120, strict=True) or []
     mine = [r for r in rows
             if (r.get("companyName") or "").strip() == name]
     slugs = {watchlist.slug_from_url(r.get("companyUrl"))
@@ -155,7 +156,7 @@ def _fetch_ats(rows, apify, per_co, call):
                {"companies": [r["domain"] for r in rows if r["domain"]],
                 "maxJobsPerCompany": per_co,
                 "includeDescription": True},
-               "Watched/ats", 300) or []
+               "Watched/ats", 300, strict=True) or []
     by_name = {r["company_name"]: r for r in rows}
     jobs: list[dict] = []
     counts = {r["company_fingerprint"]: 0 for r in rows}
@@ -197,7 +198,7 @@ def _fetch_linkedin(rows, apify, per_co, call):
     raw = call(actor,
                {"companyName": names, "limit": per_co * len(rows),
                 "datePosted": "r2592000"},
-               "Watched/linkedin", 120) or []
+               "Watched/linkedin", 120, strict=True) or []
     expect = {(r["linkedin_name"] or r["company_name"]): r for r in rows}
     jobs: list[dict] = []
     counts = {r["company_fingerprint"]: 0 for r in rows}

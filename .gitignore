@@ -34,3 +34,8 @@ job_hunt/.pytest_cache/
 
 # Uploaded resumes — personal data, never committed.
 job_hunt/data/
+
+# Generated/local state - never commit
+*.db.bak*
+job_hunt/job_hunt.db*
+.superpowers/

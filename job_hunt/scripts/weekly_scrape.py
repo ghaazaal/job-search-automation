@@ -34,6 +34,38 @@ log = logging.getLogger("weekly_scrape")
 
 USER_ID = 1
 
+# Leave this much headroom: a run that starts with less will die mid-way
+# and its tail of 403s would read as an empty market.
+_MIN_CREDIT_USD = 0.50
+
+
+def apify_credit_remaining() -> float | None:
+    """Remaining monthly usage credit in USD, or None when unknowable.
+
+    Run 10 ran out of credit mid-run: the main lanes finished, then every
+    later call 403'd, and the zeros looked like results. Refusing to
+    start is the honest failure; an unreachable limits endpoint returns
+    None and the run proceeds - this guard must never be the thing that
+    blocks scraping.
+    """
+    import os
+
+    import requests
+    token = os.environ.get("APIFY_TOKEN", "")
+    if not token:
+        return None
+    try:
+        resp = requests.get("https://api.apify.com/v2/users/me/limits",
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=20)
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        return (float(data["limits"]["maxMonthlyUsageUsd"])
+                - float(data["current"]["monthlyUsageUsd"]))
+    except Exception:
+        log.warning("could not read Apify limits - proceeding", exc_info=True)
+        return None
+
 
 def main() -> int:
     import yaml
@@ -43,6 +75,14 @@ def main() -> int:
     from src.store.profile import get_profile, list_resumes
     from src.store.runs import active_run, is_stale, start_run
     from src.store.schema import init_db
+
+    remaining = apify_credit_remaining()
+    if remaining is not None and remaining < _MIN_CREDIT_USD:
+        log.error(
+            "Apify monthly credit exhausted ($%.2f remaining) - refusing "
+            "to start a run that would half-die into silent zeros. Wait "
+            "for the cycle reset or raise the plan limit.", remaining)
+        return 1
 
     conn = connect()
     init_db(conn)

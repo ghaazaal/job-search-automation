@@ -62,10 +62,18 @@ def _redact(text: str, token: str) -> str:
 
 
 def call_actor(actor_id: str, payload: dict, label: str,
-               timeout: int = 120) -> list[dict]:
+               timeout: int = 120, strict: bool = False) -> list[dict]:
     """POST to Apify run-sync endpoint, return raw items list.
 
     Returns empty list on any error so callers can always iterate safely.
+
+    `strict=True` raises on transport/HTTP errors instead. Run 10 showed
+    why the soft default is not always right: the account's credit ran
+    out mid-run, every later call 403'd, and the resolver read those []s
+    as "this company is not on LinkedIn" - a transport failure recorded
+    as a fact about the world. Callers that turn absence into a stored
+    claim must use strict; callers that merely lose a page of results
+    may keep the soft default.
     """
     token = os.environ.get("APIFY_TOKEN", "")
     if not token:
@@ -88,9 +96,13 @@ def call_actor(actor_id: str, payload: dict, label: str,
         return resp.json()
     except requests.exceptions.Timeout as e:
         logger.warning("Timeout for %s: %s", label, _redact(str(e), token))
+        if strict:
+            raise
     except requests.exceptions.RequestException as e:
         logger.warning("Request error for %s: %s", label,
                        _redact(str(e), token))
+        if strict:
+            raise
     except json.JSONDecodeError:
         logger.warning("Could not parse response for %s", label)
     return []
