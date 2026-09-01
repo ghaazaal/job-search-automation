@@ -62,3 +62,47 @@ def test_the_banner_card_is_not_a_vacancy():
 
 def test_an_empty_country_name_claims_nothing():
     assert dataart.scrape("", get=_api([[_ITEM]])) == []
+
+
+def test_a_transient_5xx_is_retried_and_a_4xx_is_not(monkeypatch):
+    """Their API 502'd and 504'd within one day, fine seconds later."""
+    import requests as _requests
+
+    from src.scrapers import dataart as da
+
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, status):
+            self.status_code = status
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                err = _requests.exceptions.HTTPError(str(self.status_code))
+                err.response = self
+                raise err
+
+        def json(self):
+            return {"countries": [{"id": 1, "title": "Armenia"}],
+                    "vacancies": {"pagesTotal": 1, "page": 1, "items": []}}
+
+    def flaky_get(url, params=None, headers=None, timeout=None):
+        calls["n"] += 1
+        return _Resp(504 if calls["n"] == 1 else 200)
+
+    monkeypatch.setattr(da.requests, "get", flaky_get)
+    monkeypatch.setattr(da.time, "sleep", lambda s: None)
+    assert da.scrape("Armenia") == []
+    assert calls["n"] >= 2
+
+    calls["n"] = 0
+
+    def forbidden_get(url, params=None, headers=None, timeout=None):
+        calls["n"] += 1
+        return _Resp(404)
+
+    monkeypatch.setattr(da.requests, "get", forbidden_get)
+    import pytest as _pytest
+    with _pytest.raises(_requests.exceptions.HTTPError):
+        da.scrape("Armenia")
+    assert calls["n"] == 1
