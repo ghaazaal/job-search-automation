@@ -63,11 +63,22 @@ def test_criterion_2_a_status_change_persists(env):
     conn.close()
 
 
-def test_criterion_5_applied_leaves_the_map_for_the_board(env):
+def test_criterion_5_applied_reaches_the_board_and_the_map_marks_it(env):
+    """Superseded criterion (2026-09-01): a tracked role used to LEAVE the
+    map; now it stays there marked IN TRACKER, and is on the board."""
     client, _, role_id = env
     client.post(f"/api/roles/{role_id}/status", json={"status": "APPLIED"})
-    assert b"Analytics Engineer" not in client.get("/").data
+    map_data = client.get("/").data
+    assert b"Analytics Engineer" in map_data
+    assert b"IN TRACKER" in map_data
     assert b"Analytics Engineer" in client.get("/activity").data
+
+
+def test_criterion_5b_hidden_leaves_both_map_and_board(env):
+    client, _, role_id = env
+    client.post(f"/api/roles/{role_id}/status", json={"status": "HIDDEN"})
+    assert b"Analytics Engineer" not in client.get("/").data
+    assert b"Analytics Engineer" not in client.get("/activity").data
 
 
 def test_criterion_6_the_event_log_has_a_row_per_move(env):

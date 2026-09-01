@@ -119,6 +119,14 @@ _RESUMES = [
 ]
 
 
+def test_profile_has_navigation_to_the_other_pages():
+    html = render_profile(_RESUMES, _SET_PROFILE)
+    assert 'href="/"' in html
+    assert 'href="/activity"' in html
+    assert 'aria-current="page"' in html
+    assert ">PROFILE<" in html
+
+
 def test_the_profile_screen_lists_every_resume():
     html = render_profile(_RESUMES, _SET_PROFILE)
     assert "bi developer" in html
