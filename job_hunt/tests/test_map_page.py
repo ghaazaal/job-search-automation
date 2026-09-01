@@ -208,6 +208,62 @@ def test_zero_is_a_valid_id_not_a_missing_one():
     assert 'data-company="0"' in html
 
 
+# ── Navigation ────────────────────────────────────────────────────────────────
+
+def test_map_has_navigation_to_the_other_pages():
+    html = render([_map()])
+    assert 'href="/activity"' in html
+    assert 'href="/profile"' in html
+    assert 'aria-current="page"' in html
+    assert ">MAP<" in html
+
+
+# ── Tracker (kanban) wiring ───────────────────────────────────────────────────
+
+def _ids(m, company=7, role=42):
+    # A private copy of the role dict — the module-level _ROLE is shared,
+    # and these tests set per-test fields on it.
+    m["roles"] = [dict(r) for r in m["roles"]]
+    m["id"] = company
+    m["roles"][0]["id"] = role
+    return m
+
+
+def test_tracked_role_card_shows_marker_instead_of_save():
+    """A role already on the board stays on the map, marked — it must not
+    offer SAVE again, and the marker leads to the board."""
+    m = _ids(_map())
+    m["roles"][0]["app_status"] = "SAVED"
+    body = _body(render([m]))
+    assert "IN TRACKER" in body
+    assert 'data-status="SAVED"' not in body
+    assert 'href="/activity"' in body
+
+
+def test_untracked_role_card_still_offers_save():
+    body = _body(render([_ids(_map())]))
+    assert 'data-status="SAVED"' in body
+    assert "IN TRACKER" not in body
+
+
+def test_drawer_payload_carries_role_id_and_tracker_status():
+    m = _ids(_map())
+    m["roles"][0]["app_status"] = "SAVED"
+    html = render([m])
+    assert '"rid": 42' in html
+    assert '"app_status": "SAVED"' in html
+
+
+def test_drawer_offers_add_to_tracker_and_a_working_mark_applied():
+    """The detail drawer's buttons must be wired to the status endpoint —
+    MARK APPLIED existed before but was dead (no data attributes, no id)."""
+    html = render([_ids(_map())])
+    js = html.split("<script>")[1]
+    assert "ADD TO TRACKER" in js
+    assert "MARK APPLIED" in js
+    assert js.count("data-status=") >= 2
+
+
 # ── Hidden (dropped) count ────────────────────────────────────────────────────
 
 def test_hidden_postings_are_announced_in_the_meta_line():

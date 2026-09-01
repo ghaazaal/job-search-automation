@@ -12,6 +12,7 @@ proofread, and it is the model's job to get them roughly right.
 import json
 from html import escape
 
+from .nav import nav_links
 from .store.profile import WORK_MODES
 
 _CSS = """
@@ -27,6 +28,8 @@ a:hover{color:#A83519}
 .title{font:600 46px/1 Caveat,cursive;color:#D6482B}
 .sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:10px;max-width:48ch;text-wrap:pretty}
 .nav{font:500 11px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.1em}
+.nav a{color:#6E7787}
+.nav .nav-here{color:#D6482B}
 .wrap{display:flex;justify-content:center;padding:0 40px}
 .col{flex:1;max-width:820px;display:flex;flex-direction:column;gap:16px;min-width:0}
 .card{background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:22px 26px}
@@ -454,4 +457,4 @@ def render_profile(resumes: list[dict], profile: dict,
         "One person, many resumes. Each active resume adds its target roles "
         "to the search.",
         body + _STARTER, _PROFILE_JS,
-        nav='<a href="/">&larr; BACK TO MAP</a>')
+        nav=nav_links("/profile"))

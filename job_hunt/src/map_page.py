@@ -13,6 +13,8 @@ import json
 from datetime import date, datetime
 from html import escape
 
+from .nav import nav_links
+
 # Tokens from the handoff. Percentages are deliberately avoided in the output
 # so a stray "45%" can never look like a score to a reader or a test.
 _CSS = """
@@ -29,6 +31,9 @@ a:hover{color:#A83519}
 .title{font:600 46px/1 Caveat,cursive;color:#D6482B;letter-spacing:.01em}
 .sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:10px;max-width:46ch;text-wrap:pretty}
 .meta-r{flex:none;text-align:right;padding-bottom:4px}
+.nav{font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#6E7787;margin-bottom:10px}
+.nav a{color:#6E7787}
+.nav .nav-here{color:#D6482B}
 .meta-1{font:500 11px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
 .meta-2{font:400 11px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:9px}
 .wrap{display:flex;justify-content:center;padding:0 40px}
@@ -62,6 +67,7 @@ a:hover{color:#A83519}
 .btn:hover{border-color:#D6482B}
 .btn-fetch{flex:none;margin-left:auto;background:#FFFDF8;border-color:#D5CDB9}
 .btn-q{padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
+.tracked{padding:7px 0;color:#3B7EA8;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-decoration:none}
 .btn-q:hover{color:#4C5768}
 .btn-hide{margin-left:auto;color:#9AA3AE}
 .fold{display:flex;align-items:center;gap:14px;margin-top:4px}
@@ -198,15 +204,22 @@ def _fit_block(role: dict, lead: bool) -> str:
 
 
 def _actions(company_key: str, company_id=None, role_id=None,
-             watchable: bool = True) -> str:
-    """Action row. Data attributes are the wiring to the write endpoints."""
+             watchable: bool = True, app_status: str | None = None) -> str:
+    """Action row. Data attributes are the wiring to the write endpoints.
+
+    A role already on the tracker shows a marker leading to the board
+    instead of SAVE — adding it again is not an action it needs."""
     ids = ""
     if role_id is not None:
         ids += f' data-role="{_e(str(role_id))}"'
     if company_id is not None:
         ids += f' data-company="{_e(str(company_id))}"'
-    save = (f'<button type="button" class="btn-q" data-status="SAVED"{ids}>SAVE</button>'
-            if role_id is not None else "")
+    if app_status:
+        save = (f'<a class="tracked" href="/activity">IN TRACKER &middot; '
+                f'{_e(app_status)}</a>')
+    else:
+        save = (f'<button type="button" class="btn-q" data-status="SAVED"{ids}>SAVE</button>'
+                if role_id is not None else "")
     watch = (f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
              if watchable else "")
     return (
@@ -239,7 +252,7 @@ def _lead_card(m: dict, key: str) -> str:
         f'<div class="rtitle">{_e(role.get("title"))}</div>'
         f'<div class="rmeta">{_e(_role_meta(role))}</div>'
         f'{_fit_block(role, True)}'
-        f'{_actions(key, m.get("id"), role.get("id"))}</div>'
+        f'{_actions(key, m.get("id"), role.get("id"), app_status=role.get("app_status"))}</div>'
     )
 
 
@@ -256,7 +269,7 @@ def _compact_card(m: dict, key: str) -> str:
         f'<div class="cmeta">{_e(meta.upper())}</div></div>'
         f'<div class="cwhy">{_e(m["why"])}</div>'
         f'{_fit_block(role, False)}'
-        f'{_actions(key, m.get("id"), role.get("id"))}</div>'
+        f'{_actions(key, m.get("id"), role.get("id"), app_status=role.get("app_status"))}</div>'
     )
 
 
@@ -308,6 +321,8 @@ def _drawer_payload(maps: list[dict]) -> dict:
                 "gaps": list(r.get("gaps") or []),
                 "captured": bool(r.get("description_captured")),
                 "url": r.get("url") or "",
+                "rid": r.get("id"),
+                "app_status": r.get("app_status"),
             } for r in m["roles"]],
         }
     return out
@@ -337,6 +352,11 @@ function render(){
       + (r.gaps.length?'<div class="gnote">Named in the posting, not found on your resume. Not a rejection — worth a line in the cover letter.</div>':'')
       + '</div></div>' : '';
   const nextLabel = roleIdx < co.roles.length-1 ? 'NEXT ROLE HERE \\u2192' : 'BACK TO MAP \\u2192';
+  const track = r.rid == null ? ''
+    : r.app_status
+      ? '<a class="btn-s" href="/activity">IN TRACKER \\u00b7 '+esc(r.app_status)+'</a>'
+      : '<button type="button" class="btn-s" data-status="SAVED" data-role="'+esc(r.rid)+'">ADD TO TRACKER</button>'
+        + '<button type="button" class="btn-s" data-status="APPLIED" data-role="'+esc(r.rid)+'">MARK APPLIED</button>';
   shell.innerHTML = '<div class="scrim" data-close="1"></div><div class="panel">'
     + '<div class="crumb">'+esc(co.name.toUpperCase())+' \\u00b7 ROLE '+(roleIdx+1)+' OF '+co.roles.length
     + '<button type="button" class="esc" data-close="1">ESC</button></div>'
@@ -345,7 +365,7 @@ function render(){
     + tabs + fit + grid
     + '<div class="dsec">why this company</div><div class="dsec-b">'+esc(co.why)+'</div>'
     + '<div class="foot"><a class="btn-p" href="'+esc(r.url)+'" target="_blank" rel="noopener">OPEN POSTING \\u2197</a>'
-    + '<button type="button" class="btn-s">MARK APPLIED</button>'
+    + track
     + '<button type="button" class="btn-n" data-next="1">'+nextLabel+'</button></div></div>';
   shell.classList.remove('hidden');
 }
@@ -504,6 +524,7 @@ async function startRun(){
 <div class="sub">Companies worth twenty minutes. Everything below them is here for a reason you can read.</div>
 </div>
 <div class="meta-r">
+<div class="nav">{nav_links("/")}</div>
 <div class="meta-1">{n_co} COMPANIES &middot; {n_ro} ROLES</div>
 <div class="meta-2">{meta_2}</div>
 </div>

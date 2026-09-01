@@ -2,7 +2,7 @@
 
 Every function here is the boundary between storage and rendering. The internal
 `match_score` is used for ordering and for deriving a company's state, then
-dropped — it must not reach a template or a JSON response.
+dropped â€” it must not reach a template or a JSON response.
 """
 import json
 import sqlite3
@@ -14,7 +14,8 @@ from .db import transaction
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-_ACTIVITY_COLUMNS = ("SAVED", "APPLIED", "INTERVIEWING", "OFFER", "CLOSED")
+_ACTIVITY_COLUMNS = ("SAVED", "APPLIED", "INTERVIEWING", "OFFER",
+                     "REJECTED", "CLOSED")
 
 
 def mark_seen(conn: sqlite3.Connection, user_id: int, run_id: int) -> None:
@@ -43,6 +44,8 @@ def _role_view(row: sqlite3.Row) -> dict:
         "reason":               row["reason"],
         "matched":              json.loads(row["matched"]),
         "gaps":                 json.loads(row["gaps"]),
+        "app_status":           (row["app_status"]
+                                 if "app_status" in row.keys() else None),
     }
 
 
@@ -69,9 +72,9 @@ def _group(conn, rows, shortlist_min, watched_fps=frozenset()) -> list[dict]:
     for company_id, group in by_company.items():
         group.sort(key=lambda r: -(r["match_score"] or 0))
         best = group[0]["match_score"] or 0
-        # Two independent rungs, not one scale. Reach comes first — a
+        # Two independent rungs, not one scale. Reach comes first â€” a
         # role proven open to this user outranks one we merely could not
-        # disprove — and the older eligibility_verified flag still breaks
+        # disprove â€” and the older eligibility_verified flag still breaks
         # ties beneath it. Collapsing them into a single number let a
         # proven-open company swamp the verified/unverified distinction
         # entirely, which is a different question about a different fact.
@@ -105,12 +108,16 @@ def _group(conn, rows, shortlist_min, watched_fps=frozenset()) -> list[dict]:
     return maps
 
 
+# Tracked roles (any application row except HIDDEN) STAY on the map,
+# marked — adding a role to the board must not make it vanish here
+# (decision 2026-09-01, kanban spec). HIDDEN still removes it: the user
+# asked not to see it.
 _OPEN_ROLES = """
-SELECT r.* FROM role r
+SELECT r.*, a.status AS app_status FROM role r
   JOIN company c ON c.id = r.company_id
   LEFT JOIN application a ON a.role_id = r.id
  WHERE r.user_id = ?
-   AND a.id IS NULL
+   AND (a.id IS NULL OR a.status != 'HIDDEN')
    AND c.user_state != 'HIDDEN'
    AND r.dropped_at IS NULL
    AND (r.location_scope IS NULL OR r.location_scope != 'closed')
@@ -138,7 +145,7 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
 
     watching = [
         {"id": r["id"], "name": r["name"], "state": "WATCH", "roles": [],
-         "why": "watched — nothing open right now"}
+         "why": "watched â€” nothing open right now"}
         for r in conn.execute(
             "SELECT id, name FROM company WHERE user_id = ? AND user_state = 'WATCH'"
             " ORDER BY name", (user_id,))
@@ -178,14 +185,14 @@ def drop_roles_from_runs(conn: sqlite3.Connection, user_id: int, *,
 def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
     """How every stored role divides on the only question that matters.
 
-    `unverified` is a NULL or "unknown" `location_scope` — a row nothing
+    `unverified` is a NULL or "unknown" `location_scope` â€” a row nothing
     could judge. That is every LinkedIn row, whose location is a place
     rather than a reach statement, and every board row whose reach field
     was unparseable. Unverified is neither eligible nor ineligible; the
     map states the size of that set rather than implying either reading.
 
     Run 6's split for the working profile was 2 open, 66 closed, 316
-    unverified — which is why the map stopped rendering all 384.
+    unverified â€” which is why the map stopped rendering all 384.
     """
     rows = conn.execute(
         """SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
@@ -207,6 +214,7 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
     board: dict[str, list] = {col: [] for col in _ACTIVITY_COLUMNS}
     rows = conn.execute(
         """SELECT r.id, r.title, r.url, r.location, c.name AS company,
+                  r.band, r.reason, r.description_captured,
                   a.status, a.applied_at, a.updated_at
              FROM application a
              JOIN role r ON r.id = a.role_id
@@ -216,15 +224,17 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
 
     for row in rows:
         status = row["status"]
-        column = "CLOSED" if status in ("REJECTED", "CLOSED") else status
-        if column not in board:          # HIDDEN has no column
+        if status not in board:          # HIDDEN has no column
             continue
-        board[column].append({
+        board[status].append({
             "role_id":    row["id"],
             "title":      row["title"],
             "company":    row["company"],
             "location":   row["location"],
             "url":        row["url"],
+            "band":       row["band"],
+            "reason":     row["reason"],
+            "description_captured": bool(row["description_captured"]),
             "status":     status,
             "updated_at": row["updated_at"],
             "events": [dict(e) for e in conn.execute(

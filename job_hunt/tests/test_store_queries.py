@@ -58,11 +58,32 @@ def test_after_marking_seen_the_next_run_is_new(conn):
     assert [m["name"] for m in sections["earlier"]] == ["Acme"]
 
 
-def test_acted_on_roles_leave_the_map(conn):
+def test_tracked_roles_stay_on_the_map_with_their_status(conn):
+    """Adding a role to the tracker must not make it vanish from the map —
+    the map marks it instead (decision 2026-09-01, kanban spec)."""
     u = ensure_user(conn, "G")
     _run_with(conn, u, [_job("https://x/1")])
     role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
     set_role_status(conn, u, role_id, "SAVED")
+    roles = [r for m in map_sections(conn, u, shortlist_min=7)["new"]
+             for r in m["roles"]]
+    assert [r["app_status"] for r in roles] == ["SAVED"]
+
+
+def test_untracked_roles_carry_no_app_status(conn):
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1")])
+    role = map_sections(conn, u, shortlist_min=7)["new"][0]["roles"][0]
+    assert role["app_status"] is None
+
+
+def test_hidden_roles_leave_the_map(conn):
+    """HIDDEN is the one tracker status that still removes a role — the
+    user asked not to see it."""
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1")])
+    role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
+    set_role_status(conn, u, role_id, "HIDDEN")
     sections = map_sections(conn, u, shortlist_min=7)
     assert sections["new"] == [] and sections["earlier"] == []
 
@@ -76,12 +97,14 @@ def test_hidden_company_leaves_the_map(conn):
 
 
 def test_watched_company_with_no_open_role_is_on_the_shelf(conn):
+    """HIDDEN removes the role from view; APPLIED no longer would, since
+    tracked roles now stay listed (2026-09-01)."""
     u = ensure_user(conn, "G")
     _run_with(conn, u, [_job("https://x/1")])
     company_id = conn.execute("SELECT id FROM company").fetchone()["id"]
     role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
     set_company_state(conn, u, company_id, "WATCH")
-    set_role_status(conn, u, role_id, "APPLIED")
+    set_role_status(conn, u, role_id, "HIDDEN")
     sections = map_sections(conn, u, shortlist_min=7)
     assert [m["name"] for m in sections["watching"]] == ["Acme"]
 
@@ -155,10 +178,52 @@ def test_activity_board_groups_by_status(conn):
     assert [c["title"] for c in board["APPLIED"]] == ["Data Engineer"]
 
 
+def test_activity_board_is_oldest_first_within_a_column(conn):
+    """Both docstrings promise oldest first; the ORDER BY is the only thing
+    delivering it. set_role_status stamps now-time on both rows, so the
+    second-saved role is backdated to force the non-insertion order."""
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1"),
+                        _job("https://x/2", title="Data Engineer")])
+    ids = [r["id"] for r in conn.execute("SELECT id FROM role ORDER BY id")]
+    set_role_status(conn, u, ids[0], "SAVED")
+    set_role_status(conn, u, ids[1], "SAVED")
+    conn.execute("UPDATE application SET updated_at = '2020-01-01T00:00:00'"
+                 " WHERE role_id = ?", (ids[1],))
+    board = activity_board(conn, u)
+    assert [c["title"] for c in board["SAVED"]] == ["Data Engineer",
+                                                   "Analytics Engineer"]
+
+
 def test_activity_columns_always_exist_even_when_empty(conn):
     u = ensure_user(conn, "G")
     board = activity_board(conn, u)
-    assert set(board) == {"SAVED", "APPLIED", "INTERVIEWING", "OFFER", "CLOSED"}
+    assert list(board) == ["SAVED", "APPLIED", "INTERVIEWING", "OFFER",
+                           "REJECTED", "CLOSED"]
+
+
+def test_rejected_and_closed_are_separate_columns(conn):
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1"),
+                        _job("https://x/2", title="Data Engineer")])
+    ids = [r["id"] for r in conn.execute("SELECT id FROM role ORDER BY id")]
+    set_role_status(conn, u, ids[0], "REJECTED")
+    set_role_status(conn, u, ids[1], "CLOSED")
+    board = activity_board(conn, u)
+    assert [c["title"] for c in board["REJECTED"]] == ["Analytics Engineer"]
+    assert [c["title"] for c in board["CLOSED"]] == ["Data Engineer"]
+
+
+def test_activity_cards_carry_fit_evidence(conn):
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1")])
+    role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
+    set_role_status(conn, u, role_id, "SAVED")
+    card = activity_board(conn, u)["SAVED"][0]
+    assert card["band"] == "STRONG FIT"
+    assert card["reason"] == "matches dbt"
+    assert card["description_captured"] is True
+    assert "match_score" not in card
 
 
 def test_activity_cards_carry_their_event_log(conn):
