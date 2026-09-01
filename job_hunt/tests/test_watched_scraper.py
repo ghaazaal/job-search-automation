@@ -166,3 +166,30 @@ def test_an_empty_rung_makes_no_call(conn, user):
         raise AssertionError("no companies on this rung - must not bill")
 
     assert watched.fetch(conn, user, "ats", _CFG, call=call) == []
+
+
+# --- the custom rung ----------------------------------------------------
+
+def test_the_custom_rung_dispatches_by_fingerprint(conn, user, monkeypatch):
+    _watch_resolved(conn, user, "DataArt", "custom")
+    seen = {}
+
+    def fake_scrape(country):
+        seen["country"] = country
+        return [{"cat": "watchlist", "title": "Data Analyst",
+                 "company": "DataArt", "location": "Armenia",
+                 "platform": "DataArt careers", "date": "2026-09-01",
+                 "url": "https://www.dataart.team/vacancies/da1",
+                 "salary": "", "description": "sql"}]
+
+    from src.scrapers import dataart
+    monkeypatch.setattr(dataart, "scrape", fake_scrape)
+    jobs = watched.fetch(conn, user, "custom", _CFG,
+                         profile={"country": "am"})
+    assert seen["country"] == "Armenia"     # ISO am -> display, via pycountry
+    assert [j["url"] for j in jobs] == ["https://www.dataart.team/vacancies/da1"]
+
+
+def test_a_custom_row_without_an_adapter_is_skipped_not_fatal(conn, user):
+    _watch_resolved(conn, user, "Mystery Co", "custom")
+    assert watched.fetch(conn, user, "custom", _CFG, profile={}) == []

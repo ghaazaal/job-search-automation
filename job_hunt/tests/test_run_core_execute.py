@@ -1120,7 +1120,7 @@ def test_watched_rows_ride_the_existing_pipeline(conn, user, resume):
            "location": "Bengaluru, Karnataka, India",
            "description": "hybrid work, three days in the office."}
 
-    def watched_fetch(conn_, uid, lane, config):
+    def watched_fetch(conn_, uid, lane, config, **kw):
         return [good, bad] if lane == "ats" else []
 
     run_id = start_run(conn, user)
@@ -1136,7 +1136,7 @@ def test_a_failing_watched_rung_does_not_take_the_run_down(conn, user,
                                                            resume):
     _watch(conn, user, "Acme", "ats", domain="acme.com")
 
-    def watched_fetch(conn_, uid, lane, config):
+    def watched_fetch(conn_, uid, lane, config, **kw):
         raise RuntimeError("actor down")
 
     run_id = start_run(conn, user)
@@ -1146,3 +1146,26 @@ def test_a_failing_watched_rung_does_not_take_the_run_down(conn, user,
                      watched_fetch=watched_fetch)
     assert result.kept == 1
     assert get_run(conn, run_id)["status"] == "OK"
+
+
+def test_the_custom_lane_is_planned_only_when_a_custom_row_exists(conn, user,
+                                                                  resume):
+    _watch(conn, user, "GitLab", "ats", domain="gitlab.com")
+    seen = []
+    run_id = start_run(conn, user)
+    execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,
+            on_progress=seen.append, scrapers=_scrapers(),
+            watched_fetch=lambda *a, **k: [])
+    lanes = [s["lane"] for s in seen[0]["steps"]
+             if s["source"] == "Watched companies"]
+    assert lanes == ["ats", "linkedin"]
+
+    _watch(conn, user, "DataArt", "custom")
+    seen2 = []
+    run2 = start_run(conn, user)
+    execute(conn, user, run2, _CONFIG, [resume], _PROFILE,
+            on_progress=seen2.append, scrapers=_scrapers(),
+            watched_fetch=lambda *a, **k: [])
+    lanes2 = [s["lane"] for s in seen2[0]["steps"]
+              if s["source"] == "Watched companies"]
+    assert lanes2 == ["ats", "linkedin", "custom"]
