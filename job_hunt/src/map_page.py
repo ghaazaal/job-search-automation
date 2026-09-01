@@ -1,19 +1,22 @@
 """Renders the opportunity map page.
 
-Recreates `docs/design_handoff_opportunity_map/Opportunity Map Notebook.dc.html`
+Recreates the map surface of
+`design/wireframes/design_handoff_opportunity_map/Opportunity Map App.dc.html`
 as a self-contained page generated from pipeline data. Vanilla HTML/CSS/JS —
 the project generates static pages from Python and has no JS toolchain.
 
-The product rules from the handoff are enforced here, not just described:
-no numeric score is ever emitted, a band never renders without its reason, and
-an uncaptured description renders as its own "not checked yet" state rather
-than as a weak band.
+The page sits under the shared app shell (`shell.py`) and opens the shared
+role drawer (`drawer.py`). The product rules from the handoff are enforced
+here, not just described: no numeric score is ever emitted, a band never
+renders without its reason, and an uncaptured description renders as its
+own "not checked yet" state rather than as a weak band.
 """
 import json
 from datetime import date, datetime
 from html import escape
 
-from .nav import nav_links
+from .drawer import DRAWER_CSS, DRAWER_MOUNT, drawer_js
+from .shell import SHELL_CSS, shell_nav
 
 # Tokens from the handoff. Percentages are deliberately avoided in the output
 # so a stray "45%" can never look like a score to a reader or a test.
@@ -24,18 +27,14 @@ body{font-family:Inter,system-ui,sans-serif;color:#2A3342;-webkit-font-smoothing
 a{color:#D6482B;text-decoration:none}
 a:hover{color:#A83519}
 ::selection{background:rgba(46,125,91,.18)}
-.page{min-height:100vh;background:#F7F2E6;background-image:radial-gradient(rgba(42,51,66,.14) 1px,transparent 1px);background-size:22px 22px;background-position:11px 11px;padding:0 0 80px}
-.hatch{height:26px;background-image:repeating-linear-gradient(112deg,rgba(59,126,168,.28) 0 1px,transparent 1px 7px);mask-image:linear-gradient(to bottom,#000,transparent);-webkit-mask-image:linear-gradient(to bottom,#000,transparent)}
-.head{display:flex;justify-content:center;padding:30px 40px 34px}
-.head-in{flex:1;max-width:1180px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px}
-.title{font:600 46px/1 Caveat,cursive;color:#D6482B;letter-spacing:.01em}
-.sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:10px;max-width:46ch;text-wrap:pretty}
-.meta-r{flex:none;text-align:right;padding-bottom:4px}
-.nav{font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.1em;color:#6E7787;margin-bottom:10px}
-.nav a{color:#6E7787}
-.nav .nav-here{color:#D6482B}
-.meta-1{font:500 11px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
-.meta-2{font:400 11px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:9px}
+.page{min-height:100vh;background:#F7F2E6;background-image:radial-gradient(rgba(42,51,66,.14) 1px,transparent 1px);background-size:22px 22px;background-position:11px 11px;padding:0 0 90px}
+.head{display:flex;justify-content:center;padding:30px 40px 30px}
+.head-in{flex:1;max-width:820px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px}
+.title{font:600 42px/1 Caveat,cursive;color:#D6482B;letter-spacing:.01em}
+.sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:46ch;text-wrap:pretty}
+.meta-r{flex:none;max-width:340px;text-align:right;padding-bottom:4px}
+.meta-1{font:500 11px/1.7 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
+.meta-2{font:400 11px/1.7 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:7px}
 .wrap{display:flex;justify-content:center;padding:0 40px}
 .col{flex:1;max-width:820px;display:flex;flex-direction:column;gap:16px;min-width:0}
 .lead{background:#FFFDF8;border:1px solid #CBBFA5;border-left:3px solid #2E7D5B;border-radius:4px;padding:22px 26px 20px;box-shadow:0 1px 0 rgba(42,51,66,.06)}
@@ -48,13 +47,14 @@ a:hover{color:#A83519}
 .card .cmeta{font-size:10.5px}
 .cwhy{font:400 15px/1.65 Inter,sans-serif;color:#4C5768;margin-top:9px;text-wrap:pretty}
 .card .cwhy{font-size:14px;color:#6E7787;margin-top:7px}
+.card .cwhy .creason{color:#3A4557}
 .rule{height:1px;background:#EBE3D2;margin:18px 0;border:0}
 .rtitle{font:500 17px/1.3 Inter,sans-serif;color:#1F2937}
 .rmeta{font:400 11.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.06em;margin-top:9px}
 .brow{display:flex;gap:13px;align-items:flex-start;margin-top:15px}
 .reason{font:400 14.5px/1.6 Inter,sans-serif;color:#3A4557;text-wrap:pretty}
-.card .reason{font-size:14px}
-.pill{flex:none;font:700 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.11em;border-radius:2px}
+.pill{flex:none;font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.11em;border-radius:2px}
+.card .pill{font-size:9.5px}
 .pill-strong{padding:5px 11px;background:#2E7D5B;color:#FFFDF8}
 .pill-partial{padding:4px 10px;border:1px solid #2A5F86;color:#2A5F86}
 .pill-stretch{padding:4px 10px;border:1px solid #B9C4D0;color:#6E7787}
@@ -62,21 +62,24 @@ a:hover{color:#A83519}
 .unchecked span{font:400 13.5px/1.6 Inter,sans-serif;color:#6E7787;text-wrap:pretty}
 .unchecked b{color:#3A4557;font-weight:400}
 .acts{display:flex;align-items:center;gap:10px;margin-top:16px}
+.lead .acts{padding-top:18px;border-top:1px solid #EBE3D2}
 .card .acts{margin-top:14px;gap:12px}
-.btn{padding:7px 13px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
+.btn-lead{padding:10px 18px;border:1px solid #D6482B;background:#D6482B;border-radius:3px;color:#FFFDF8;font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer}
+.btn-lead:hover{background:#A83519;border-color:#A83519}
+.btn{padding:7px 13px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer}
 .btn:hover{border-color:#D6482B}
 .btn-fetch{flex:none;margin-left:auto;background:#FFFDF8;border-color:#D5CDB9}
-.btn-q{padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
-.tracked{padding:7px 0;color:#3B7EA8;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-decoration:none}
+.btn-q{padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer}
 .btn-q:hover{color:#4C5768}
+.tracked{padding:7px 0;color:#3B7EA8;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;text-decoration:none;white-space:nowrap}
 .btn-hide{margin-left:auto;color:#9AA3AE}
-.fold{display:flex;align-items:center;gap:14px;margin-top:4px}
+.fold{display:flex;align-items:center;gap:16px;margin-top:4px}
 .fold span{flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
 .fold i{flex:1;height:1px;background:#DED5C1}
 .shelf{margin-top:34px}
-.shelf-h{display:flex;align-items:baseline;gap:14px;padding-bottom:12px;border-bottom:1px solid #E0D8C4}
-.shelf-t{font:600 26px/1.2 Caveat,cursive;color:#2E7D5B}
-.shelf-m{margin-left:auto;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
+.shelf-h{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #E0D8C4}
+.shelf-t{font:600 26px/1 Caveat,cursive;color:#2E7D5B}
+.shelf-m{flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
 .tile{background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:13px 15px}
 .tile-n{font:500 14.5px/1.3 Inter,sans-serif;color:#3A4557}
@@ -84,38 +87,8 @@ a:hover{color:#A83519}
 .quiet{background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:24px 26px;margin-bottom:4px}
 .quiet-t{font:600 26px/1.2 Caveat,cursive;color:#2A3342}
 .quiet-b{font:400 14.5px/1.65 Inter,sans-serif;color:#4C5768;margin-top:8px;max-width:52ch;text-wrap:pretty}
-.scrim{position:absolute;inset:0;background:rgba(42,51,66,.26)}
-.shell{position:fixed;inset:0;z-index:60;display:flex;justify-content:flex-end}
-.panel{position:relative;width:min(560px,94vw);height:100vh;overflow:auto;overscroll-behavior:contain;background:#FFFDF8;border-left:1px solid #CBBFA5;padding:28px 32px 32px;box-shadow:-18px 0 40px -26px rgba(42,51,66,.55)}
-.crumb{display:flex;align-items:center;gap:12px;font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.1em}
-.esc{margin-left:auto;padding:5px 9px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;cursor:pointer}
-.dtitle{font:500 24px/1.25 Inter,sans-serif;color:#1F2937;letter-spacing:-.02em;margin-top:16px}
-.dmeta{font:400 11.5px/1.75 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.05em;margin-top:8px}
-.tabs{display:flex;flex-wrap:wrap;gap:7px;margin-top:18px;padding-bottom:14px;border-bottom:1px solid #EBE3D2}
-.tab{padding:5px 11px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#6E7787;font:400 11.5px/1.3 Inter,sans-serif;cursor:pointer}
-.tab:hover{border-color:#CBBFA5;color:#3A4557}
-.tab-on{border-color:#2E7D5B;background:#EAF2ED;color:#215E44;font-weight:500}
-.dband{background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:15px 16px;display:flex;gap:13px;align-items:flex-start;margin-top:18px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:24px}
-.gh{font:500 9.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em;padding-bottom:10px}
-.gh-m{border-bottom:1px solid #2E7D5B}
-.gh-g{border-bottom:1px dashed #C9BFA8}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-.chip{font:400 12.5px/1.3 Inter,sans-serif;padding:5px 10px;border-radius:2px;white-space:nowrap}
-.chip-m{background:#EAF2ED;border:1px solid #C3DACD;color:#215E44}
-.chip-g{background:transparent;border:1px dashed #C9BFA8;color:#4C5768}
-.gnote{font:400 12.5px/1.6 Inter,sans-serif;color:#8A93A1;margin-top:12px;text-wrap:pretty}
-.dsec{font:600 22px/1.2 Caveat,cursive;color:#2E7D5B;margin-top:26px;padding-bottom:10px;border-bottom:1px solid #EBE3D2}
-.dsec-b{font:400 13.5px/1.65 Inter,sans-serif;color:#4C5768;margin-top:12px;text-wrap:pretty}
-.foot{display:flex;align-items:center;gap:10px;margin-top:26px;padding-top:18px;border-top:1px solid #EBE3D2}
-.btn-p{padding:8px 15px;border:1px solid #D6482B;background:#D6482B;border-radius:3px;color:#FFFDF8;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
-.btn-p:hover{background:#A83519;border-color:#A83519}
-.btn-s{padding:8px 15px;border:1px solid #D5CDB9;background:transparent;border-radius:3px;color:#6E7787;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
-.btn-s:hover{border-color:#2E7D5B;color:#2E7D5B}
-.btn-n{margin-left:auto;border:0;background:transparent;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;cursor:pointer}
-.btn-n:hover{color:#3A4557}
 .hidden{display:none}
-.fold-btn{display:flex;align-items:center;gap:14px;margin-top:4px;align-self:stretch;border:0;background:transparent;padding:0;cursor:pointer;text-align:left}
+.fold-btn{display:flex;align-items:center;gap:16px;margin-top:4px;align-self:stretch;border:0;background:transparent;padding:6px 0;cursor:pointer;text-align:left}
 .fold-btn span.lbl{flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
 .fold-btn:hover span.lbl{color:#4C5768}
 .fold-btn i{flex:1;height:1px;background:#DED5C1}
@@ -192,57 +165,53 @@ def _unchecked_block(role: dict) -> str:
     )
 
 
-def _fit_block(role: dict, lead: bool) -> str:
-    if not role.get("description_captured"):
-        return _unchecked_block(role)
-    pill = _band_pill(role)
-    reason = _e(role.get("reason") or "")
-    if not pill or not reason:
-        # Rule 2 — rather than show a band alone, show neither.
-        return ""
-    return f'<div class="brow">{pill}<span class="reason">{reason}</span></div>'
+def _checked(role: dict) -> bool:
+    """Whether the band+reason pair may render at all (rules 2 and 3)."""
+    return bool(role.get("description_captured")
+                and role.get("band") and role.get("reason"))
 
 
-def _actions(company_key: str, company_id=None, role_id=None,
-             watchable: bool = True, app_status: str | None = None) -> str:
-    """Action row. Data attributes are the wiring to the write endpoints.
-
-    A role already on the tracker shows a marker leading to the board
+def _track_action(role_id, app_status: str | None, ids: str) -> str:
+    """A role already on the tracker shows a marker leading to the board
     instead of SAVE — adding it again is not an action it needs."""
+    if app_status:
+        return (f'<a class="tracked" href="/activity">IN TRACKER &middot; '
+                f'{_e(app_status)}</a>')
+    if role_id is not None:
+        return (f'<button type="button" class="btn-q" data-status="SAVED"'
+                f'{ids}>SAVE</button>')
+    return ""
+
+
+def _ids(company_id, role_id) -> str:
     ids = ""
     if role_id is not None:
         ids += f' data-role="{_e(str(role_id))}"'
     if company_id is not None:
         ids += f' data-company="{_e(str(company_id))}"'
-    if app_status:
-        save = (f'<a class="tracked" href="/activity">IN TRACKER &middot; '
-                f'{_e(app_status)}</a>')
-    else:
-        save = (f'<button type="button" class="btn-q" data-status="SAVED"{ids}>SAVE</button>'
-                if role_id is not None else "")
-    watch = (f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
-             if watchable else "")
-    return (
-        f'<div class="acts">'
-        f'<button type="button" class="btn" data-open="{_e(company_key)}">REVIEW ROLE</button>'
-        f'{save}{watch}'
-        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"{ids}>HIDE</button>'
-        f'</div>'
-    )
+    return ids
 
 
 def _watch_chip(m: dict) -> str:
     """Marker only — watching changed what was fetched, never a rank."""
     if not m.get("watched"):
         return ""
-    return ('<span style="color:#00D4FF;font-size:10px;'
-            'letter-spacing:1px;margin-left:8px">WATCHLIST</span>')
+    return ('<span style="color:#2A5F86;font:500 10px/1 \'JetBrains Mono\','
+            'monospace;letter-spacing:.1em;margin-left:8px">WATCHLIST</span>')
 
 
 def _lead_card(m: dict, key: str) -> str:
     role = m["roles"][0]
     n = len(m["roles"])
     noun = "ROLE" if n == 1 else "ROLES"
+    ids = _ids(m.get("id"), role.get("id"))
+    fit = (f'<div class="brow">{_band_pill(role)}'
+           f'<span class="reason">{_e(role.get("reason"))}</span></div>'
+           if _checked(role) else
+           _unchecked_block(role) if not role.get("description_captured")
+           else "")
+    watchable = (f'<button type="button" class="btn-q" data-state="WATCH"'
+                 f'{ids}>WATCH</button>')
     return (
         f'<div class="lead"><div class="crow">'
         f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
@@ -251,25 +220,52 @@ def _lead_card(m: dict, key: str) -> str:
         f'<hr class="rule">'
         f'<div class="rtitle">{_e(role.get("title"))}</div>'
         f'<div class="rmeta">{_e(_role_meta(role))}</div>'
-        f'{_fit_block(role, True)}'
-        f'{_actions(key, m.get("id"), role.get("id"), app_status=role.get("app_status"))}</div>'
+        f'{fit}'
+        f'<div class="acts">'
+        f'<button type="button" class="btn-lead" data-open="{_e(key)}">'
+        f'REVIEW ROLE</button>'
+        f'{_track_action(role.get("id"), role.get("app_status"), ids)}'
+        f'{watchable}'
+        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"'
+        f'{ids}>HIDE</button>'
+        f'</div></div>'
     )
 
 
 def _compact_card(m: dict, key: str) -> str:
+    """A compact company card. Company evidence and the role's reason
+    share one paragraph (evidence muted, reason darker), and the band
+    pill leads the action row — the App file's compact anatomy."""
     role = m["roles"][0]
     n = len(m["roles"])
     noun = "ROLE" if n == 1 else "ROLES"
     tag = "NEW TO YOU · " if m.get("state") == "DISCOVER" else ""
     age = _days_ago(role.get("date"))
     meta = f'{tag}{n} {noun}' + (f' · {age}' if age else "")
+
+    checked = _checked(role)
+    reason = (f' <span class="creason">{_e(role.get("reason"))}</span>'
+              if checked else "")
+    why = f'<div class="cwhy">{_e(m["why"])}{reason}</div>'
+    unchecked = ("" if role.get("description_captured")
+                 else _unchecked_block(role))
+    # Rule 2 — the pill renders in the action row only because the reason
+    # sentence rendered in the paragraph above it.
+    pill = _band_pill(role) if checked else ""
+
+    ids = _ids(m.get("id"), role.get("id"))
     return (
         f'<div class="card"><div class="crow">'
         f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
         f'<div class="cmeta">{_e(meta.upper())}</div></div>'
-        f'<div class="cwhy">{_e(m["why"])}</div>'
-        f'{_fit_block(role, False)}'
-        f'{_actions(key, m.get("id"), role.get("id"), app_status=role.get("app_status"))}</div>'
+        f'{why}{unchecked}'
+        f'<div class="acts">{pill}'
+        f'<button type="button" class="btn" data-open="{_e(key)}">REVIEW ROLE</button>'
+        f'{_track_action(role.get("id"), role.get("app_status"), ids)}'
+        f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
+        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"'
+        f'{ids}>HIDE</button>'
+        f'</div></div>'
     )
 
 
@@ -328,55 +324,12 @@ def _drawer_payload(maps: list[dict]) -> dict:
     return out
 
 
+# The page's own wiring: open the shared drawer, post card actions, unfold
+# the folded groups. The drawer's internals live in drawer.py.
 _JS = """
-const DATA = __DATA__;
-let openKey = null, roleIdx = 0;
-const shell = document.getElementById('shell');
-function pillClass(b){return b==='STRONG FIT'?'pill-strong':b==='PARTIAL FIT'?'pill-partial':'pill-stretch';}
-function esc(s){const d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
-function render(){
-  const co = DATA[openKey]; if(!co){return;}
-  const r = co.roles[roleIdx]; const many = co.roles.length > 1;
-  const tabs = many ? '<div class="tabs">' + co.roles.map((x,i)=>
-    '<button type="button" class="tab '+(i===roleIdx?'tab-on':'')+'" data-i="'+i+'">'+esc(x.tab)+'</button>').join('') + '</div>' : '';
-  const fit = !r.captured
-    ? '<div class="unchecked"><span><b>Not checked yet.</b> '+esc(r.reason)+'</span>'
-      + '<button type="button" class="btn btn-fetch">FETCH POSTING</button></div>'
-    : '<div class="dband"><span class="pill '+pillClass(r.band)+'">'+esc(r.band)+'</span>'
-      + '<span class="reason">'+esc(r.reason)+'</span></div>';
-  const chips = (a,c)=>a.length? a.map(x=>'<span class="chip '+c+'">'+esc(x)+'</span>').join('') : '<span class="gnote">none</span>';
-  const grid = r.captured ? '<div class="grid"><div><div class="gh gh-m">MATCHED FROM YOUR RESUME</div>'
-      + '<div class="chips">'+chips(r.matched,'chip-m')+'</div></div>'
-      + '<div><div class="gh gh-g">IN THE POST, NOT ON YOUR RESUME</div>'
-      + '<div class="chips">'+chips(r.gaps,'chip-g')+'</div>'
-      + (r.gaps.length?'<div class="gnote">Named in the posting, not found on your resume. Not a rejection — worth a line in the cover letter.</div>':'')
-      + '</div></div>' : '';
-  const nextLabel = roleIdx < co.roles.length-1 ? 'NEXT ROLE HERE \\u2192' : 'BACK TO MAP \\u2192';
-  const track = r.rid == null ? ''
-    : r.app_status
-      ? '<a class="btn-s" href="/activity">IN TRACKER \\u00b7 '+esc(r.app_status)+'</a>'
-      : '<button type="button" class="btn-s" data-status="SAVED" data-role="'+esc(r.rid)+'">ADD TO TRACKER</button>'
-        + '<button type="button" class="btn-s" data-status="APPLIED" data-role="'+esc(r.rid)+'">MARK APPLIED</button>';
-  shell.innerHTML = '<div class="scrim" data-close="1"></div><div class="panel">'
-    + '<div class="crumb">'+esc(co.name.toUpperCase())+' \\u00b7 ROLE '+(roleIdx+1)+' OF '+co.roles.length
-    + '<button type="button" class="esc" data-close="1">ESC</button></div>'
-    + '<div class="dtitle">'+esc(r.title)+'</div>'
-    + '<div class="dmeta">'+esc(r.meta)+'</div>'
-    + tabs + fit + grid
-    + '<div class="dsec">why this company</div><div class="dsec-b">'+esc(co.why)+'</div>'
-    + '<div class="foot"><a class="btn-p" href="'+esc(r.url)+'" target="_blank" rel="noopener">OPEN POSTING \\u2197</a>'
-    + track
-    + '<button type="button" class="btn-n" data-next="1">'+nextLabel+'</button></div></div>';
-  shell.classList.remove('hidden');
-}
-function close(){shell.classList.add('hidden');shell.innerHTML='';openKey=null;document.body.style.overflow='';}
 document.addEventListener('click',function(e){
   const o=e.target.closest('[data-open]');
-  if(o){openKey=o.getAttribute('data-open');roleIdx=0;document.body.style.overflow='hidden';render();return;}
-  if(e.target.closest('[data-close]')){close();return;}
-  const t=e.target.closest('.tab'); if(t){roleIdx=parseInt(t.getAttribute('data-i'),10);render();return;}
-  const n=e.target.closest('[data-next]');
-  if(n){const co=DATA[openKey]; if(roleIdx<co.roles.length-1){roleIdx++;render();}else{close();}return;}
+  if(o){window.Drawer.open(o.getAttribute('data-open'),0);return;}
   const f=e.target.closest('[data-expand]');
   if(f){const grp=document.getElementById(f.getAttribute('data-expand'));if(grp){grp.classList.remove('hidden');}f.remove();}
 });
@@ -390,14 +343,19 @@ document.addEventListener('click',function(e){
   const w=e.target.closest('[data-state]');
   if(w&&w.dataset.company){post('/api/companies/'+w.dataset.company+'/state',{state:w.dataset.state});}
 });
-document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openKey){close();}});
 """
 
 
 def render(maps: list[dict], meta: dict | None = None,
-           running_run_id: int | None = None) -> str:
-    """Build the full opportunity map page."""
+           running_run_id: int | None = None,
+           nav: dict | None = None) -> str:
+    """Build the full opportunity map page.
+
+    `nav` carries the shell's counts and identity: `tracker_count` for
+    the TRACKER tab badge and `user_label` beside the wordmark. The MAP
+    badge is the company count this render already knows."""
     meta = meta or {}
+    nav = nav or {}
     listed = [m for m in maps if m.get("state") != "WATCH"]
     watching = [m for m in maps if m.get("state") == "WATCH"]
     act_now = [m for m in listed if m.get("state") == "ACT_NOW"]
@@ -504,6 +462,10 @@ async function startRun(){
 }
 </script>"""
 
+    top_nav = shell_nav("/", counts={"/": n_co,
+                                     "/activity": nav.get("tracker_count")},
+                        user_label=nav.get("user_label") or "")
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -513,18 +475,17 @@ async function startRun(){
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>{_CSS}</style>
+<style>{_CSS}{SHELL_CSS}{DRAWER_CSS}</style>
 </head>
 <body>
 <div class="page">
-<div class="hatch"></div>
+{top_nav}
 <div class="head"><div class="head-in">
 <div>
 <div class="title">today</div>
 <div class="sub">Companies worth twenty minutes. Everything below them is here for a reason you can read.</div>
 </div>
 <div class="meta-r">
-<div class="nav">{nav_links("/")}</div>
 <div class="meta-1">{n_co} COMPANIES &middot; {n_ro} ROLES</div>
 <div class="meta-2">{meta_2}</div>
 </div>
@@ -537,8 +498,9 @@ async function startRun(){
 {_watch_shelf(watching)}
 </div></div>
 </div>
-<div id="shell" class="shell hidden"></div>
-<script>{_JS.replace("__DATA__", payload)}</script>
+{DRAWER_MOUNT}
+<script>{drawer_js(payload)}</script>
+<script>{_JS}</script>
 {starter}
 </body>
 </html>

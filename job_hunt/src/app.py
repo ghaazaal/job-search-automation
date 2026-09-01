@@ -16,17 +16,19 @@ from .activity_page import render as render_activity
 from .agents.profile_parser import parse_profile
 from .llm.base import LLMClient
 from .map_page import render as render_map
+from .profile_page import render as render_profile
 from .run_core import search_titles
 from .run_worker import run_in_background, work
 from .searching_page import render as render_searching
-from .setup_page import render_confirm, render_profile, render_upload
+from .setup_page import render_confirm, render_upload
 from .store.db import DEFAULT_PATH, connect, transaction
 from .store.ingest import ensure_user
 from .store.profile import (create_resume, delete_resume, get_profile,
                             get_resume, list_resumes, resume_by_sha,
                             set_profile, unique_label, update_resume)
 from .store.queries import (activity_board, eligibility_counts,
-                            map_sections, mark_seen)
+                            live_tracker_count, map_sections, mark_seen,
+                            open_company_count)
 from .store.runs import (active_run, clear_running, fail_run, get_run,
                          is_stale, latest_ok_run)
 from .store.schema import init_db
@@ -129,7 +131,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
                       "hidden": hidden, "offtopic": offtopic, **counts},
-                running_run_id=in_flight["id"] if in_flight else None)
+                running_run_id=in_flight["id"] if in_flight else None,
+                nav={"tracker_count": live_tracker_count(conn, user_id),
+                     "user_label": user_name})
 
             if latest:
                 mark_seen(conn, user_id, latest)
@@ -141,7 +145,11 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
     def activity_screen():
         conn = _conn()
         try:
-            return render_activity(activity_board(conn, _user(conn)))
+            user_id = _user(conn)
+            return render_activity(
+                activity_board(conn, user_id),
+                nav={"map_count": open_company_count(conn, user_id),
+                     "user_label": user_name})
         finally:
             conn.close()
 
@@ -419,9 +427,28 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         try:
             user_id = _user(conn)
             from .store.watchlist import list_watched
-            return render_profile(list_resumes(conn, user_id),
-                                  get_profile(conn, user_id),
-                                  watched=list_watched(conn, user_id))
+
+            # The filtered-out card states what the checks set aside:
+            # reach verdicts from the store, plus the latest run's
+            # off-topic count. Real numbers or nothing.
+            counts = eligibility_counts(conn, user_id)
+            offtopic = 0
+            latest = latest_ok_run(conn, user_id)
+            if latest:
+                latest_run = get_run(conn, latest)
+                if latest_run:
+                    offtopic = latest_run.get("offtopic") or 0
+
+            return render_profile(
+                list_resumes(conn, user_id),
+                get_profile(conn, user_id),
+                watched=list_watched(conn, user_id),
+                filtered={"closed": counts["closed"],
+                          "unverified": counts["unverified"],
+                          "offtopic": offtopic},
+                nav={"map_count": open_company_count(conn, user_id),
+                     "tracker_count": live_tracker_count(conn, user_id),
+                     "user_label": user_name})
         finally:
             conn.close()
 

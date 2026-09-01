@@ -210,11 +210,17 @@ def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
 
 
 def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
-    """Roles the user has acted on, grouped by status, oldest first."""
+    """Roles the user has acted on, grouped by status, oldest first.
+
+    Carries everything the shared role drawer needs (matched, gaps, work
+    mode, salary, posted date) so the tracker's ROLE button can open the
+    same panel the map does."""
     board: dict[str, list] = {col: [] for col in _ACTIVITY_COLUMNS}
     rows = conn.execute(
         """SELECT r.id, r.title, r.url, r.location, c.name AS company,
-                  r.band, r.reason, r.description_captured,
+                  c.id AS company_id, r.band, r.reason,
+                  r.description_captured, r.matched, r.gaps, r.work_mode,
+                  r.salary, r.posted_date,
                   a.status, a.applied_at, a.updated_at
              FROM application a
              JOIN role r ON r.id = a.role_id
@@ -230,12 +236,19 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
             "role_id":    row["id"],
             "title":      row["title"],
             "company":    row["company"],
+            "company_id": row["company_id"],
             "location":   row["location"],
             "url":        row["url"],
             "band":       row["band"],
             "reason":     row["reason"],
             "description_captured": bool(row["description_captured"]),
+            "matched":    json.loads(row["matched"]),
+            "gaps":       json.loads(row["gaps"]),
+            "work_mode":  row["work_mode"],
+            "salary":     row["salary"],
+            "date":       row["posted_date"],
             "status":     status,
+            "applied_at": row["applied_at"],
             "updated_at": row["updated_at"],
             "events": [dict(e) for e in conn.execute(
                 "SELECT from_status, to_status, at FROM event"
@@ -243,6 +256,36 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
                 (row["id"],))],
         })
     return board
+
+
+# The four statuses that count as "in flight" on the shell's TRACKER tab
+# and the board header. Rejected and closed are outcomes, not motion.
+LIVE_STATUSES = ("SAVED", "APPLIED", "INTERVIEWING", "OFFER")
+
+
+def live_tracker_count(conn: sqlite3.Connection, user_id: int) -> int:
+    """How many applications are in flight — the shell's TRACKER badge."""
+    marks = ",".join("?" for _ in LIVE_STATUSES)
+    return conn.execute(
+        f"SELECT COUNT(*) AS n FROM application"
+        f" WHERE user_id = ? AND status IN ({marks})",
+        (user_id, *LIVE_STATUSES)).fetchone()["n"]
+
+
+def open_company_count(conn: sqlite3.Connection, user_id: int) -> int:
+    """How many companies the map lists — the shell's MAP badge.
+
+    Same filter as the map's role query, without the seen/unseen split."""
+    return conn.execute(
+        """SELECT COUNT(DISTINCT r.company_id) AS n FROM role r
+             JOIN company c ON c.id = r.company_id
+             LEFT JOIN application a ON a.role_id = r.id
+            WHERE r.user_id = ?
+              AND (a.id IS NULL OR a.status != 'HIDDEN')
+              AND c.user_state != 'HIDDEN'
+              AND r.dropped_at IS NULL
+              AND (r.location_scope IS NULL OR r.location_scope != 'closed')""",
+        (user_id,)).fetchone()["n"]
 
 
 def known_listings(conn: sqlite3.Connection,

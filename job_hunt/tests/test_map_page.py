@@ -35,7 +35,10 @@ def test_no_match_score_is_rendered():
 
 
 def test_no_percentage_is_rendered():
-    html = render([_map()])
+    # CSS and JS are stripped first: a `width:100%` in a stylesheet is
+    # not a percentage on the screen.
+    html = re.sub(r"<(style|script)\b.*?</\1>", "", render([_map()]),
+                  flags=re.DOTALL)
     assert not re.search(r"\d+%", html)
 
 
@@ -255,13 +258,16 @@ def test_drawer_payload_carries_role_id_and_tracker_status():
 
 
 def test_drawer_offers_add_to_tracker_and_a_working_mark_applied():
-    """The detail drawer's buttons must be wired to the status endpoint —
+    """The shared drawer's buttons must be wired to the status endpoint —
     MARK APPLIED existed before but was dead (no data attributes, no id)."""
     html = render([_ids(_map())])
-    js = html.split("<script>")[1]
+    js = html.split("<script>")[1]  # the drawer's script block
     assert "ADD TO TRACKER" in js
     assert "MARK APPLIED" in js
-    assert js.count("data-status=") >= 2
+    assert js.count("data-dw-status=") >= 2
+    # MARK APPLIED says where it goes and actually goes there.
+    assert "GOES TO TRACKER" in js
+    assert "'/activity'" in js
 
 
 # ── Hidden (dropped) count ────────────────────────────────────────────────────

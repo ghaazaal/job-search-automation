@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>html,body{margin:0;background:#F7F2E6}body{font-family:Inter,system-ui,sans-serif;color:#2A3342;-webkit-font-smoothing:antialiased}a{color:#D6482B;text-decoration:none}a:hover{color:#A83519}::selection{background:rgba(46,125,91,.18)}</style>
+</helmet>
+
+<div style="min-height:100vh;background:#F7F2E6;background-image:radial-gradient(rgba(42,51,66,.14) 1px, transparent 1px);background-size:22px 22px;background-position:11px 11px;padding:0 0 90px">
+
+<div style="position:sticky;top:0;z-index:40;background:#F7F2E6">
+<div style="height:14px;background-image:repeating-linear-gradient(112deg, rgba(59,126,168,.3) 0 1px, transparent 1px 7px)"></div>
+<div style="display:flex;justify-content:center;border-bottom:1px solid #DED5C1">
+<div style="width:100%;max-width:1180px;display:flex;align-items:center;justify-content:space-between;gap:28px;padding:12px 40px 11px">
+<div style="display:flex;align-items:baseline;gap:12px">
+<span style="font:600 27px/1 Caveat,cursive;color:#D6482B">opportunity map</span>
+<span style="font:400 10px/1 'JetBrains Mono',monospace;color:#9AA3AE;letter-spacing:.12em">GHAZAL I.</span>
+</div>
+<div style="display:flex;align-items:center;gap:4px">
+<sc-for list="{{ nav }}" as="item" hint-placeholder-count="3">
+<button type="button" onClick="{{ item.onClick }}" style="display:flex;align-items:center;gap:7px;padding:8px 13px 7px;border:1px solid transparent;border-bottom:2px solid {{ item.rule }};background:{{ item.bg }};border-radius:2px;color:{{ item.color }};font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.11em;white-space:nowrap;cursor:pointer" style-hover="color:#3A4557">{{ item.label }}<span style="font:400 10px/1 'JetBrains Mono',monospace;color:#A6AEB9;letter-spacing:.08em">{{ item.count }}</span></button>
+</sc-for>
+</div>
+</div>
+</div>
+</div>
+
+<sc-if value="{{ isMap }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;justify-content:center;padding:30px 40px 30px">
+<div style="width:100%;max-width:820px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+<div>
+<div style="font:600 42px/1 Caveat,cursive;color:#D6482B">today</div>
+<div style="font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:46ch;text-wrap:pretty">Three companies worth twenty minutes. Everything below them is here for a reason you can read.</div>
+</div>
+<div style="flex:none;text-align:right;padding-bottom:4px">
+<div style="font:500 11px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em">14 COMPANIES · 31 ROLES</div>
+<div style="font:400 11px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:9px">SCRAPED 06:40</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex;justify-content:center;padding:0 40px">
+<div style="width:100%;max-width:820px">
+
+<sc-if value="{{ quietDay }}" hint-placeholder-val="{{ false }}">
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:24px 26px;margin-bottom:20px">
+<div style="font:600 26px/1.2 Caveat,cursive;color:#2A3342">nothing to apply to today</div>
+<div style="font:400 14.5px/1.65 Inter,sans-serif;color:#4C5768;margin-top:8px;max-width:52ch;text-wrap:pretty">31 postings came in; none named enough of your stack to earn the top of the list. That is the check working, not a dry spell.</div>
+<div style="display:flex;gap:10px;margin-top:18px">
+<span style="padding:9px 15px;border:1px solid #D6482B;border-radius:3px;color:#D6482B;font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.06em">FETCH 4 MISSING DESCRIPTIONS</span>
+<span style="padding:9px 15px;border:1px solid #E0D8C4;border-radius:3px;color:#6E7787;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.06em">WIDEN SOURCES</span>
+</div>
+</div>
+</sc-if>
+
+<div style="display:flex;flex-direction:column;gap:16px">
+
+<div style="background:#FFFDF8;border:1px solid #CBBFA5;border-left:3px solid #2E7D5B;border-radius:4px;padding:22px 26px 20px;box-shadow:0 1px 0 rgba(42,51,66,.06)">
+<div style="display:flex;align-items:baseline;gap:14px">
+<div style="font:500 21px/1.25 Inter,sans-serif;color:#1F2937;letter-spacing:-.015em">Northwind Analytics</div>
+<div style="margin-left:auto;flex:none;font:500 11px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">3 ROLES OPEN</div>
+</div>
+<div style="font:400 15px/1.65 Inter,sans-serif;color:#4C5768;margin-top:9px;text-wrap:pretty">Three analytics roles posted in ten days — this team is being built, not backfilled.</div>
+<div style="height:1px;background:#EBE3D2;margin:18px 0"></div>
+<div style="font:500 17px/1.3 Inter,sans-serif;color:#1F2937">Analytics Engineer II</div>
+<div style="font:400 11.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.06em;margin-top:9px">REMOTE (US) · POSTED 2d · $145–170k</div>
+<div style="display:flex;align-items:flex-start;gap:13px;margin-top:15px">
+<span style="flex:none;padding:5px 11px;background:#2E7D5B;border-radius:2px;color:#FFFDF8;font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.11em">STRONG FIT</span>
+<span style="font:400 14.5px/1.6 Inter,sans-serif;color:#3A4557;text-wrap:pretty">dbt, Snowflake and Airflow are all named in the post — you shipped that exact stack for three years at Kestrel.</span>
+</div>
+<div style="height:1px;background:#EBE3D2;margin:18px 0"></div>
+<div style="display:flex;align-items:center;gap:10px">
+<button type="button" onClick="{{ openNorthwind }}" style="padding:10px 18px;border:1px solid #D6482B;background:#D6482B;border-radius:3px;color:#FFFDF8;font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="background:#A83519;border-color:#A83519">REVIEW ROLE</button>
+<button type="button" style="padding:10px 15px;border:1px solid #D5CDB9;background:transparent;border-radius:3px;color:#4C5768;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#2E7D5B;color:#2E7D5B">WATCH</button>
+<button type="button" style="margin-left:auto;padding:10px 12px;border:1px solid transparent;background:transparent;border-radius:3px;color:#9AA3AE;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">HIDE</button>
+</div>
+</div>
+
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:17px 22px" style-hover="border-color:#CBBFA5">
+<div style="display:flex;align-items:baseline;gap:14px">
+<div style="font:500 18px/1.3 Inter,sans-serif;color:#1F2937;letter-spacing:-.01em">Meridian Health Data</div>
+<div style="margin-left:auto;flex:none;font:500 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">1 ROLE · SENIOR DATA ENG · 5d</div>
+</div>
+<div style="font:400 14px/1.65 Inter,sans-serif;color:#6E7787;margin-top:7px;text-wrap:pretty">First data hire in a 40-person clinical team. <span style="color:#3A4557">Python pipelines and warehouse modelling line up; Kafka streaming is new ground.</span></div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+<span style="flex:none;padding:4px 10px;border:1px solid #2A5F86;border-radius:2px;color:#2A5F86;font:700 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.11em">PARTIAL FIT</span>
+<button type="button" onClick="{{ openMeridian }}" style="padding:7px 13px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">REVIEW ROLE</button>
+<button type="button" style="padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">WATCH</button>
+<button type="button" style="margin-left:auto;padding:7px 11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#9AA3AE;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">HIDE</button>
+</div>
+</div>
+
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:17px 22px">
+<div style="display:flex;align-items:baseline;gap:14px">
+<div style="font:500 18px/1.3 Inter,sans-serif;color:#1F2937;letter-spacing:-.01em">Halyard Freight</div>
+<div style="margin-left:auto;flex:none;font:500 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">1 ROLE · DATA ANALYST, OPS · 1d</div>
+</div>
+<div style="font:400 14px/1.65 Inter,sans-serif;color:#6E7787;margin-top:7px">Logistics data team; hired four people in your city this year.</div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:13px;padding:11px 13px;border:1px dashed #C9BFA8;border-radius:3px;background:#F4EFE1">
+<span style="font:400 13.5px/1.6 Inter,sans-serif;color:#6E7787;text-wrap:pretty"><span style="color:#3A4557">Not checked yet.</span> This listing arrived without a description, so no skills have been compared against it.</span>
+<button type="button" style="flex:none;margin-left:auto;padding:7px 13px;border:1px solid #D5CDB9;background:#FFFDF8;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">FETCH POSTING</button>
+</div>
+</div>
+
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:17px 22px">
+<div style="display:flex;align-items:baseline;gap:14px">
+<div style="font:500 18px/1.3 Inter,sans-serif;color:#1F2937;letter-spacing:-.01em">Foldwork</div>
+<div style="margin-left:auto;flex:none;font:500 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">NEW TO YOU · 2 ROLES · 3d</div>
+</div>
+<div style="font:400 14px/1.65 Inter,sans-serif;color:#6E7787;margin-top:7px;text-wrap:pretty">Series B, no data hires until now. <span style="color:#3A4557">Both Product Analyst posts name experiment design, which is most of your last year.</span></div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+<span style="flex:none;padding:5px 11px;background:#2E7D5B;border-radius:2px;color:#FFFDF8;font:700 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.11em">STRONG FIT</span>
+<button type="button" onClick="{{ openFoldwork }}" style="padding:7px 13px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">REVIEW ROLE</button>
+<button type="button" style="padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">WATCH</button>
+<button type="button" style="margin-left:auto;padding:7px 11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#9AA3AE;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">HIDE</button>
+</div>
+</div>
+
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:17px 22px">
+<div style="display:flex;align-items:baseline;gap:14px">
+<div style="font:500 18px/1.3 Inter,sans-serif;color:#1F2937;letter-spacing:-.01em">Bellwether Grid</div>
+<div style="margin-left:auto;flex:none;font:500 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">NEW TO YOU · 1 ROLE · 4d</div>
+</div>
+<div style="font:400 14px/1.65 Inter,sans-serif;color:#6E7787;margin-top:7px;text-wrap:pretty">Energy analytics, 200 people. <span style="color:#3A4557">dbt and Snowflake are in the post; the role also owns forecasting models you have not built before.</span></div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:14px">
+<span style="flex:none;padding:4px 10px;border:1px solid #B9C4D0;border-radius:2px;color:#6E7787;font:700 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.11em">STRETCH</span>
+<button type="button" onClick="{{ openBellwether }}" style="padding:7px 13px;border:1px solid #E0D8C4;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">REVIEW ROLE</button>
+<button type="button" style="padding:7px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">WATCH</button>
+<button type="button" style="margin-left:auto;padding:7px 11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#9AA3AE;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em;white-space:nowrap;cursor:pointer" style-hover="color:#4C5768">HIDE</button>
+</div>
+</div>
+
+<div style="display:flex;align-items:center;gap:16px;padding:6px 0">
+<span style="flex:1;height:1px;background:#DED5C1"></span>
+<span style="flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">8 MORE COMPANIES WITH OPEN ROLES</span>
+<span style="flex:1;height:1px;background:#DED5C1"></span>
+</div>
+</div>
+
+<sc-if value="{{ showWatchShelf }}" hint-placeholder-val="{{ true }}">
+<div style="margin-top:34px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #E0D8C4">
+<div style="font:600 26px/1 Caveat,cursive;color:#2E7D5B">keeping an eye on</div>
+<span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em">NO ROLE OPEN · 4</span>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+<div style="background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:13px 15px"><div style="font:500 14.5px/1.3 Inter,sans-serif;color:#3A4557">Tessellate Labs</div><div style="font:400 13px/1.55 Inter,sans-serif;color:#8A93A1;margin-top:5px">Hires your stack; you saved two of their roles before.</div></div>
+<div style="background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:13px 15px"><div style="font:500 14.5px/1.3 Inter,sans-serif;color:#3A4557">Kestrel Mobility</div><div style="font:400 13px/1.55 Inter,sans-serif;color:#8A93A1;margin-top:5px">Two analytics hires last month — likely to post again.</div></div>
+<div style="background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:13px 15px"><div style="font:500 14.5px/1.3 Inter,sans-serif;color:#3A4557">Ironbark Retail</div><div style="font:400 13px/1.55 Inter,sans-serif;color:#8A93A1;margin-top:5px">Opens data roles most quarters; last one in April.</div></div>
+<div style="background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px;padding:13px 15px"><div style="font:500 14.5px/1.3 Inter,sans-serif;color:#3A4557">Cormorant AI</div><div style="font:400 13px/1.55 Inter,sans-serif;color:#8A93A1;margin-top:5px">Data team of three and growing; you follow two of them.</div></div>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isTracker }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;justify-content:center;padding:30px 40px 26px">
+<div style="width:100%;max-width:1180px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px">
+<div>
+<div style="font:600 42px/1 Caveat,cursive;color:#D6482B">in flight</div>
+<div style="font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:52ch;text-wrap:pretty">Five things are moving. Oldest sits at the top of each column — move a card with its arrows when something changes.</div>
+</div>
+<div style="flex:none;text-align:right;padding-bottom:4px">
+<div style="font:500 11px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em">{{ trackerCount }} IN FLIGHT</div>
+<div style="font:400 11px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:9px">LAST MOVE 2d AGO</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex;justify-content:center;padding:0 40px">
+<div style="width:100%;max-width:1180px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:10px">
+<div style="display:grid;grid-template-columns:repeat(5,minmax(176px,1fr));gap:14px;align-items:start">
+<sc-for list="{{ columns }}" as="col" hint-placeholder-count="5">
+<div style="background:{{ col.bg }};border:1px solid #E0D8C4;border-radius:4px;padding:14px 13px 16px;min-height:230px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:9px;border-bottom:1px solid {{ col.rule }}">
+<span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:{{ col.labelColor }};letter-spacing:.11em">{{ col.label }}</span>
+<span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#A6AEB9">{{ col.count }}</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:11px;margin-top:12px">
+<sc-for list="{{ col.cards }}" as="card" hint-placeholder-count="1">
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-left:3px solid {{ card.accent }};border-radius:3px;padding:12px 13px 11px" style-hover="border-color:#CBBFA5">
+<div style="font:400 9.5px/1.3 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.11em">{{ card.company }}</div>
+<div style="font:500 15px/1.35 Inter,sans-serif;color:#1F2937;margin-top:6px;text-wrap:pretty">{{ card.title }}</div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:9px">
+<span style="padding:3px 8px;border-radius:2px;background:{{ card.chipBg }};border:1px solid {{ card.chipBorder }};color:{{ card.chipColor }};font:700 9px/1.2 'JetBrains Mono',monospace;letter-spacing:.1em">{{ card.band }}</span>
+</div>
+<div style="font:400 10px/1.5 'JetBrains Mono',monospace;color:#9AA3AE;letter-spacing:.05em;margin-top:9px">{{ card.meta }}</div>
+<sc-if value="{{ card.hasNote }}" hint-placeholder-val="{{ false }}">
+<div style="font:600 17px/1.25 Caveat,cursive;color:#2E7D5B;margin-top:9px">{{ card.note }}</div>
+</sc-if>
+<div style="display:flex;align-items:center;gap:6px;margin-top:11px;padding-top:9px;border-top:1px solid #EFE8D8">
+<button type="button" onClick="{{ card.back }}" style="width:26px;padding:5px 0;border:1px solid #E0D8C4;background:transparent;border-radius:2px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer" style-hover="border-color:#CBBFA5;color:#3A4557">←</button>
+<button type="button" onClick="{{ card.fwd }}" style="width:26px;padding:5px 0;border:1px solid #E0D8C4;background:transparent;border-radius:2px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B;color:#D6482B">→</button>
+<button type="button" onClick="{{ card.open }}" style="margin-left:auto;padding:5px 8px;border:1px solid transparent;background:transparent;border-radius:2px;color:#D6482B;font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">ROLE</button>
+</div>
+</div>
+</sc-for>
+<sc-if value="{{ col.empty }}" hint-placeholder-val="{{ false }}">
+<div style="border:1px dashed #D5CDB9;border-radius:3px;padding:14px 13px;font:400 13px/1.5 Inter,sans-serif;color:#A6AEB9">nothing here yet</div>
+</sc-if>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="display:flex;justify-content:center;padding:26px 40px 0">
+<div style="width:100%;max-width:1180px;display:flex;align-items:center;gap:14px;padding-top:16px;border-top:1px solid #DED5C1">
+<span style="font:600 22px/1 Caveat,cursive;color:#2E7D5B">next thing to do</span>
+<span style="font:400 14px/1.6 Inter,sans-serif;color:#4C5768">Foldwork asked for availability on Tuesday — reply before their loop closes on Friday.</span>
+<button type="button" style="flex:none;margin-left:auto;padding:9px 15px;border:1px solid #D6482B;background:#D6482B;border-radius:3px;color:#FFFDF8;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="background:#A83519;border-color:#A83519">SEND TIMES</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isProfile }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;justify-content:center;padding:30px 40px 28px">
+<div style="width:100%;max-width:820px">
+<div style="font:600 42px/1 Caveat,cursive;color:#D6482B">your profile</div>
+<div style="font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:52ch;text-wrap:pretty">One person, many resumes. Each active resume adds its target roles to tomorrow's search.</div>
+</div>
+</div>
+
+<div style="display:flex;justify-content:center;padding:0 40px">
+<div style="width:100%;max-width:820px;display:flex;flex-direction:column;gap:16px">
+
+<div style="background:#FFFDF8;border:1px solid #CBBFA5;border-radius:4px;padding:20px 24px 22px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+<span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em">YOUR RESUMES</span>
+<span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#A6AEB9;letter-spacing:.1em">2 ACTIVE · 1 PAUSED</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+<div style="border:1px solid #E0D8C4;border-left:3px solid #2E7D5B;border-radius:3px;padding:13px 15px;display:flex;align-items:center;gap:14px">
+<div style="min-width:0">
+<div style="font:500 16px/1.3 Inter,sans-serif;color:#1F2937">cv_ghazal_izadi_ae</div>
+<div style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.08em;margin-top:7px">4 TARGET ROLES · 10 SKILLS · SENIOR · ADDED MAR 2026</div>
+</div>
+<div style="margin-left:auto;flex:none;display:flex;gap:6px">
+<button type="button" style="padding:7px 11px;border:1px solid #E0D8C4;background:transparent;border-radius:2px;color:#4C5768;font:400 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#CBBFA5">EDIT</button>
+<button type="button" style="padding:7px 11px;border:1px solid transparent;background:transparent;border-radius:2px;color:#9AA3AE;font:400 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="color:#A83519">PAUSE</button>
+</div>
+</div>
+<div style="border:1px solid #E0D8C4;border-left:3px solid #2A5F86;border-radius:3px;padding:13px 15px;display:flex;align-items:center;gap:14px">
+<div style="min-width:0">
+<div style="font:500 16px/1.3 Inter,sans-serif;color:#1F2937">cv_product_analyst</div>
+<div style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.08em;margin-top:7px">2 TARGET ROLES · 7 SKILLS · MID–SENIOR · ADDED AUG 2026</div>
+</div>
+<div style="margin-left:auto;flex:none;display:flex;gap:6px">
+<button type="button" style="padding:7px 11px;border:1px solid #E0D8C4;background:transparent;border-radius:2px;color:#4C5768;font:400 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#CBBFA5">EDIT</button>
+<button type="button" style="padding:7px 11px;border:1px solid transparent;background:transparent;border-radius:2px;color:#9AA3AE;font:400 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="color:#A83519">PAUSE</button>
+</div>
+</div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid #EBE3D2">
+<button type="button" style="padding:10px 16px;border:1px solid #D6482B;background:#D6482B;border-radius:3px;color:#FFFDF8;font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="background:#A83519;border-color:#A83519">ADD A RESUME</button>
+<button type="button" onClick="{{ goMap }}" style="padding:10px 15px;border:1px solid #D5CDB9;background:transparent;border-radius:3px;color:#4C5768;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#2E7D5B;color:#2E7D5B">RUN THE SEARCH NOW</button>
+<span style="margin-left:auto;font:400 10.5px/1 'JetBrains Mono',monospace;color:#A6AEB9;letter-spacing:.08em">NEXT RUN 06:40 DAILY</span>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:18px 20px 20px">
+<span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em">WHERE YOU ARE LOOKING</span>
+<div style="font:400 15px/1.6 Inter,sans-serif;color:#3A4557;margin-top:11px">Yerevan, Armenia · remote or hybrid</div>
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:13px">
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">EU time zones</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">CET ±3h</span>
+<span style="padding:5px 10px;border:1px dashed #C9BFA8;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#4C5768">no relocation</span>
+</div>
+</div>
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:18px 20px 20px">
+<span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em">WHAT COUNTS AS A MATCH</span>
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:13px">
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">SQL</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">Python</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">Airflow</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">dbt</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">Snowflake</span>
+<span style="padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">experiment design</span>
+</div>
+<div style="font:400 13px/1.6 Inter,sans-serif;color:#8A93A1;margin-top:12px;text-wrap:pretty">A role needs three of these named in its own description before it can be called a strong fit.</div>
+</div>
+</div>
+
+<div style="background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px;padding:18px 20px 20px">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-bottom:11px;border-bottom:1px solid #EBE3D2">
+<span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em">YOUR WATCHLIST</span>
+<span style="font:400 10.5px/1 'JetBrains Mono',monospace;color:#A6AEB9;letter-spacing:.1em">6 COMPANIES · CHECKED DAILY</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:2px;margin-top:6px">
+<sc-for list="{{ watchlist }}" as="row" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:14px;padding:12px 2px;border-bottom:1px solid #F0EADB">
+<span style="font:500 15.5px/1.3 Inter,sans-serif;color:#1F2937">{{ row.name }}</span>
+<span style="margin-left:auto;flex:none;font:400 10.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.08em">{{ row.meta }}</span>
+<button type="button" style="flex:none;padding:6px 10px;border:1px solid transparent;background:transparent;border-radius:2px;color:#9AA3AE;font:400 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="color:#A83519;border-color:#E3CFC7">REMOVE</button>
+</div>
+</sc-for>
+</div>
+<button type="button" style="margin-top:14px;padding:9px 14px;border:1px dashed #C9BFA8;background:transparent;border-radius:3px;color:#D6482B;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#D6482B">+ ADD A COMPANY</button>
+</div>
+
+<div style="background:#F4EFE1;border:1px solid #E0D8C4;border-radius:4px;padding:18px 20px">
+<div style="font:600 24px/1 Caveat,cursive;color:#2E7D5B">what got filtered out</div>
+<div style="font:400 14px/1.7 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:64ch;text-wrap:pretty">Yesterday: 570 postings were not open roles, 34 could not be verified, and 5 were off-topic. You can read the whole list any time — nothing is dropped silently.</div>
+<button type="button" style="margin-top:14px;padding:9px 14px;border:1px solid #D5CDB9;background:#FFFDF8;border-radius:3px;color:#4C5768;font:400 11px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#2E7D5B;color:#2E7D5B">OPEN THE REJECT LOG</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ detail }}" hint-placeholder-val="{{ false }}">
+<div style="position:fixed;inset:0;z-index:60;display:flex;justify-content:flex-end">
+<div onClick="{{ close }}" style="position:absolute;inset:0;background:rgba(42,51,66,.26)"></div>
+<div style="position:relative;width:min(560px,94vw);height:100%;box-sizing:border-box;overflow:auto;overscroll-behavior:contain;background:#FFFDF8;border-left:1px solid #CBBFA5;padding:28px 32px 32px;box-shadow:-18px 0 40px -26px rgba(42,51,66,.55)">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+<div style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.1em">{{ detail.crumb }}</div>
+<button type="button" onClick="{{ close }}" style="border:1px solid #E0D8C4;background:#FFFDF8;border-radius:3px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;padding:6px 9px;white-space:nowrap;cursor:pointer" style-hover="border-color:#CBBFA5;color:#3A4557">ESC</button>
+</div>
+<div style="font:500 24px/1.25 Inter,sans-serif;color:#1F2937;letter-spacing:-.02em;margin-top:16px">{{ detail.title }}</div>
+<div style="font:400 11.5px/1.75 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.05em;margin-top:9px">{{ detail.meta }}</div>
+
+<sc-if value="{{ detail.hasSiblings }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:16px;padding-top:14px;border-top:1px solid #EBE3D2">
+<sc-for list="{{ detail.tabs }}" as="tab" hint-placeholder-count="3">
+<sc-if value="{{ tab.active }}" hint-placeholder-val="{{ true }}">
+<span style="display:inline-block;padding:6px 11px;border:1px solid #2E7D5B;background:#EAF2ED;border-radius:2px;font:500 11.5px/1.2 Inter,sans-serif;color:#215E44">{{ tab.label }}</span>
+</sc-if>
+<sc-if value="{{ tab.inactive }}" hint-placeholder-val="{{ false }}">
+<button type="button" onClick="{{ tab.onClick }}" style="display:inline-block;padding:6px 11px;border:1px solid #E0D8C4;background:transparent;border-radius:2px;font:400 11.5px/1.2 Inter,sans-serif;color:#6E7787;white-space:nowrap;cursor:pointer" style-hover="border-color:#CBBFA5;color:#3A4557">{{ tab.label }}</button>
+</sc-if>
+</sc-for>
+</div>
+</sc-if>
+
+<div style="display:flex;align-items:flex-start;gap:13px;margin-top:18px;padding:15px 16px;background:#F4EFE1;border:1px solid #E0D8C4;border-radius:3px">
+<sc-if value="{{ detail.isStrong }}" hint-placeholder-val="{{ true }}"><span style="flex:none;padding:5px 11px;background:#2E7D5B;border-radius:2px;color:#FFFDF8;font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.11em">STRONG FIT</span></sc-if>
+<sc-if value="{{ detail.isPartial }}" hint-placeholder-val="{{ false }}"><span style="flex:none;padding:4px 10px;border:1px solid #2A5F86;border-radius:2px;color:#2A5F86;font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.11em">PARTIAL FIT</span></sc-if>
+<sc-if value="{{ detail.isStretch }}" hint-placeholder-val="{{ false }}"><span style="flex:none;padding:4px 10px;border:1px solid #B9C4D0;border-radius:2px;color:#6E7787;font:700 10px/1 'JetBrains Mono',monospace;letter-spacing:.11em">STRETCH</span></sc-if>
+<span style="font:400 14.5px/1.6 Inter,sans-serif;color:#3A4557;text-wrap:pretty">{{ detail.reason }}</span>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:24px">
+<div>
+<div style="font:500 9.5px/1.4 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em;padding-bottom:10px;border-bottom:1px solid #2E7D5B">MATCHED FROM YOUR RESUME</div>
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:13px">
+<sc-for list="{{ detail.matched }}" as="chip" hint-placeholder-count="4">
+<span style="display:inline-block;white-space:nowrap;padding:5px 10px;background:#EAF2ED;border:1px solid #C3DACD;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#215E44">{{ chip }}</span>
+</sc-for>
+</div>
+</div>
+<div>
+<div style="font:500 9.5px/1.4 'JetBrains Mono',monospace;color:#6E7787;letter-spacing:.11em;padding-bottom:10px;border-bottom:1px dashed #C9BFA8">IN THE POST, NOT ON YOUR RESUME</div>
+<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:13px">
+<sc-for list="{{ detail.gaps }}" as="chip" hint-placeholder-count="2">
+<span style="display:inline-block;white-space:nowrap;padding:5px 10px;border:1px dashed #C9BFA8;border-radius:2px;font:400 12.5px/1.2 Inter,sans-serif;color:#4C5768">{{ chip }}</span>
+</sc-for>
+</div>
+<div style="font:400 12.5px/1.6 Inter,sans-serif;color:#8A93A1;margin-top:12px;text-wrap:pretty">{{ detail.gapNote }}</div>
+</div>
+</div>
+<div style="margin-top:24px;padding-top:18px;border-top:1px solid #EBE3D2">
+<div style="font:600 22px/1 Caveat,cursive;color:#2E7D5B">why this company</div>
+<div style="font:400 13.5px/1.65 Inter,sans-serif;color:#4C5768;margin-top:9px;text-wrap:pretty">{{ detail.companyWhy }}</div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:22px;padding-top:16px;border-top:1px solid #EBE3D2">
+<a href="#posting" style="white-space:nowrap;padding:10px 16px;background:#D6482B;border:1px solid #D6482B;border-radius:3px;color:#FFFDF8;font:500 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em">OPEN POSTING ↗</a>
+<button type="button" onClick="{{ markApplied }}" style="padding:10px 14px;border:1px solid #D5CDB9;background:transparent;border-radius:3px;color:#4C5768;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="border-color:#2E7D5B;color:#2E7D5B">MARK APPLIED · GOES TO TRACKER</button>
+<button type="button" onClick="{{ next }}" style="margin-left:auto;padding:10px 13px;border:1px solid transparent;background:transparent;border-radius:3px;color:#8A93A1;font:400 11.5px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer" style-hover="color:#3A4557">{{ detail.nextLabel }}</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1320,&quot;height&quot;:940},&quot;startPage&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;map&quot;,&quot;tracker&quot;,&quot;profile&quot;],&quot;default&quot;:&quot;map&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;showWatchShelf&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;quietDay&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;}}">
+const COMPANIES = {
+  northwind: {
+    name: "NORTHWIND ANALYTICS",
+    why: "Three analytics roles posted in ten days · you have never hidden them · all three descriptions captured.",
+    roles: [
+      { title: "Analytics Engineer II", tab: "Analytics Eng II",
+        meta: "REMOTE (US) · POSTED 2d · $145–170k · FULL DESCRIPTION CAPTURED", band: "STRONG FIT",
+        reason: "dbt, Snowflake and Airflow are all named in the post — you shipped that exact stack for three years at Kestrel.",
+        matched: ["dbt", "Snowflake", "Airflow", "SQL modelling", "stakeholder specs"],
+        gaps: ["Dagster", "dbt Cloud CI"],
+        gapNote: "Two items, neither listed as required — worth a line in the cover note." },
+      { title: "Senior Analytics Engineer", tab: "Senior Analytics Eng",
+        meta: "REMOTE (US) · POSTED 6d · $170–195k · FULL DESCRIPTION CAPTURED", band: "PARTIAL FIT",
+        reason: "Same stack as the role above, but the post leads on mentoring and roadmap ownership you have not formally held.",
+        matched: ["dbt", "Snowflake", "SQL modelling", "data contracts"],
+        gaps: ["team leadership", "hiring loops"],
+        gapNote: "Both are scope, not skill — the kind of thing a referral covers better than a resume." },
+      { title: "Data Platform Engineer", tab: "Data Platform Eng",
+        meta: "REMOTE (US) · POSTED 9d · $155–180k · FULL DESCRIPTION CAPTURED", band: "STRETCH",
+        reason: "Infrastructure-first: Terraform and Kubernetes lead the post, and your work has sat one layer above them.",
+        matched: ["Airflow", "Python", "CI pipelines"],
+        gaps: ["Terraform", "Kubernetes", "on-call"],
+        gapNote: "Three infra items in the requirements block — the widest gap on your map today." }
+    ]
+  },
+  meridian: {
+    name: "MERIDIAN HEALTH DATA",
+    why: "First data hire in a 40-person clinical team · one open role · no prior hides.",
+    roles: [
+      { title: "Senior Data Engineer", tab: "Senior Data Eng",
+        meta: "BOSTON · HYBRID · POSTED 5d · NO SALARY LISTED", band: "PARTIAL FIT",
+        reason: "Python pipelines and warehouse modelling line up. Kafka streaming and clinical-data exposure are new ground.",
+        matched: ["Python ingestion", "dimensional modelling", "dbt", "Airflow"],
+        gaps: ["Kafka", "HIPAA / clinical data"],
+        gapNote: "Kafka sits under \"nice to have\"; the domain is new to you." }
+    ]
+  },
+  foldwork: {
+    name: "FOLDWORK",
+    why: "Series B with no data hires until now · two Product Analyst roles open · new to your map today.",
+    roles: [
+      { title: "Product Analyst", tab: "Product Analyst",
+        meta: "REMOTE (EU/US) · POSTED 3d · $120–140k · FULL DESCRIPTION CAPTURED", band: "STRONG FIT",
+        reason: "The post asks for experiment design and self-serve metrics — you ran the A/B programme at Kestrel all last year.",
+        matched: ["experiment design", "SQL", "Looker", "metric definitions"],
+        gaps: ["Amplitude"],
+        gapNote: "One tool, same category as Looker — a week of ramp, not a blocker." },
+      { title: "Senior Product Analyst, Growth", tab: "Senior PA, Growth",
+        meta: "REMOTE (EU/US) · POSTED 3d · $140–160k · FULL DESCRIPTION CAPTURED", band: "PARTIAL FIT",
+        reason: "Experimentation carries over, but the post is built around paid-acquisition modelling you have not owned.",
+        matched: ["experiment design", "SQL", "causal analysis"],
+        gaps: ["paid acquisition", "LTV modelling"],
+        gapNote: "Growth-specific framing; the role above is the closer match of the two." }
+    ]
+  },
+  bellwether: {
+    name: "BELLWETHER GRID",
+    why: "Energy analytics, 200 people · new to your map today · one open role.",
+    roles: [
+      { title: "Analytics Engineer, Forecasting", tab: "Analytics Eng",
+        meta: "AMSTERDAM · HYBRID · POSTED 4d · €85–100k · FULL DESCRIPTION CAPTURED", band: "STRETCH",
+        reason: "dbt and Snowflake are in the post, but the role is built around load-forecasting models you have not built before.",
+        matched: ["dbt", "Snowflake", "SQL modelling"],
+        gaps: ["time-series forecasting", "energy markets"],
+        gapNote: "Both sit in the requirements block, not the nice-to-haves." }
+    ]
+  }
+};
+
+const STAGES = ["saved", "applied", "interviewing", "offer", "closed"];
+const STAGE_LABEL = { saved: "SAVED", applied: "APPLIED", interviewing: "INTERVIEWING", offer: "OFFER", closed: "CLOSED" };
+
+const BAND_STYLE = {
+  "STRONG FIT": { accent: "#2E7D5B", chipBg: "#2E7D5B", chipBorder: "#2E7D5B", chipColor: "#FFFDF8" },
+  "PARTIAL FIT": { accent: "#2A5F86", chipBg: "transparent", chipBorder: "#2A5F86", chipColor: "#2A5F86" },
+  "STRETCH": { accent: "#B9C4D0", chipBg: "transparent", chipBorder: "#B9C4D0", chipColor: "#6E7787" }
+};
+
+const SEED = [
+  { id: 1, company: "NORTHWIND ANALYTICS", key: "northwind", role: 0, title: "Analytics Engineer II", band: "STRONG FIT", stage: "applied", meta: "APPLIED 6d AGO · NO REPLY YET", note: "nudge the referral" },
+  { id: 2, company: "FOLDWORK", key: "foldwork", role: 0, title: "Product Analyst", band: "STRONG FIT", stage: "interviewing", meta: "SCREEN DONE · LOOP TUE 14:00", note: "send availability" },
+  { id: 3, company: "MERIDIAN HEALTH DATA", key: "meridian", role: 0, title: "Senior Data Engineer", band: "PARTIAL FIT", stage: "saved", meta: "SAVED 2d AGO · POSTED 5d", note: "" },
+  { id: 4, company: "BELLWETHER GRID", key: "bellwether", role: 0, title: "Analytics Engineer, Forecasting", band: "STRETCH", stage: "saved", meta: "SAVED 1d AGO · POSTED 4d", note: "" },
+  { id: 5, company: "TESSELLATE LABS", key: "northwind", role: 1, title: "Senior Analytics Engineer", band: "PARTIAL FIT", stage: "closed", meta: "CLOSED 9d AGO · ROLE FILLED", note: "" }
+];
+
+const WATCHLIST = [
+  { name: "Andersen Lab", meta: "LINKEDIN · LAST FETCH 4h AGO · 0 OPEN" },
+  { name: "DataArt", meta: "CUSTOM FEED · LAST FETCH 4h AGO · 10 OPEN" },
+  { name: "EPAM Systems", meta: "LINKEDIN · LAST FETCH 4h AGO · 4 OPEN" },
+  { name: "Kestrel Mobility", meta: "LINKEDIN · LAST FETCH 4h AGO · 0 OPEN" },
+  { name: "Sigma Software", meta: "CUSTOM FEED · LAST FETCH 4h AGO · 1 OPEN" },
+  { name: "Tessellate Labs", meta: "LINKEDIN · LAST FETCH 4h AGO · 0 OPEN" }
+];
+
+class Component extends DCLogic {
+  state = { page: null, company: null, role: 0, items: SEED };
+  componentDidMount() {
+    this._esc = (e) => { if (e.key === "Escape") this.setState({ company: null, role: 0 }); };
+    window.addEventListener("keydown", this._esc);
+  }
+  componentDidUpdate() { document.body.style.overflow = this.state.company ? "hidden" : ""; }
+  componentWillUnmount() {
+    window.removeEventListener("keydown", this._esc);
+    document.body.style.overflow = "";
+  }
+  open(company, role) { this.setState({ company: company, role: role || 0 }); }
+  move(id, dir) {
+    this.setState(s => ({
+      items: s.items.map(it => {
+        if (it.id !== id) return it;
+        const i = Math.max(0, Math.min(STAGES.length - 1, STAGES.indexOf(it.stage) + dir));
+        return Object.assign({}, it, { stage: STAGES[i] });
+      })
+    }));
+  }
+  renderVals() {
+    const page = this.state.page || this.props.startPage || "map";
+    const items = this.state.items;
+    const key = this.state.company;
+    let detail = false;
+    if (key) {
+      const co = COMPANIES[key];
+      const i = Math.min(this.state.role, co.roles.length - 1);
+      const r = co.roles[i];
+      const last = i === co.roles.length - 1;
+      detail = {
+        crumb: co.name + " · ROLE " + (i + 1) + " OF " + co.roles.length,
+        title: r.title, meta: r.meta, reason: r.reason,
+        matched: r.matched, gaps: r.gaps, gapNote: r.gapNote,
+        companyWhy: co.why,
+        isStrong: r.band === "STRONG FIT",
+        isPartial: r.band === "PARTIAL FIT",
+        isStretch: r.band === "STRETCH",
+        hasSiblings: co.roles.length > 1,
+        nextLabel: last ? "BACK TO MAP →" : "NEXT ROLE HERE →",
+        tabs: co.roles.map((rr, j) => ({
+          label: rr.tab, active: j === i, inactive: j !== i,
+          onClick: () => this.setState({ role: j })
+        }))
+      };
+    }
+    const live = items.filter(it => it.stage !== "closed").length;
+    const nav = [
+      { id: "map", label: "MAP", count: "14" },
+      { id: "tracker", label: "TRACKER", count: String(live) },
+      { id: "profile", label: "PROFILE", count: "" }
+    ].map(n => ({
+      label: n.label, count: n.count,
+      color: page === n.id ? "#D6482B" : "#6E7787",
+      rule: page === n.id ? "#D6482B" : "transparent",
+      bg: page === n.id ? "#FFFDF8" : "transparent",
+      onClick: () => this.setState({ page: n.id, company: null, role: 0 })
+    }));
+    const columns = STAGES.map(st => {
+      const cards = items.filter(it => it.stage === st).map(it => {
+        const bs = BAND_STYLE[it.band];
+        return {
+          company: it.company, title: it.title, band: it.band, meta: it.meta,
+          note: it.note, hasNote: !!it.note,
+          accent: bs.accent, chipBg: bs.chipBg, chipBorder: bs.chipBorder, chipColor: bs.chipColor,
+          back: () => this.move(it.id, -1),
+          fwd: () => this.move(it.id, 1),
+          open: () => this.open(it.key, it.role)
+        };
+      });
+      return {
+        label: STAGE_LABEL[st], count: String(cards.length), cards: cards,
+        empty: cards.length === 0,
+        bg: st === "closed" ? "#F4EFE1" : "#FBF7EC",
+        rule: st === "closed" ? "#DED5C1" : "#CBBFA5",
+        labelColor: st === "closed" ? "#8A93A1" : "#3A4557"
+      };
+    });
+    return {
+      isMap: page === "map", isTracker: page === "tracker", isProfile: page === "profile",
+      nav: nav, columns: columns, trackerCount: String(live), watchlist: WATCHLIST,
+      showWatchShelf: this.props.showWatchShelf ?? true,
+      quietDay: this.props.quietDay ?? false,
+      detail: detail,
+      goMap: () => this.setState({ page: "map" }),
+      openNorthwind: () => this.open("northwind"),
+      openMeridian: () => this.open("meridian"),
+      openFoldwork: () => this.open("foldwork"),
+      openBellwether: () => this.open("bellwether"),
+      close: () => this.setState({ company: null, role: 0 }),
+      markApplied: () => this.setState({ company: null, role: 0, page: "tracker" }),
+      next: () => this.setState(s => {
+        const co = COMPANIES[s.company];
+        if (!co || s.role >= co.roles.length - 1) return { company: null, role: 0 };
+        return { role: s.role + 1 };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>
