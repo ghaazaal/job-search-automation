@@ -337,7 +337,7 @@ def test_the_profile_screen_shows_the_saved_location(client):
                                       "work_modes": ["remote", "hybrid"]})
     body = client.get("/profile").data.decode("utf-8")
     assert "Toronto, ON" in body
-    assert "remote, hybrid" in body
+    assert "remote or hybrid" in body
 
 
 _NEW_ROUTES = ["/setup", "/profile"]
