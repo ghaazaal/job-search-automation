@@ -40,7 +40,10 @@ _MIN_CREDIT_USD = 0.50
 
 
 def apify_credit_remaining() -> float | None:
-    """Remaining monthly usage credit in USD, or None when unknowable.
+    """The BEST remaining monthly credit across all accounts, or None.
+
+    call_actor fails over between tokens, so the run can proceed as long
+    as ANY configured account still has credit.
 
     Run 10 ran out of credit mid-run: the main lanes finished, then every
     later call 403'd, and the zeros looked like results. Refusing to
@@ -51,20 +54,27 @@ def apify_credit_remaining() -> float | None:
     import os
 
     import requests
-    token = os.environ.get("APIFY_TOKEN", "")
-    if not token:
+    tokens = [os.environ.get(k, "").strip()
+              for k in ("APIFY_TOKEN", "APIFY_TOKEN_2", "APIFY_TOKEN_3")]
+    tokens = [t for t in tokens if t]
+    if not tokens:
         return None
-    try:
-        resp = requests.get("https://api.apify.com/v2/users/me/limits",
-                            headers={"Authorization": f"Bearer {token}"},
-                            timeout=20)
-        resp.raise_for_status()
-        data = resp.json()["data"]
-        return (float(data["limits"]["maxMonthlyUsageUsd"])
-                - float(data["current"]["monthlyUsageUsd"]))
-    except Exception:
-        log.warning("could not read Apify limits - proceeding", exc_info=True)
-        return None
+    best = None
+    for i, token in enumerate(tokens, 1):
+        try:
+            resp = requests.get(
+                "https://api.apify.com/v2/users/me/limits",
+                headers={"Authorization": f"Bearer {token}"}, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()["data"]
+            left = (float(data["limits"]["maxMonthlyUsageUsd"])
+                    - float(data["current"]["monthlyUsageUsd"]))
+            log.info("account %d: $%.2f credit remaining", i, left)
+            best = left if best is None else max(best, left)
+        except Exception:
+            log.warning("could not read Apify limits for account %d - "
+                        "ignoring it", i, exc_info=True)
+    return best
 
 
 def main() -> int:
