@@ -93,3 +93,111 @@ def test_a_missing_token_is_still_reported_and_skipped(monkeypatch, caplog):
 def test_the_items_come_back_unchanged(token, monkeypatch):
     _capture(monkeypatch)
     assert base.call_actor("kaix~indeed-scraper", {}, "Indeed/x") == [{"ok": True}]
+
+
+# --- two accounts, one pipeline ----------------------------------------
+
+def test_a_refused_token_fails_over_to_the_second(monkeypatch, caplog):
+    """Run 10's credit death, survived: token A 403s, token B answers."""
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_tokenA_aaaaaaaaaaaaaaaa")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_tokenB_bbbbbbbbbbbbbb")
+    base._reset_token_preference()
+    used = []
+
+    class _Resp:
+        def __init__(self, ok):
+            self.ok_ = ok
+            self.status_code = 200 if ok else 403
+
+        def raise_for_status(self):
+            if not self.ok_:
+                raise requests.exceptions.HTTPError("403", response=self)
+
+        def json(self):
+            return [{"ok": True}]
+
+    def post(url, **kwargs):
+        token = kwargs["headers"]["Authorization"].split()[-1]
+        used.append(token)
+        return _Resp("tokenB" in token)
+
+    monkeypatch.setattr(base.requests, "post", post)
+    with caplog.at_level(logging.WARNING):
+        out = base.call_actor("a~b", {}, "X/y")
+    assert out == [{"ok": True}]
+    assert "tokenA" in used[0] and "tokenB" in used[1]
+    # Neither token's value may reach the log.
+    assert "tokenA_aaaa" not in caplog.text and "tokenB_bbbb" not in caplog.text
+
+
+def test_the_working_token_becomes_sticky(monkeypatch):
+    """After a failover, later calls start with the token that worked -
+    one dead account must not cost a wasted request per call."""
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_tokenA_aaaaaaaaaaaaaaaa")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_tokenB_bbbbbbbbbbbbbb")
+    base._reset_token_preference()
+    used = []
+
+    class _Resp:
+        def __init__(self, ok):
+            self.ok_ = ok
+            self.status_code = 200 if ok else 403
+
+        def raise_for_status(self):
+            if not self.ok_:
+                raise requests.exceptions.HTTPError("403", response=self)
+
+        def json(self):
+            return []
+
+    def post(url, **kwargs):
+        token = kwargs["headers"]["Authorization"].split()[-1]
+        used.append(token)
+        return _Resp("tokenB" in token)
+
+    monkeypatch.setattr(base.requests, "post", post)
+    base.call_actor("a~b", {}, "X/y")       # fails over A -> B
+    base.call_actor("a~b", {}, "X/y")       # must start at B
+    assert "tokenB" in used[2]
+    assert len(used) == 3
+
+
+def test_both_tokens_dead_behaves_like_one_dead(monkeypatch):
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_tokenA_aaaaaaaaaaaaaaaa")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_tokenB_bbbbbbbbbbbbbb")
+    base._reset_token_preference()
+
+    class _Resp:
+        status_code = 403
+
+        def raise_for_status(self):
+            raise requests.exceptions.HTTPError("403", response=self)
+
+    monkeypatch.setattr(base.requests, "post", lambda url, **kw: _Resp())
+    assert base.call_actor("a~b", {}, "X/y") == []
+    import pytest as _pytest
+    with _pytest.raises(requests.exceptions.HTTPError):
+        base.call_actor("a~b", {}, "X/y", strict=True)
+
+
+def test_a_non_auth_error_does_not_rotate(monkeypatch):
+    """A 500 from the actor is not the account's fault; burning the second
+    account's credit on it would be a silent cost."""
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_tokenA_aaaaaaaaaaaaaaaa")
+    monkeypatch.setenv("APIFY_TOKEN_2", "apify_api_tokenB_bbbbbbbbbbbbbb")
+    base._reset_token_preference()
+    used = []
+
+    class _Resp:
+        status_code = 500
+
+        def raise_for_status(self):
+            raise requests.exceptions.HTTPError("500", response=self)
+
+    def post(url, **kwargs):
+        used.append(kwargs["headers"]["Authorization"])
+        return _Resp()
+
+    monkeypatch.setattr(base.requests, "post", post)
+    base.call_actor("a~b", {}, "X/y")
+    assert len(used) == 1
