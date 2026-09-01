@@ -26,6 +26,7 @@ Two field notes from measurement:
   no slug; the slug requirement drops it too.
 """
 import logging
+import time
 from datetime import date
 
 import requests
@@ -42,9 +43,29 @@ _MAX_PAGES = 30   # backstop; Armenia is 1-7 pages today
 def _get(params, get=None):
     if get is not None:
         return get(_API, params)
-    resp = requests.get(_API, params=params, headers=_UA, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    # Their API returned a 502 and a 504 within one day (2026-09-01) and
+    # was fine seconds later each time — transient load, not policy. A
+    # 4xx is not retried: that would be our request's fault.
+    last = None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(5 * attempt)
+        try:
+            resp = requests.get(_API, params=params, headers=_UA, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.HTTPError as exc:
+            last = exc
+            status = getattr(exc.response, "status_code", 0)
+            if status < 500:
+                raise
+            logger.warning("DataArt API %s (attempt %d/3)", status,
+                           attempt + 1)
+        except requests.exceptions.RequestException as exc:
+            last = exc
+            logger.warning("DataArt API %s (attempt %d/3)",
+                           type(exc).__name__, attempt + 1)
+    raise last
 
 
 def scrape(country_display: str, get=None) -> list[dict]:
