@@ -66,3 +66,19 @@ def test_empty_title_is_not_relevant():
 def test_no_include_list_accepts_everything_not_excluded():
     """An unconfigured gate must not silently reject the whole run."""
     assert is_target_role("Anything At All", {"include": [], "exclude": []}) is True
+
+
+def test_platform_engineer_is_a_target_role():
+    """DataArt's Data Engineering track titles its Armenia roles
+    "Platform Engineer with Python" (slug DE00320). Added at the user's
+    request - the gate changed, not the bypass: watched companies still
+    pass the same gate as everyone."""
+    assert is_target_role("Platform Engineer with Python", CFG)
+    assert is_target_role("Senior Platform Engineer with AWS AgentCore Gateway", CFG)
+
+
+def test_security_engineer_is_still_not_a_target_role():
+    """The rest of DataArt's Armenia list stays out - security and ML
+    evaluation are not this product's professions."""
+    assert not is_target_role("Security Engineer with Cedar Policy", CFG)
+    assert not is_target_role("Senior ML Evaluation Engineer with AWS Agent Evaluation", CFG)

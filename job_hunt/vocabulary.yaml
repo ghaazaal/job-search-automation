@@ -402,6 +402,12 @@ roles:
     - "reporting analyst"
     - "insights analyst"
     - "data platform"
+    # Added at the user's request (2026-09-01), measured against DataArt's
+    # Armenia postings: their Data Engineering track titles roles
+    # "Platform Engineer with Python" (slug DE00320). Word-bounded, so
+    # "platform engineering culture" in prose never matches a title gate
+    # that only reads titles anyway.
+    - "platform engineer"
   exclude:
     # Traps that pass an include phrase but are not the job.
     # Plural forms listed explicitly, same as everywhere else in this
