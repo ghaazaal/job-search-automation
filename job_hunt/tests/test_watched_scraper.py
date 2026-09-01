@@ -32,7 +32,7 @@ _CFG = {"apify": {}, "search": {}}
 def test_a_domain_that_resolves_on_the_ats_actor_is_ats(conn, user):
     wid = watchlist.add(conn, user, name="GitLab", domain="gitlab.com")
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         assert payload["companies"] == ["gitlab.com"]
         return [{"title": "Data Engineer", "company_name": "GitLab"}]
 
@@ -43,7 +43,7 @@ def test_a_domain_that_resolves_on_the_ats_actor_is_ats(conn, user):
 def test_a_clean_linkedin_name_resolves_linkedin(conn, user):
     wid = watchlist.add(conn, user, name="EPAM Systems")
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         assert "companyName" in payload
         return [{"companyName": "EPAM Systems",
                  "companyUrl": "https://www.linkedin.com/company/epam-systems"}]
@@ -59,7 +59,7 @@ def test_an_ambiguous_name_stays_unresolved_with_a_note(conn, user):
     """Two distinct slugs behind one display name is the Andersen case."""
     wid = watchlist.add(conn, user, name="Andersen")
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         return [
             {"companyName": "Andersen",
              "companyUrl": "https://www.linkedin.com/company/andersenus"},
@@ -105,7 +105,7 @@ def test_ats_rung_is_one_call_for_all_companies(conn, user):
     _watch_resolved(conn, user, "Supabase", "ats", domain="supabase.com")
     calls = []
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         calls.append(payload)
         return [{"title": "Data Engineer", "company_name": "GitLab",
                  "location": {"raw": "Remote"}, "job_url": "https://g/1",
@@ -127,7 +127,7 @@ def test_linkedin_rung_is_one_call_and_filters_purity(conn, user):
                     linkedin_name="Andersen", linkedin_slug="andersenus")
     calls = []
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         calls.append(payload)
         return [
             {"companyName": "Andersen", "title": "Data Analyst",
@@ -150,7 +150,7 @@ def test_linkedin_rung_is_one_call_and_filters_purity(conn, user):
 def test_yields_are_recorded_per_company(conn, user):
     row = _watch_resolved(conn, user, "GitLab", "ats", domain="gitlab.com")
 
-    def call(actor, payload, label, timeout):
+    def call(actor, payload, label, timeout, **kw):
         return [{"title": "A", "company_name": "GitLab",
                  "job_url": "https://g/1", "description_text": "x"},
                 {"title": "B", "company_name": "GitLab",
@@ -193,3 +193,23 @@ def test_the_custom_rung_dispatches_by_fingerprint(conn, user, monkeypatch):
 def test_a_custom_row_without_an_adapter_is_skipped_not_fatal(conn, user):
     _watch_resolved(conn, user, "Mystery Co", "custom")
     assert watched.fetch(conn, user, "custom", _CFG, profile={}) == []
+
+
+def test_a_credit_403_never_becomes_a_fact_about_the_company(conn, user):
+    """Run 10's lesson: the account's credit ran out mid-run, every call
+    403'd, and the resolver recorded "not found on LinkedIn" - a
+    transport failure stored as a claim about the world. A strict raise
+    leaves the row pending instead."""
+    import requests
+
+    wid = watchlist.add(conn, user, name="EPAM Systems")
+
+    def call(actor, payload, label, timeout, **kw):
+        if kw.get("strict"):
+            raise requests.exceptions.HTTPError("403 Forbidden")
+        return []
+
+    watched.resolve_pending(conn, user, _CFG, call=call)
+    row = watchlist.get(conn, user, wid)
+    assert row["resolution"] == "unresolved"
+    assert row["resolution_note"] == "pending next run"   # unchanged
