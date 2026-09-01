@@ -113,7 +113,10 @@ the authority, including their correction notes and accepted residuals):
   (`2026-08-31-company-watchlist-v1-design.md`). Resolution (ats /
   linkedin / unresolved) is a source strategy, never authority; the
   LinkedIn actor's `companyId` is dead - batch by exact `companyName`
-  and verify the `companyUrl` slug.
+  and verify the `companyUrl` slug. The one custom adapter is DataArt
+  (`scrapers/dataart.py`, their careers JSON API on dataart.team - found
+  by the user, no browser needed); a second custom company earns its own
+  file, and only 5-10 earn a shared shape.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
 - The first alias in a `vocabulary.yaml` country list IS the display name

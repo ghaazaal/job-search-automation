@@ -161,9 +161,9 @@ class RunResult:
     titles: list[str] = field(default_factory=list)
 
 
-def _default_watched_fetch(conn, user_id, lane, config):
+def _default_watched_fetch(conn, user_id, lane, config, profile=None):
     from .scrapers.watched import fetch
-    return fetch(conn, user_id, lane, config)
+    return fetch(conn, user_id, lane, config, profile=profile)
 
 
 def _default_scrapers() -> dict:
@@ -482,10 +482,16 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     # company changes where we search, not what qualifies as a job for
     # the user.
     from .store.watchlist import list_watched
-    if list_watched(conn, user_id):
+    _watch_rows = list_watched(conn, user_id)
+    if _watch_rows:
+        _watch_lanes = ["ats", "linkedin"]
+        # The custom rung's step exists only when a company resolved to
+        # it - a permanent zero-row step would read as noise.
+        if any(r["resolution"] == "custom" for r in _watch_rows):
+            _watch_lanes.append("custom")
         steps += [{"source": "Watched companies", "role": "watchlist",
                    "lane": lane, "state": "pending", "found": 0}
-                  for lane in ("ats", "linkedin")]
+                  for lane in _watch_lanes]
 
     scraped_total = 0
     dropped_total = 0
@@ -513,7 +519,8 @@ def execute(conn, user_id: int, run_id: int, config: dict,
                     from .scrapers.watched import resolve_pending
                     resolve_pending(conn, user_id, config)
                 fetch = watched_fetch or _default_watched_fetch
-                jobs = fetch(conn, user_id, step["lane"], config)
+                jobs = fetch(conn, user_id, step["lane"], config,
+                             profile=profile)
             except Exception as exc:
                 # One rung failing must not throw away the other's rows,
                 # or any other source's.

@@ -207,9 +207,27 @@ failure.
 - routes: POST returns before any probe runs; DELETE removes fetch
   participation next run.
 
+## Amendment 2026-09-01 — the DataArt adapter, built
+
+The non-goal below deferred DataArt because it was believed
+browser-rendered at an unknown URL. The user supplied the real URL
+(dataart.team, not dataart.com) and measurement overturned every
+premise: the portal is a JS shell over a PLAIN JSON API
+(`/dataart-team/api/vacancies/filter-fields-page`), fetchable with one
+HTTP GET, country-filterable by an id resolvable from the API's own
+countries list. The adapter is `scrapers/dataart.py` — one module, no
+framework; the trap the non-goal guarded against was abstractions, and
+none was built. Dispatch is a dict literal keyed by fingerprint in
+`watched.py`; the `custom` lane is planned only when a custom-resolved
+row exists.
+
+Measured at build time: Armenia shows 10 distinct vacancies (the page's
+"68" is pagination echo), currently 0 matching the user's data titles —
+the watch's value is the Monday that changes.
+
 ## Non-goals
 
-- **Custom adapters, including DataArt.** Trigger to revisit: 5–10 real
+- **Custom adapters beyond DataArt** (see Amendment). Trigger to revisit: 5–10 real
   companies measurably failing both rungs — an abstraction for n=1 is
   the trap this spec exists to avoid. DataArt's staff.am presence is an
   **unverified** lead, recorded as exactly that.

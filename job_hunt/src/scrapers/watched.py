@@ -93,12 +93,31 @@ def _resolve_one(conn, user_id, row, careers_actor, linkedin_actor, call):
                  "30 days; add a domain or a LinkedIn URL")
 
 
+# The custom rung's adapters, keyed by company fingerprint. Plain dict,
+# not a registry class: the v1 spec's trap is frameworks for n=1, and at
+# n=1 a dict literal IS the whole dispatch. A row resolved 'custom' with
+# no entry here is skipped with a log line, never an error.
+def _dataart(row, profile):
+    from . import dataart
+
+    # DataArt's API filters by display name ("Armenia"); the profile
+    # stores the ISO code. pycountry is already a dependency (geo.py).
+    import pycountry
+    code = (profile.get("country") or "").strip().upper()
+    country = pycountry.countries.get(alpha_2=code) if code else None
+    return dataart.scrape(country.name if country else "")
+
+
+_CUSTOM_ADAPTERS = {
+    "dataart|": _dataart,
+}
+
+
 def fetch(conn, user_id: int, lane: str, config: dict,
-          call=call_actor) -> list[dict]:
+          call=call_actor, profile: dict | None = None) -> list[dict]:
     """One batched call for every company on the rung. Empty rung, no call."""
-    wanted = "ats" if lane == "ats" else "linkedin"
     rows = [r for r in watchlist.list_watched(conn, user_id)
-            if r["resolution"] == wanted]
+            if r["resolution"] == lane]
     if not rows:
         return []
     apify = config.get("apify", {})
@@ -107,10 +126,27 @@ def fetch(conn, user_id: int, lane: str, config: dict,
 
     if lane == "ats":
         jobs, counts = _fetch_ats(rows, apify, per_co, call)
-    else:
+    elif lane == "linkedin":
         jobs, counts = _fetch_linkedin(rows, apify, per_co, call)
+    else:
+        jobs, counts = _fetch_custom(rows, profile or {})
     watchlist.record_yield(conn, user_id, counts)
     return jobs
+
+
+def _fetch_custom(rows, profile):
+    jobs: list[dict] = []
+    counts = {}
+    for row in rows:
+        adapter = _CUSTOM_ADAPTERS.get(row["company_fingerprint"])
+        if adapter is None:
+            logger.info("no custom adapter for %r - skipped",
+                        row["company_name"])
+            continue
+        fetched = adapter(row, profile)
+        jobs.extend(fetched)
+        counts[row["company_fingerprint"]] = len(fetched)
+    return jobs, counts
 
 
 def _fetch_ats(rows, apify, per_co, call):
