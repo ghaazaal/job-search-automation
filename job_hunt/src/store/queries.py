@@ -125,14 +125,39 @@ SELECT r.*, a.status AS app_status FROM role r
 """
 
 
+def platform_company_ids(conn: sqlite3.Connection, user_id: int) -> set[int]:
+    """Companies that are talent platforms, not employers.
+
+    Decided by name at read time rather than at scrape time, so rows
+    stored before the list existed leave the map too."""
+    from ..scoring.platforms import is_talent_platform
+    return {r["id"] for r in conn.execute(
+        "SELECT id, name FROM company WHERE user_id = ?", (user_id,))
+        if is_talent_platform(r["name"])}
+
+
+def _not_platform(conn, user_id) -> tuple[str, tuple]:
+    """A WHERE clause leaving out talent-platform companies, and its params."""
+    ids = platform_company_ids(conn, user_id)
+    if not ids:
+        return "", ()
+    marks = ",".join("?" for _ in ids)
+    return f" AND c.id NOT IN ({marks})", tuple(ids)
+
+
 def map_sections(conn: sqlite3.Connection, user_id: int,
                  shortlist_min: int = 7) -> dict:
     """The three sections of the map screen."""
     seen = conn.execute("SELECT last_seen_run_id FROM user WHERE id = ?",
                         (user_id,)).fetchone()["last_seen_run_id"] or 0
 
-    new_rows = conn.execute(_OPEN_ROLES.format(op=">"), (user_id, seen)).fetchall()
-    old_rows = conn.execute(_OPEN_ROLES.format(op="<="), (user_id, seen)).fetchall()
+    platforms = platform_company_ids(conn, user_id)
+    new_rows = [r for r in conn.execute(_OPEN_ROLES.format(op=">"),
+                                        (user_id, seen))
+                if r["company_id"] not in platforms]
+    old_rows = [r for r in conn.execute(_OPEN_ROLES.format(op="<="),
+                                        (user_id, seen))
+                if r["company_id"] not in platforms]
 
     from .watchlist import watched_fingerprints
     watched_fps = watched_fingerprints(conn, user_id)
@@ -193,20 +218,40 @@ def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
 
     Run 6's split for the working profile was 2 open, 66 closed, 316
     unverified â€” which is why the map stopped rendering all 384.
+
+    Talent-platform roles are in none of the three; `platform_role_count`
+    counts them.
     """
+    skip, params = _not_platform(conn, user_id)
     rows = conn.execute(
-        """SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
+        f"""SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
                   COUNT(*) AS n
              FROM role r
              JOIN company c ON c.id = r.company_id
             WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
-              AND r.dropped_at IS NULL
-            GROUP BY verdict""", (user_id,)).fetchall()
+              AND r.dropped_at IS NULL{skip}
+            GROUP BY verdict""", (user_id, *params)).fetchall()
     counts = {row["verdict"]: row["n"] for row in rows}
     return {"open": counts.get("open", 0),
             "closed": counts.get("closed", 0),
             "unverified": (counts.get("unverified", 0)
                            + counts.get("unknown", 0))}
+
+
+def platform_role_count(conn: sqlite3.Connection, user_id: int) -> int:
+    """Stored roles hidden because a talent platform posted them, for the
+    "N HIDDEN (TALENT PLATFORM)" clause. Same base filter as
+    `eligibility_counts`, so the four numbers cover every stored role."""
+    ids = platform_company_ids(conn, user_id)
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    return conn.execute(
+        f"""SELECT COUNT(*) AS n FROM role r
+              JOIN company c ON c.id = r.company_id
+             WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
+               AND r.dropped_at IS NULL
+               AND c.id IN ({marks})""", (user_id, *ids)).fetchone()["n"]
 
 
 def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -276,16 +321,18 @@ def open_company_count(conn: sqlite3.Connection, user_id: int) -> int:
     """How many companies the map lists — the shell's MAP badge.
 
     Same filter as the map's role query, without the seen/unseen split."""
+    skip, params = _not_platform(conn, user_id)
     return conn.execute(
-        """SELECT COUNT(DISTINCT r.company_id) AS n FROM role r
+        f"""SELECT COUNT(DISTINCT r.company_id) AS n FROM role r
              JOIN company c ON c.id = r.company_id
              LEFT JOIN application a ON a.role_id = r.id
             WHERE r.user_id = ?
               AND (a.id IS NULL OR a.status != 'HIDDEN')
               AND c.user_state != 'HIDDEN'
               AND r.dropped_at IS NULL
-              AND (r.location_scope IS NULL OR r.location_scope != 'closed')""",
-        (user_id,)).fetchone()["n"]
+              AND (r.location_scope IS NULL OR r.location_scope != 'closed')
+              {skip}""",
+        (user_id, *params)).fetchone()["n"]
 
 
 def known_listings(conn: sqlite3.Connection,

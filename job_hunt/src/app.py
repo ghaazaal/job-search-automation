@@ -28,7 +28,7 @@ from .store.profile import (create_resume, delete_resume, get_profile,
                             set_profile, unique_label, update_resume)
 from .store.queries import (activity_board, eligibility_counts,
                             live_tracker_count, map_sections, mark_seen,
-                            open_company_count)
+                            open_company_count, platform_role_count)
 from .store.runs import (active_run, clear_running, fail_run, get_run,
                          is_stale, latest_ok_run)
 from .store.schema import init_db
@@ -130,7 +130,9 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden, "offtopic": offtopic, **counts},
+                      "hidden": hidden, "offtopic": offtopic,
+                      "platforms": platform_role_count(conn, user_id),
+                      **counts},
                 running_run_id=in_flight["id"] if in_flight else None,
                 nav={"tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
@@ -445,7 +447,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 watched=list_watched(conn, user_id),
                 filtered={"closed": counts["closed"],
                           "unverified": counts["unverified"],
-                          "offtopic": offtopic},
+                          "offtopic": offtopic,
+                          "platforms": platform_role_count(conn, user_id)},
                 nav={"map_count": open_company_count(conn, user_id),
                      "tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})

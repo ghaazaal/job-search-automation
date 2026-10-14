@@ -424,6 +424,12 @@ def render(maps: list[dict], meta: dict | None = None,
     if hidden:
         meta_2 = f"{meta_2} &middot; {hidden} HIDDEN (ON-SITE ELSEWHERE)"
 
+    # The third exception: Proxify, Toptal and the like recruit into a
+    # freelance pool rather than post an employer's opening.
+    platforms = meta.get("platforms") or 0
+    if platforms:
+        meta_2 = f"{meta_2} &middot; {platforms} HIDDEN (TALENT PLATFORM)"
+
     # A relevance-gate rejection is a different fact from a hidden-elsewhere
     # posting — wrong place vs. not this job at all — so it earns its own
     # clause rather than folding into the count above.

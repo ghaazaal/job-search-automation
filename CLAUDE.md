@@ -56,8 +56,8 @@ the authority, including their correction notes and accepted residuals):
 
 - Every claim needs evidence; silence is the default. Phrase rules are
   word-bounded and phrase-only; conflicting evidence claims nothing.
-- Flag-never-hide, with TWO user-approved exceptions. Both are counted
-  and both are stated on the map — hidden, never silent:
+- Flag-never-hide, with THREE user-approved exceptions. All are counted
+  and all are stated on the map — hidden, never silent:
   1. A posting the user cannot physically attend, in a confidently-parsed
      foreign country, is dropped — stated as "N HIDDEN (ON-SITE
      ELSEWHERE)". Two ways to qualify: the posting states a mode the user
@@ -74,6 +74,13 @@ the authority, including their correction notes and accepted residuals):
      below proven-open ones, and say so on the card. Ship 8 hid them too
      and that was wrong — it buried 1055 LinkedIn roles the user could see
      on LinkedIn itself behind a bare number.
+  3. Talent platforms (Proxify, Toptal, micro1, mercor, Lemon.io —
+     `talent_platforms` in `vocabulary.yaml`) recruit into a freelance
+     pool rather than post an employer's opening. Hidden where the map
+     reads roles, not at scrape time, so stored rows go too; counted as
+     "N HIDDEN (TALENT PLATFORM)". Exact name match after folding and a
+     legal-suffix strip ("Proxify AB" is Proxify). Recruitment agencies
+     are NOT platforms. A tracked platform role stays on the tracker.
   Roles first seen before the relevance gate existed (runs 1-4) are
   soft-dropped via `role.dropped_at` — excluded from map and counts, never
   DELETEd, and never dropped if the user has an application row for them.

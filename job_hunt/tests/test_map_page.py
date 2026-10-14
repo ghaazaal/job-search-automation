@@ -282,6 +282,19 @@ def test_no_hidden_word_appears_when_nothing_was_dropped():
                                             "hidden": 0})
 
 
+# ── Talent platform count ─────────────────────────────────────────────────────
+
+def test_talent_platform_postings_are_announced_in_the_meta_line():
+    html = render([], meta={"companies": 0, "roles": 0, "platforms": 11})
+    assert "11 HIDDEN (TALENT PLATFORM)" in html
+
+
+def test_no_platform_clause_when_none_were_hidden():
+    assert "TALENT PLATFORM" not in render([], meta={"companies": 0,
+                                                     "roles": 0,
+                                                     "platforms": 0})
+
+
 # ── Off-topic (relevance gate) count ──────────────────────────────────────────
 
 def test_offtopic_titles_are_announced_in_the_meta_line():

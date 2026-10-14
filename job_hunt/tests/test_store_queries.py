@@ -419,3 +419,31 @@ def test_a_watched_companys_map_is_marked(conn):
     maps = {m["name"]: m for m in map_sections(conn, u, 7)["new"]}
     assert maps["Open Co"]["watched"] is True
     assert maps["Other Co"]["watched"] is False
+
+
+def test_a_talent_platform_is_not_listed_but_is_counted(conn):
+    """Proxify and friends recruit into a freelance pool rather than post a
+    job. They leave the map whatever their legal suffix, and the count says
+    how many went — hidden, never silent."""
+    from src.store.queries import open_company_count, platform_role_count
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1"),
+                        _job("https://x/2", company="Proxify"),
+                        _job("https://x/3", company="Proxify AB"),
+                        _job("https://x/4", company="Toptal",
+                             location_scope=None)])
+    sections = map_sections(conn, u, shortlist_min=7)
+    assert [m["name"] for m in sections["new"]] == ["Acme"]
+    assert open_company_count(conn, u) == 1
+    assert platform_role_count(conn, u) == 3
+    assert eligibility_counts(conn, u) == {"open": 1, "closed": 0,
+                                           "unverified": 0}
+
+
+def test_a_tracked_talent_platform_role_stays_on_the_board(conn):
+    u = ensure_user(conn, "G")
+    _run_with(conn, u, [_job("https://x/1", company="Proxify")])
+    role_id = conn.execute("SELECT id FROM role").fetchone()["id"]
+    set_role_status(conn, u, role_id, "SAVED")
+    assert map_sections(conn, u, shortlist_min=7)["new"] == []
+    assert [c["company"] for c in activity_board(conn, u)["SAVED"]] == ["Proxify"]

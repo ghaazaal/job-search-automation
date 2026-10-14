@@ -424,6 +424,20 @@ roles:
     - "clinical data"
     - "flight data"
 
+# Talent platforms: a "job" that is a pool to join, not an employer's
+# opening. They recruit freelancers to place later, so they never reach the
+# map. Hidden and counted in its header, the third approved exception to
+# flag-never-hide (plan 2026-09-25). Recruitment AGENCIES are not here:
+# they usually front a real employer's real opening.
+#
+# Matched by exact equality after folding case, accents and punctuation and
+# removing a trailing legal suffix, so "Proxify AB" is Proxify and "Toptal
+# Recruiting Partners" is not Toptal. Careerswift and Jobgether wait on the
+# user's word.
+talent_platforms:
+  names: ["proxify", "toptal", "micro1", "mercor", "lemon.io"]
+  legal_suffixes: ["ab", "inc", "ltd", "llc", "gmbh", "bv", "ou", "sa", "srl"]
+
 # Remote boards publish reach as a FIELD rather than burying it in
 # prose. These are the shapes measured on a live run:
 #   "Anywhere in the World" / "Europe, North America, Latin America,

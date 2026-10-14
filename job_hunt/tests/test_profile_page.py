@@ -131,6 +131,11 @@ def test_filtered_card_states_the_real_counts():
     assert "5 were not one of your target roles" in html
 
 
+def test_filtered_card_names_talent_platforms():
+    html = render(_RESUMES, _SET_PROFILE, filtered={"platforms": 11})
+    assert "11 came from talent platforms" in html
+
+
 def test_filtered_card_with_nothing_filtered_says_so():
     html = render(_RESUMES, _SET_PROFILE, filtered={})
     assert "Nothing has been filtered out yet" in html

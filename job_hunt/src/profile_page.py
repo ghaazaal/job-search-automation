@@ -340,7 +340,8 @@ def _filtered_card(filtered: dict) -> str:
     closed = filtered.get("closed") or 0
     unverified = filtered.get("unverified") or 0
     offtopic = filtered.get("offtopic") or 0
-    if not (closed or unverified or offtopic):
+    platforms = filtered.get("platforms") or 0
+    if not (closed or unverified or offtopic or platforms):
         body = ("Nothing has been filtered out yet — after a search, the "
                 "count of postings set aside (and why) appears here and in "
                 "the map header.")
@@ -350,7 +351,10 @@ def _filtered_card(filtered: dict) -> str:
                    f"{unverified} could not be verified either way"
                    if unverified else "",
                    f"{offtopic} were not one of your target roles"
-                   if offtopic else ""]
+                   if offtopic else "",
+                   f"{platforms} came from talent platforms that recruit "
+                   f"into a freelance pool, not an employer's opening"
+                   if platforms else ""]
         joined = ", ".join(c for c in clauses if c)
         body = (f"Right now: {joined}. The map header carries the same "
                 "counts — nothing is dropped silently.")
