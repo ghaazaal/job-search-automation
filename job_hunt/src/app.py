@@ -16,6 +16,7 @@ from .activity_page import render as render_activity
 from .agents.profile_parser import parse_profile
 from .llm.base import LLMClient
 from .learning_page import render as render_learning
+from . import map_filters
 from .map_page import render as render_map
 from .profile_page import render as render_profile
 from .run_core import search_titles
@@ -104,7 +105,13 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             if not resumes or not profile.get("setup_complete"):
                 return redirect("/setup")
 
-            sections = map_sections(conn, user_id, shortlist_min)
+            # A filtered view reloads the page, and the first load has
+            # already marked the latest run seen. `since` carries the
+            # baseline that load used, so filtering never empties "new".
+            view = map_filters.parse(request.args)
+            sections = map_sections(conn, user_id, shortlist_min,
+                                    seen=view["since"])
+            view["since"] = sections["seen"]
             tagged = (
                 [{**m, "section": "new"} for m in sections["new"]]
                 + [{**m, "section": "earlier"} for m in sections["earlier"]]
@@ -135,7 +142,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                       "hidden": hidden, "offtopic": offtopic, **counts},
                 running_run_id=in_flight["id"] if in_flight else None,
                 nav={"tracker_count": live_tracker_count(conn, user_id),
-                     "user_label": user_name})
+                     "user_label": user_name},
+                view=view)
 
             if latest:
                 mark_seen(conn, user_id, latest)

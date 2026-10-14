@@ -15,6 +15,7 @@ import json
 from datetime import date, datetime
 from html import escape
 
+from . import map_filters
 from .drawer import DRAWER_CSS, DRAWER_MOUNT, drawer_js
 from .shell import SHELL_CSS, shell_nav
 
@@ -102,6 +103,16 @@ font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
 .go:hover{background:#A83519;border-color:#A83519}
 .go.alt{background:transparent;color:#D6482B}
 .go.alt:hover{background:transparent;color:#A83519}
+.filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px;padding:13px 16px;background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px}
+.fl{display:flex;flex-direction:column;gap:6px;min-width:0}
+.fl span{font:400 9.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
+.fl select,.fl input{max-width:100%;font:500 11px/1.2 'JetBrains Mono',monospace;color:#2A3342;background:#F7F2E6;border:1px solid #E0D8C4;border-radius:3px;padding:6px 8px;letter-spacing:.04em}
+.fl select:focus,.fl input:focus{outline:none;border-color:#2A5F86}
+.fl.on select,.fl.on input{border-color:#D6482B;color:#A83519}
+.fl-q input{width:150px}
+.filters .btn-q{padding:7px 4px}
+.fstate{display:flex;align-items:center;gap:12px;font:400 10.5px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
+.fstate a{font-weight:500}
 """
 
 _PILL_CLASS = {"STRONG FIT": "pill-strong",
@@ -200,10 +211,17 @@ def _watch_chip(m: dict) -> str:
             'monospace;letter-spacing:.1em;margin-left:8px">WATCHLIST</span>')
 
 
+def _role_count(m: dict) -> str:
+    """"2 ROLES", or "1 OF 2 ROLES" when a filter set some aside — the
+    company sentence above still speaks for all of them."""
+    n = len(m["roles"])
+    total = max(m.get("roles_total") or n, n)
+    noun = "ROLE" if total == 1 else "ROLES"
+    return f"{n} OF {total} {noun}" if total > n else f"{n} {noun}"
+
+
 def _lead_card(m: dict, key: str) -> str:
     role = m["roles"][0]
-    n = len(m["roles"])
-    noun = "ROLE" if n == 1 else "ROLES"
     ids = _ids(m.get("id"), role.get("id"))
     fit = (f'<div class="brow">{_band_pill(role)}'
            f'<span class="reason">{_e(role.get("reason"))}</span></div>'
@@ -215,7 +233,7 @@ def _lead_card(m: dict, key: str) -> str:
     return (
         f'<div class="lead"><div class="crow">'
         f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
-        f'<div class="cmeta">{n} {noun} OPEN</div></div>'
+        f'<div class="cmeta">{_role_count(m)} OPEN</div></div>'
         f'<div class="cwhy">{_e(m["why"])}</div>'
         f'<hr class="rule">'
         f'<div class="rtitle">{_e(role.get("title"))}</div>'
@@ -237,11 +255,9 @@ def _compact_card(m: dict, key: str) -> str:
     share one paragraph (evidence muted, reason darker), and the band
     pill leads the action row — the App file's compact anatomy."""
     role = m["roles"][0]
-    n = len(m["roles"])
-    noun = "ROLE" if n == 1 else "ROLES"
     tag = "NEW TO YOU · " if m.get("state") == "DISCOVER" else ""
     age = _days_ago(role.get("date"))
-    meta = f'{tag}{n} {noun}' + (f' · {age}' if age else "")
+    meta = f'{tag}{_role_count(m)}' + (f' · {age}' if age else "")
 
     checked = _checked(role)
     reason = (f' <span class="creason">{_e(role.get("reason"))}</span>'
@@ -298,6 +314,69 @@ def _quiet_header(open_count: int, unchecked: int) -> str:
     )
 
 
+def _select(name: str, label: str, choices: list[tuple[str, str]],
+            current: str, any_label: str | None = "ANY") -> str:
+    opts = (f'<option value="">{_e(any_label)}</option>'
+            if any_label is not None else "")
+    opts += "".join(
+        f'<option value="{_e(v)}"{" selected" if v == current else ""}>'
+        f'{_e(text)}</option>' for v, text in choices)
+    on = " on" if current and any_label is not None else ""
+    return (f'<label class="fl{on}"><span>{_e(label)}</span>'
+            f'<select name="{name}">{opts}</select></label>')
+
+
+def _controls(view: dict, choices: dict) -> str:
+    """The sort and filter bar. A plain GET form, so a filtered map is a
+    link the user can keep; the page script submits it on change."""
+    since = view.get("since")
+    hidden = (f'<input type="hidden" name="since" value="{int(since)}">'
+              if since is not None else "")
+    modes = [(m, "NOT STATED" if m == map_filters.NO_MODE else m.upper())
+             for m in choices.get("mode") or []]
+    levels = [(k, map_filters.LEVELS[k]) for k in choices.get("level") or []]
+    q = view.get("q") or ""
+    return (
+        f'<form class="filters" method="get" action="/">{hidden}'
+        + _select("sort", "SORT", list(map_filters.SORTS.items()),
+                  view.get("sort") or "fit", any_label=None)
+        + _select("fit", "FIT", list(map_filters.FITS.items()),
+                  view.get("fit") or "")
+        + _select("posted", "POSTED", list(map_filters.POSTED.items()),
+                  view.get("posted") or "")
+        + _select("kind", "KIND OF ROLE",
+                  [(k, k.upper()) for k in choices.get("kind") or []],
+                  view.get("kind") or "")
+        + _select("level", "SENIORITY", levels, view.get("level") or "")
+        + _select("mode", "WORK MODE", modes, view.get("mode") or "")
+        + _select("reach", "LOCATION", list(map_filters.REACH.items()),
+                  view.get("reach") or "")
+        + _select("board", "BOARD",
+                  [(b, b.upper()) for b in choices.get("board") or []],
+                  view.get("board") or "")
+        + f'<label class="fl fl-q{" on" if q else ""}"><span>COMPANY</span>'
+          f'<input type="search" name="q" value="{_e(q)}" '
+          f'placeholder="NAME"></label>'
+          '<button type="submit" class="btn-q">APPLY</button></form>'
+    )
+
+
+def _filter_state(view: dict, shown: int, total: int) -> str:
+    """A filter is the user's choice, not a policy rule, but it still sets
+    companies aside - so the page says how many, and how to undo it."""
+    since = view.get("since")
+    clear = f"/?since={int(since)}" if since is not None else "/"
+    noun = "COMPANY" if total == 1 else "COMPANIES"
+    line = (f'<div class="fstate">SHOWING {shown} OF {total} {noun}'
+            f'<a href="{clear}">CLEAR FILTERS</a></div>')
+    if shown:
+        return line
+    return line + (
+        '<div class="quiet"><div class="quiet-t">nothing matches these '
+        'filters</div><div class="quiet-b">Every company is still on the '
+        'map. Loosen a filter or clear them to see it.</div></div>')
+
+
 def _drawer_payload(maps: list[dict]) -> dict:
     """Data the drawer needs. The internal score is deliberately excluded."""
     out: dict = {}
@@ -337,6 +416,20 @@ async function post(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r.ok){location.reload();}else{alert('That did not save. Try again.');}
 }
+function sendFilters(f){
+  for(const el of f.elements){
+    if(el.name&&(!el.value||(el.name==='sort'&&el.value==='fit'))){el.disabled=true;}
+  }
+  f.submit();
+}
+document.addEventListener('change',function(e){
+  const f=e.target.closest('form.filters');
+  if(f&&e.target.tagName==='SELECT'){sendFilters(f);}
+});
+document.addEventListener('submit',function(e){
+  const f=e.target.closest('form.filters');
+  if(f){e.preventDefault();sendFilters(f);}
+});
 document.addEventListener('click',function(e){
   const s=e.target.closest('[data-status]');
   if(s&&s.dataset.role){post('/api/roles/'+s.dataset.role+'/status',{status:s.dataset.status});return;}
@@ -348,19 +441,30 @@ document.addEventListener('click',function(e){
 
 def render(maps: list[dict], meta: dict | None = None,
            running_run_id: int | None = None,
-           nav: dict | None = None) -> str:
+           nav: dict | None = None,
+           view: dict | None = None) -> str:
     """Build the full opportunity map page.
 
     `nav` carries the shell's counts and identity: `tracker_count` for
     the TRACKER tab badge and `user_label` beside the wordmark. The MAP
-    badge is the company count this render already knows."""
+    badge is the company count this render already knows.
+
+    `view` is the user's sort and filters (`map_filters.parse`). The
+    header counts and the quiet-day header describe the whole map; only
+    the cards follow the view."""
     meta = meta or {}
     nav = nav or {}
+    view = view or {}
     listed = [m for m in maps if m.get("state") != "WATCH"]
     watching = [m for m in maps if m.get("state") == "WATCH"]
     act_now = [m for m in listed if m.get("state") == "ACT_NOW"]
 
-    keys = {id(m): f"c{i}" for i, m in enumerate(maps)}
+    shown = map_filters.apply(listed, view)
+    keys = {id(m): f"c{i}" for i, m in enumerate(shown)}
+    # The lead card is the store's top pick. Under another sort the first
+    # card is first for a different reason, so it renders compact.
+    lead_ok = (any(m.get("state") == "ACT_NOW" for m in shown)
+               and view.get("sort", "fit") == "fit")
 
     body: list[str] = []
     if not act_now:
@@ -369,15 +473,22 @@ def render(maps: list[dict], meta: dict | None = None,
         roles_seen = sum(len(m["roles"]) for m in listed)
         body.append(_quiet_header(roles_seen, unchecked))
 
-    fresh = [m for m in listed if m.get("section", "new") == "new"]
-    earlier = [m for m in listed if m.get("section") == "earlier"]
+    with_roles = [m for m in listed if m.get("roles")]
+    if with_roles:
+        body.append(_controls(view, map_filters.options(with_roles)))
+    if map_filters.is_active(view):
+        body.append(_filter_state(
+            view, sum(1 for m in shown if m.get("roles")), len(with_roles)))
+
+    fresh = [m for m in shown if m.get("section", "new") == "new"]
+    earlier = [m for m in shown if m.get("section") == "earlier"]
 
     def _emit(group: list[dict], allow_lead: bool, group_id: str) -> None:
         for i, m in enumerate(group[:_LEAD_VISIBLE]):
             if not m.get("roles"):
                 continue
             key = keys[id(m)]
-            body.append(_lead_card(m, key) if i == 0 and allow_lead and act_now
+            body.append(_lead_card(m, key) if i == 0 and allow_lead and lead_ok
                         else _compact_card(m, key))
         rest = [m for m in group[_LEAD_VISIBLE:] if m.get("roles")]
         if rest:
@@ -431,7 +542,7 @@ def render(maps: list[dict], meta: dict | None = None,
     if offtopic:
         meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A TARGET ROLE)"
 
-    payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
+    payload = json.dumps(_drawer_payload(shown), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 
     # Only counts the run has actually produced. While scraping, the total is

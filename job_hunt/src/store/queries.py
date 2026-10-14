@@ -126,10 +126,15 @@ SELECT r.*, a.status AS app_status FROM role r
 
 
 def map_sections(conn: sqlite3.Connection, user_id: int,
-                 shortlist_min: int = 7) -> dict:
-    """The three sections of the map screen."""
-    seen = conn.execute("SELECT last_seen_run_id FROM user WHERE id = ?",
-                        (user_id,)).fetchone()["last_seen_run_id"] or 0
+                 shortlist_min: int = 7, seen: int | None = None) -> dict:
+    """The three sections of the map screen.
+
+    `seen` overrides the user's last-seen run, for a reload that must
+    split new from earlier the way the first load did. The run used is
+    returned under "seen"."""
+    if seen is None:
+        seen = conn.execute("SELECT last_seen_run_id FROM user WHERE id = ?",
+                            (user_id,)).fetchone()["last_seen_run_id"] or 0
 
     new_rows = conn.execute(_OPEN_ROLES.format(op=">"), (user_id, seen)).fetchall()
     old_rows = conn.execute(_OPEN_ROLES.format(op="<="), (user_id, seen)).fetchall()
@@ -151,7 +156,8 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
             " ORDER BY name", (user_id,))
         if r["id"] not in listed
     ]
-    return {"new": new, "earlier": earlier, "watching": watching}
+    return {"new": new, "earlier": earlier, "watching": watching,
+            "seen": seen}
 
 
 def drop_roles_from_runs(conn: sqlite3.Connection, user_id: int, *,
