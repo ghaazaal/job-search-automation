@@ -72,6 +72,11 @@ summary{cursor:pointer;font:400 11px/1.4 'JetBrains Mono',monospace;color:#8A93A
 .famn{font:500 14px/1.3 Inter,sans-serif;color:#1F2937}
 .faml{font:400 13px/1.7 Inter,sans-serif;color:#4C5768;margin-top:6px}
 .tr{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px}
+.roles{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.role{display:inline-flex;align-items:baseline;gap:7px;padding:8px 12px 7px;border:1px solid #E0D8C4;border-radius:3px;background:#FFFDF8;color:#4C5768;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.08em;white-space:nowrap}
+.role:hover{border-color:#CBBFA5;color:#2A3342}
+.role.on{border-color:#D6482B;color:#D6482B;background:#FFF6F2}
+.role .rc{font-weight:400;color:#A6AEB9;letter-spacing:.06em}
 @media (max-width:700px){.fam,.tr{grid-template-columns:1fr}.head,.wrap{padding-left:16px;padding-right:16px}}
 """
 
@@ -174,14 +179,42 @@ def _empty_card(running_id) -> str:
         + _action("BUILD MY PATH", running_id) + '</div>')
 
 
-def _summary_card(row: dict, running_id) -> str:
-    analysis, plan = row["analysis"], row["path"]
-    cov, after = analysis.get("coverage") or {}, analysis.get("after") or {}
+def views_of(row: dict) -> tuple[list[dict], dict]:
+    """(views, plans) from a stored analysis.
+
+    Rows written before paths were split by kind of role hold one path at
+    the top level; they read as a single "All roles" view.
+    """
+    analysis, stored = row["analysis"], row["path"]
+    if analysis.get("views"):
+        return analysis["views"], stored
+    legacy = {k: analysis.get(k) for k in
+              ("postings", "skills", "trends", "gaps", "coverage", "after")}
+    return [{"key": "all", "name": "All roles", **legacy}], {"all": stored}
+
+
+def _role_picker(views: list[dict], active: str) -> str:
+    if len(views) < 2:
+        return ""
+    links = []
+    for view in views:
+        css = "role on" if view["key"] == active else "role"
+        current = ' aria-current="page"' if view["key"] == active else ""
+        links.append(f'<a class="{css}" href="/learn?role={_e(view["key"])}"'
+                     f'{current}>{_e(view["name"].upper())}'
+                     f'<span class="rc">{view["postings"]}</span></a>')
+    return ('<div class="card"><div class="lab">CHOOSE A KIND OF ROLE</div>'
+            f'<div class="roles">{"".join(links)}</div></div>')
+
+
+def _summary_card(row: dict, view: dict, plan: dict, running_id) -> str:
+    cov, after = view.get("coverage") or {}, view.get("after") or {}
     lines = []
     if cov.get("with_requirements"):
         lines.append(
-            f'<div class="gline">Of the {cov["with_requirements"]} postings '
-            f'that name technical requirements, you meet every one in '
+            f'<div class="gline">Of the {cov["with_requirements"]} '
+            f'{_e(_kind(view))}postings that name technical requirements, '
+            f'you meet every one in '
             f'<b>{cov["meets_all"]}</b> and are within two skills of '
             f'<b>{cov["within_two"]}</b> more.')
         if after:
@@ -194,10 +227,14 @@ def _summary_card(row: dict, running_id) -> str:
     built = _date(row.get("finished_at"))
     return (
         '<div class="card em"><div class="lab-row">'
-        '<span class="lab">YOUR PATH</span>'
+        f'<span class="lab">YOUR PATH · {_e(view["name"].upper())}</span>'
         f'<span class="lab-m">BUILT {_e(built.upper())}</span></div>'
         f'{summary}{"".join(lines)}'
         + _action("REFRESH WITH NEW POSTINGS", running_id) + '</div>')
+
+
+def _kind(view: dict) -> str:
+    return "" if view["key"] == "all" else view["name"] + " "
 
 
 def _stage_card(number: int, stage: dict, gaps: dict) -> str:
@@ -337,7 +374,7 @@ def _method_card(row: dict) -> str:
 
 
 def render(latest_ok: dict | None, latest_any: dict | None,
-           nav: dict | None = None) -> str:
+           nav: dict | None = None, role: str = "all") -> str:
     nav = nav or {}
     running_id = (latest_any["id"] if latest_any
                   and latest_any["status"] == "RUNNING" else None)
@@ -349,17 +386,22 @@ def render(latest_ok: dict | None, latest_any: dict | None,
                     f'<div class="gline">{_e(latest_any.get("error"))}</div></div>')
 
     if latest_ok and latest_ok.get("analysis") and latest_ok.get("path"):
-        analysis, plan = latest_ok["analysis"], latest_ok["path"]
-        gaps = {g["name"]: g for g in analysis.get("gaps") or []}
-        body.append(_summary_card(latest_ok, running_id))
+        analysis = latest_ok["analysis"]
+        views, plans = views_of(latest_ok)
+        view = next((v for v in views if v["key"] == role), views[0])
+        plan = plans.get(view["key"]) or {}
+        gaps = {g["name"]: g for g in view.get("gaps") or []}
+        body.append(_role_picker(views, view["key"]))
+        body.append(_summary_card(latest_ok, view, plan, running_id))
         for number, stage in enumerate(plan.get("stages") or [], 1):
             body.append(_stage_card(number, stage, gaps))
         body.append(_left_out_card(plan.get("left_out") or [], gaps))
-        body.append(_market_card(analysis))
-        body.append(_families_card(analysis))
-        body.append(_trends_card(analysis))
+        body.append(_market_card(view))
+        if view["key"] == "all":
+            body.append(_families_card(analysis))
+        body.append(_trends_card(view))
         body.append(_method_card(latest_ok))
-        sub = (f'One path for the whole market you search, built from '
+        sub = (f'A path for each kind of role you search, built from '
                f'{analysis["postings"]} postings and your resume.')
     else:
         body.append(_empty_card(running_id))

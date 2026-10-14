@@ -565,11 +565,13 @@ def run_learning_path(limit: int | None) -> None:
     if row["status"] != "OK":
         print(f"ERROR: {row['error']}")
         sys.exit(1)
-    analysis, plan = row["analysis"], row["path"]
+    analysis, plans = row["analysis"], row["path"]
     print()
     print(f"  {analysis['postings']} postings analysed.")
-    for i, stage in enumerate(plan["stages"], 1):
-        print(f"  {i}. {stage['title']}: {', '.join(stage['skills'])}")
+    for view in analysis["views"]:
+        print(f"\n  {view['name']} ({view['postings']} postings)")
+        for i, stage in enumerate(plans[view["key"]]["stages"], 1):
+            print(f"    {i}. {stage['title']}: {', '.join(stage['skills'])}")
     print()
     print("  Open the LEARN tab (python main.py --serve) for the full path.")
 

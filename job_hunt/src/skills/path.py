@@ -76,8 +76,13 @@ def _text(value, limit: int = 600) -> str:
     return " ".join(cleaned.split())[:limit]
 
 
-def prompt(gaps: list[dict], resume: dict, strengths: list[str]) -> str:
-    lines = ["Candidate:"]
+def prompt(gaps: list[dict], resume: dict, strengths: list[str],
+           focus: str | None = None) -> str:
+    lines = []
+    if focus:
+        lines += [f"This path is for {focus} roles. The counts below come "
+                  f"from {focus} postings only.", ""]
+    lines.append("Candidate:")
     lines.append(f"- Seniority: {resume.get('seniority') or 'not stated'}")
     roles = [r.get("title", "") for r in resume.get("target_roles") or []]
     if roles:
@@ -139,9 +144,10 @@ def validate(answer: dict, gaps: list[dict]) -> dict:
 
 
 def build_path(model, gaps: list[dict], resume: dict,
-               strengths: list[str]) -> dict:
+               strengths: list[str], focus: str | None = None) -> dict:
     if not gaps:
         return {"summary": "", "stages": [], "left_out": []}
-    answer = model(system=SYSTEM, prompt=prompt(gaps, resume, strengths),
+    answer = model(system=SYSTEM,
+                   prompt=prompt(gaps, resume, strengths, focus),
                    schema=SCHEMA, effort="medium")
     return validate(answer, gaps)

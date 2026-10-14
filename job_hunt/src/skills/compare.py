@@ -19,7 +19,7 @@ from .extract import squash, verified
 HAVE, ADJACENT, MISSING = "have", "adjacent", "missing"
 
 # How many of the most-demanded unplaced skills Claude is asked about.
-REVIEW_LIMIT = 40
+REVIEW_LIMIT = 60
 
 SYSTEM = """You compare a candidate's resume with skills that job postings ask for.
 

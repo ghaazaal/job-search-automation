@@ -76,12 +76,14 @@ class FakeModel:
     def __init__(self, ids, extraction=None, fail=False):
         self.ids = ids
         self.calls = []
+        self.prompts = []
         self.fail = fail
         self.extraction = extraction
 
     def __call__(self, *, system, prompt, schema, effort="low",
                  max_tokens=16000):
         self.calls.append(system)
+        self.prompts.append(prompt)
         if self.fail:
             raise RuntimeError("401 invalid x-api-key")
         if system == extract.SYSTEM:
@@ -414,8 +416,11 @@ def test_pipeline_writes_one_grounded_snapshot(tmp_path, monkeypatch):
     conn = connect(db)
     row = learning.get(conn, path_id)
     assert row["status"] == "OK", row["error"]
-    analysis, plan = row["analysis"], row["path"]
-    gaps = [g["name"] for g in analysis["gaps"]]
+    analysis, plans = row["analysis"], row["path"]
+    overall = analysis["views"][0]
+    assert overall["key"] == "all"
+    plan = plans["all"]
+    gaps = [g["name"] for g in overall["gaps"]]
     assert "SQL" not in gaps and "Apache Airflow" not in gaps
     assert "Communication" not in gaps
     assert gaps[0] == "Snowflake"
@@ -652,3 +657,58 @@ def test_the_window_leaves_older_postings_unread_and_uncounted(tmp_path):
     assert counted == {ids["https://x/1"], ids["https://x/2"]}
     assert not any(r["role_id"] == ids["https://x/3"]
                    for r in extract.evidence_rows(conn, user_id, since))
+
+
+
+def _family_settings():
+    return ({"workers": 2, "top_gaps": 5, "min_family_postings": 2},
+            {"skill_names": [], "role_families": FAMILIES})
+
+
+def test_each_kind_of_role_with_enough_postings_gets_its_own_path(
+        tmp_path, monkeypatch):
+    db, conn, user_id = _store(tmp_path)
+    model = FakeModel(_role_ids(conn))
+    monkeypatch.setattr(pipeline, "load_settings", _family_settings)
+    path_id = learning.start(conn, user_id)
+    conn.close()
+    pipeline.work(db, user_id, path_id, model)
+    row = learning.get(connect(db), path_id)
+    keys = [v["key"] for v in row["analysis"]["views"]]
+    # Data Analyst has one posting, below the minimum of two.
+    assert keys == ["all", "data-engineer"]
+    assert set(row["path"]) == {"all", "data-engineer"}
+    engineer = row["analysis"]["views"][1]
+    assert engineer["postings"] == 2
+    # Tableau is only asked for by the analyst posting.
+    assert "Tableau" not in [s["name"] for s in engineer["skills"]]
+    assert any("for Data Engineer roles" in c for c in model.prompts)
+
+
+def test_the_page_shows_the_chosen_kind_of_role(tmp_path, monkeypatch):
+    db, conn, user_id = _store(tmp_path)
+    model = FakeModel(_role_ids(conn))
+    conn.close()
+    monkeypatch.setattr(pipeline, "load_settings", _family_settings)
+    app = create_app(db_path=db, user_name="G", run_in_thread=False,
+                     learning_model=model)
+    client = app.test_client()
+    client.post("/api/learning-path")
+    page = client.get("/learn?role=data-engineer").data.decode()
+    assert "YOUR PATH · DATA ENGINEER" in page
+    assert 'href="/learn?role=all"' in page
+    assert "BY KIND OF ROLE" not in page
+    # An unknown role falls back to all roles rather than erroring.
+    assert "YOUR PATH · ALL ROLES" in client.get("/learn?role=nope").data.decode()
+
+
+def test_a_path_stored_before_the_split_still_renders():
+    from src.learning_page import render
+    row = {"id": 1, "status": "OK", "finished_at": "2026-10-14T08:51:03+00:00",
+           "model": "m", "path": {"summary": "s", "stages": [], "left_out": []},
+           "analysis": {"postings": 3, "skills": [], "gaps": [],
+                        "coverage": {}, "after": None, "trends": {},
+                        "families": [], "resume_labels": ["ae"]}}
+    page = render(row, row)
+    assert "YOUR PATH · ALL ROLES" in page
+    assert "CHOOSE A KIND OF ROLE" not in page

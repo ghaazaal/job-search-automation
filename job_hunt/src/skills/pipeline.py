@@ -6,6 +6,7 @@ say what is happening; any exception fails the row with its message.
 import logging
 import threading
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -19,6 +20,13 @@ from . import compare, extract, market, path, rank
 logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
+
+ALL = "all"
+# A kind of role needs this many postings in the window to get its own
+# path; below it, it still counts toward "All roles".
+MIN_FAMILY_POSTINGS = 10
+# Skills the resume comparison asks Claude about, across every view.
+COMPARE_LIMIT = 60
 
 
 def load_settings() -> tuple[dict, dict]:
@@ -67,7 +75,9 @@ def merged_resume(resumes: list[dict]) -> dict:
 def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
             on_progress=None, limit: int | None = None,
             reader=None) -> tuple[dict, dict]:
-    """Returns (analysis, path). Raises when there is nothing to work from.
+    """Returns (analysis, paths) — one path for all roles and one per kind
+    of role with enough postings, keyed like the analysis's views. Raises
+    when there is nothing to work from.
 
     `reader` does the bulk work — reading every posting and grouping
     names — and `model` the two judgement calls (the resume comparison and
@@ -127,22 +137,82 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
              for raw, display in spelling.items()}
 
     report("counting demand")
-    view = market.build(rows, postings, vocabulary.get("role_families") or [],
-                        names, window_days=days or None)
+    families = vocabulary.get("role_families") or []
+    overall = market.build(rows, postings, families, names,
+                           window_days=days or None)
+    views = [(ALL, "All roles", overall)]
+    # One view per kind of role with enough postings to count on. Smaller
+    # kinds still count toward "All roles"; a path built from a handful
+    # of postings would read as more certain than it is.
+    minimum = int(settings.get("min_family_postings", MIN_FAMILY_POSTINGS))
+    family_of = {p["id"]: market.family_of(p["title"], families)
+                 for p in postings}
+    for family in overall["families"]:
+        if family["postings"] < minimum:
+            continue
+        ids = {r for r, f in family_of.items() if f == family["name"]}
+        views.append((slug(family["name"]), family["name"], market.build(
+            [r for r in rows if r["role_id"] in ids],
+            [p for p in postings if p["id"] in ids],
+            families, names, window_days=days or None)))
 
     report("comparing with your resume")
-    statuses = compare.compare(view["skills"], resume, model)
+    # One comparison covers every view: each skill once, ordered by the
+    # highest share it reaches in any view, so a skill that matters to one
+    # kind of role is reviewed even when it is rare overall.
+    best: dict[str, dict] = {}
+    for _, _, view in views:
+        for skill in view["skills"]:
+            if (skill["name"] not in best
+                    or skill["share"] > best[skill["name"]]["share"]):
+                best[skill["name"]] = skill
+    demand = sorted(best.values(), key=lambda s: (-s["share"], s["name"]))
+    statuses = compare.compare(demand, resume, model,
+                               review_limit=COMPARE_LIMIT)
 
-    ranked = rank.rank(view, statuses, int(settings.get("top_gaps",
-                                                        rank.TOP_GAPS)))
+    top = int(settings.get("top_gaps", rank.TOP_GAPS))
+    ranked = {key: rank.rank(view, statuses, top) for key, _, view in views}
 
-    report("writing your learning path")
-    strengths = [s["name"] for s in view["skills"]
-                 if statuses.get(s["name"], {}).get("status") == compare.HAVE
-                 and s["category"] != "soft"][:10]
-    plan = path.build_path(model, ranked["gaps"], resume, strengths)
+    report("writing your learning paths", done=0, total=len(views))
 
-    # The snapshot keeps what the page needs, not every posting id.
+    def plan_for(item):
+        key, name, view = item
+        strengths = [s["name"] for s in view["skills"]
+                     if statuses.get(s["name"], {}).get("status") == compare.HAVE
+                     and s["category"] != "soft"][:10]
+        return key, path.build_path(model, ranked[key]["gaps"], resume,
+                                    strengths,
+                                    focus=None if key == ALL else name)
+
+    plans = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(len(views), 4))) as pool:
+        for key, plan in pool.map(plan_for, views):
+            plans[key] = plan
+
+    analysis = {
+        "postings": overall["postings"],
+        "date_from": overall["date_from"],
+        "date_to": overall["date_to"],
+        "resume_labels": resume["labels"],
+        "families": overall["families"],
+        "views": [_view_snapshot(key, name, view, ranked[key], statuses)
+                  for key, name, view in views],
+        "window_days": days or None,
+        "unverified": extract.unverified_total(conn, user_id, since),
+        "unread": len(extract.pending_roles(conn, user_id, since=since)),
+        "this_run": read,
+    }
+    return analysis, plans
+
+
+def slug(name: str) -> str:
+    return "-".join("".join(c if c.isalnum() else " " for c in
+                            name.lower()).split())
+
+
+def _view_snapshot(key: str, name: str, view: dict, ranked: dict,
+                   statuses: dict) -> dict:
+    """What the page needs from one view, not every posting id."""
     skills = []
     for skill in view["skills"][:60]:
         status = statuses.get(skill["name"], {})
@@ -153,23 +223,10 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
                          "how": status.get("how", ""),
                          "related_to": status.get("related_to", ""),
                          "resume_evidence": status.get("evidence", "")})
-    analysis = {
-        "postings": view["postings"],
-        "date_from": view["date_from"],
-        "date_to": view["date_to"],
-        "resume_labels": resume["labels"],
-        "skills": skills,
-        "families": view["families"],
-        "trends": view["trends"],
-        "gaps": ranked["gaps"],
-        "coverage": ranked["coverage"],
-        "after": ranked["after"],
-        "window_days": days or None,
-        "unverified": extract.unverified_total(conn, user_id, since),
-        "unread": len(extract.pending_roles(conn, user_id, since=since)),
-        "this_run": read,
-    }
-    return analysis, plan
+    return {"key": key, "name": name, "postings": view["postings"],
+            "skills": skills, "trends": view["trends"],
+            "gaps": ranked["gaps"], "coverage": ranked["coverage"],
+            "after": ranked["after"]}
 
 
 def build_models(settings: dict):

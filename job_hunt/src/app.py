@@ -463,6 +463,7 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             return render_learning(
                 learning.latest(conn, user_id, status="OK"),
                 learning.latest(conn, user_id),
+                role=request.args.get("role", "all"),
                 nav={"map_count": open_company_count(conn, user_id),
                      "tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
