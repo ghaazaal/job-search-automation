@@ -64,8 +64,16 @@ def merged_resume(resumes: list[dict]) -> dict:
 
 
 def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
-            on_progress=None, limit: int | None = None) -> tuple[dict, dict]:
-    """Returns (analysis, path). Raises when there is nothing to work from."""
+            on_progress=None, limit: int | None = None,
+            reader=None) -> tuple[dict, dict]:
+    """Returns (analysis, path). Raises when there is nothing to work from.
+
+    `reader` does the bulk work — reading every posting and grouping
+    names — and `model` the two judgement calls (the resume comparison and
+    the path). Reading is about 95% of the tokens, and its output is
+    checked quote by quote, so a cheaper reader costs little accuracy.
+    """
+    reader = reader or model
     def report(stage: str, **detail):
         if on_progress:
             on_progress({"stage": stage, **detail})
@@ -82,7 +90,7 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
     report("reading postings", done=0,
            total=len(extract.pending_roles(conn, user_id, limit)))
     read = extract.extract_pending(
-        conn, user_id, model, reference, limit=limit,
+        conn, user_id, reader, reference, limit=limit,
         workers=int(settings.get("workers", 4)), on_progress=on_progress)
 
     # Every call this time failed: say why, rather than build a path from
@@ -103,7 +111,7 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
     for row in rows:
         per_name.setdefault(spelling[row["name"]], set()).add(row["role_id"])
     counts = Counter({n: len(ids) for n, ids in per_name.items()})
-    synonyms = market.merge_synonyms(model, counts)
+    synonyms = market.merge_synonyms(reader, counts)
     names = {raw: synonyms.get(display, display)
              for raw, display in spelling.items()}
 
@@ -152,9 +160,14 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
     return analysis, plan
 
 
-def build_model(settings: dict):
+def build_models(settings: dict):
+    """(planner, reader). The reader defaults to the planner's model."""
     from .claude import DEFAULT_MODEL, ClaudeJson
-    return ClaudeJson(settings.get("model") or DEFAULT_MODEL)
+    planner = ClaudeJson(settings.get("model") or DEFAULT_MODEL)
+    read_model = settings.get("read_model")
+    if not read_model or read_model == planner.model:
+        return planner, planner
+    return planner, ClaudeJson(read_model)
 
 
 def work(db_path, user_id: int, path_id: int, model=None,
@@ -163,14 +176,21 @@ def work(db_path, user_id: int, path_id: int, model=None,
     conn = connect(db_path)
     try:
         settings, vocabulary = load_settings()
-        model = model or build_model(settings)
+        if model is None:
+            model, reader = build_models(settings)
+        else:
+            reader = model
 
         def on_progress(event: dict) -> None:
             store.set_progress(conn, path_id, event.get("stage", ""), event)
 
         analysis, plan = analyse(conn, user_id, model, settings, vocabulary,
-                                 on_progress=on_progress, limit=limit)
-        store.finish(conn, path_id, getattr(model, "model", ""), analysis, plan)
+                                 on_progress=on_progress, limit=limit,
+                                 reader=reader)
+        names = getattr(model, "model", "")
+        if reader is not model:
+            names += f" (postings read by {getattr(reader, 'model', '')})"
+        store.finish(conn, path_id, names, analysis, plan)
     except Exception as exc:
         logger.exception("Learning path %s failed", path_id)
         try:

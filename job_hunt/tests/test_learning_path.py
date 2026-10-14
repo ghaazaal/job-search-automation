@@ -527,3 +527,25 @@ def test_wrapper_raises_on_refusal_and_truncation():
                            client=_Client(_Response("{}", stop)))
         with pytest.raises(ModelError):
             model(system="s", prompt="p", schema={})
+
+
+def test_reading_and_planning_can_use_different_models(tmp_path, monkeypatch):
+    db, conn, user_id = _store(tmp_path)
+    ids = _role_ids(conn)
+    planner, reader = FakeModel(ids), FakeModel(ids)
+    monkeypatch.setattr(pipeline, "load_settings", _settings_and_vocab)
+    settings, vocab = _settings_and_vocab()
+    pipeline.analyse(conn, user_id, planner, settings, vocab, reader=reader)
+    assert extract.SYSTEM in reader.calls and market.MERGE_SYSTEM in reader.calls
+    assert extract.SYSTEM not in planner.calls
+    assert compare.SYSTEM in planner.calls and path.SYSTEM in planner.calls
+
+
+def test_config_names_a_separate_reader(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    planner, reader = pipeline.build_models(
+        {"model": "claude-opus-5-5", "read_model": "claude-haiku-5-5"})
+    assert (planner.model, reader.model) == ("claude-opus-5-5",
+                                             "claude-haiku-5-5")
+    same, also = pipeline.build_models({"model": "claude-opus-5-5"})
+    assert same is also

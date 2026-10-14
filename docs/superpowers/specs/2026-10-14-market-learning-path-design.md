@@ -49,9 +49,14 @@ verifies.
 
 ## Defaults picked (the ask left these open)
 
-- **Model:** `claude-opus-5-5` everywhere, server-side refusal fallback on,
-  effort low for reading, medium for comparing and planning. Configurable
-  in `config.yaml: learning_path.model`.
+- **Models:** reading postings and grouping names use
+  `learning_path.read_model` (default `claude-haiku-5-5`); comparing with
+  the resume and writing the path use `learning_path.model` (default
+  `claude-opus-5-5`, server-side refusal fallback on). Reading is ~95% of
+  the tokens; the user asked to cut the first-run cost (2026-10-14), and
+  quote verification means a cheaper reader risks missed skills, not
+  invented ones. Estimated first full read of 1,085 postings: Haiku ~$0.50,
+  Sonnet ~$11, Opus ~$21 (estimate from character counts, not measured).
 - **Path format:** stages in the app's LEARN tab (paper shell), not a file.
 - **Soft skills:** shown in the market list, not planned.
 - **Several resumes:** merged; one path per person.
