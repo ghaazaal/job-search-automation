@@ -549,3 +549,90 @@ def test_config_names_a_separate_reader(monkeypatch):
                                              "claude-haiku-5-5")
     same, also = pipeline.build_models({"model": "claude-opus-5-5"})
     assert same is also
+
+
+
+class BatchingModel(FakeModel):
+    """FakeModel plus the Batch API: answers every request at once."""
+
+    def __init__(self, ids, errored=(), create_fails=False):
+        super().__init__(ids)
+        self.errored, self.create_fails = set(errored), create_fails
+        self.batched = 0
+
+    def batch(self, requests, *, schema, effort="low", on_wait=None):
+        if self.create_fails:
+            raise RuntimeError("401 invalid x-api-key")
+        if on_wait:
+            on_wait(0, len(requests))
+        self.batched += len(requests)
+        return {cid: (RuntimeError("batch request errored")
+                      if cid in self.errored
+                      else self(system=system, prompt=prompt, schema=schema))
+                for cid, system, prompt in requests}
+
+
+def test_batch_reading_stores_the_same_grounded_skills(tmp_path, monkeypatch):
+    _, conn, user_id = _store(tmp_path)
+    monkeypatch.setattr(extract, "BATCH_SIZE", 1)
+    model = BatchingModel(_role_ids(conn))
+    totals = extract.extract_pending(conn, user_id, model, [], use_batch=True)
+    assert model.batched == 3 and totals["read"] == 3
+    names = {r["name"] for r in conn.execute("SELECT name FROM posting_skill")}
+    assert "Rust" not in names and "Snowflake" in names
+
+
+def test_an_errored_batch_request_leaves_its_postings_unread(tmp_path,
+                                                             monkeypatch):
+    _, conn, user_id = _store(tmp_path)
+    monkeypatch.setattr(extract, "BATCH_SIZE", 1)
+    model = BatchingModel(_role_ids(conn), errored={"0"})
+    totals = extract.extract_pending(conn, user_id, model, [], use_batch=True)
+    assert totals["read"] == 2 and totals["failed_batches"] == 1
+    assert len(extract.pending_roles(conn, user_id)) == 1
+
+
+def test_a_batch_that_cannot_be_created_stops_the_analysis(tmp_path):
+    _, conn, user_id = _store(tmp_path)
+    model = BatchingModel(_role_ids(conn), create_fails=True)
+    totals = extract.extract_pending(conn, user_id, model, [], use_batch=True)
+    assert totals["aborted"] and "401" in totals["error"]
+    assert len(extract.pending_roles(conn, user_id)) == 3
+
+
+def test_small_reads_skip_the_batch_wait(tmp_path, monkeypatch):
+    db, conn, user_id = _store(tmp_path)
+    model = BatchingModel(_role_ids(conn))
+    settings = {"batch": True, "batch_min_postings": 50}
+    pipeline.analyse(conn, user_id, model, settings,
+                     _settings_and_vocab()[1])
+    assert model.batched == 0
+
+
+def test_wrapper_sends_a_batch_and_parses_each_result():
+    from types import SimpleNamespace as NS
+    from src.skills.claude import ClaudeJson, ModelError
+
+    class Batches:
+        def create(self, requests):
+            self.sent = requests
+            return NS(id="b1")
+
+        def retrieve(self, _id):
+            return NS(processing_status="ended")
+
+        def results(self, _id):
+            return [NS(custom_id="0", result=NS(
+                        type="succeeded",
+                        message=_Response('{"postings": []}'))),
+                    NS(custom_id="1", result=NS(type="errored"))]
+
+    client = _Client(_Response("{}"))
+    client.messages.batches = Batches()
+    model = ClaudeJson("claude-sonnet-5-5", client=client)
+    out = model.batch([("0", "s", "p0"), ("1", "s", "p1")], schema={})
+    assert out["0"] == {"postings": []}
+    assert isinstance(out["1"], ModelError)
+    sent = client.messages.batches.sent[0]["params"]
+    assert sent["output_config"]["format"]["type"] == "json_schema"
+    assert "extra_body" not in sent  # no fallbacks on the Batch API

@@ -70,8 +70,15 @@ learning_path:
   model: "claude-opus-5-5"        # compares with your resume, writes the path
   # Reads every posting for skills: ~95% of the cost. Each skill it names
   # must quote the posting, so a cheaper reader mostly risks MISSING a
-  # skill, not inventing one. First full read of ~1,100 postings, roughly:
-  # claude-haiku-5-5 ~$0.50 · claude-sonnet-5-5 ~$11 · claude-opus-5-5 ~$21
-  read_model: "claude-haiku-5-5"
-  workers: 4          # postings are read in parallel batches
+  # skill, not inventing one.
+  read_model: "claude-sonnet-5-5"
+  # Send the reading through Claude's Batch API: half price, but answered
+  # in minutes to an hour instead of right away. Only used when at least
+  # batch_min_postings are unread (the first run, or after a big scrape).
+  batch: true
+  batch_min_postings: 50
+  # First full read of ~1,100 postings, estimated:
+  #   sonnet + batch ~$4-5 · opus + batch ~$9-10 · haiku ~$0.50
+  #   sonnet, no batch ~$9-11 · opus, no batch ~$18-21
+  workers: 4          # parallel requests when not batching
   top_gaps: 12        # how many ranked gaps the path is built from

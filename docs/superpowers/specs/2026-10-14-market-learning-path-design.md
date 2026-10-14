@@ -50,13 +50,20 @@ verifies.
 ## Defaults picked (the ask left these open)
 
 - **Models:** reading postings and grouping names use
-  `learning_path.read_model` (default `claude-haiku-5-5`); comparing with
+  `learning_path.read_model` (default `claude-sonnet-5-5`); comparing with
   the resume and writing the path use `learning_path.model` (default
   `claude-opus-5-5`, server-side refusal fallback on). Reading is ~95% of
-  the tokens; the user asked to cut the first-run cost (2026-10-14), and
-  quote verification means a cheaper reader risks missed skills, not
-  invented ones. Estimated first full read of 1,085 postings: Haiku ~$0.50,
-  Sonnet ~$11, Opus ~$21 (estimate from character counts, not measured).
+  the tokens. The user asked to cut the first-run cost but keep Sonnet or
+  Opus (2026-10-14), so a read of 50+ unread postings goes through the
+  Message Batches API (half price, minutes to an hour; no refusal fallback
+  there, a declined request just stays unread) and quotes are capped at 12
+  words. Quote verification means a cheaper reader risks missed skills,
+  not invented ones. Estimated first full read of 1,085 postings: Sonnet +
+  batch ~$4-5, Opus + batch ~$9-10, Haiku ~$0.50 (estimates from character
+  counts, not measured).
+  Residual: an app restart while a batch is waiting discards that batch's
+  results (already paid for); the next analysis resubmits. Run the first
+  big read from the command line to avoid it.
 - **Path format:** stages in the app's LEARN tab (paper shell), not a file.
 - **Soft skills:** shown in the market list, not planned.
 - **Several resumes:** merged; one path per person.

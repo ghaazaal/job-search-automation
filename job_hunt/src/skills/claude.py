@@ -43,9 +43,9 @@ class ClaudeJson:
         self._client = client
         self.model = model
 
-    def __call__(self, *, system: str, prompt: str, schema: dict,
-                 effort: str = "low", max_tokens: int = 16000) -> dict:
-        kwargs = dict(
+    def _params(self, system: str, prompt: str, schema: dict, effort: str,
+                max_tokens: int) -> dict:
+        return dict(
             model=self.model,
             max_tokens=max_tokens,
             # The system prompt is identical across every call of one kind,
@@ -57,20 +57,68 @@ class ClaudeJson:
                            "format": {"type": "json_schema",
                                       "schema": schema}},
         )
+
+    def __call__(self, *, system: str, prompt: str, schema: dict,
+                 effort: str = "low", max_tokens: int = 16000) -> dict:
+        kwargs = self._params(system, prompt, schema, effort, max_tokens)
         if self.model in _FALLBACK_MODELS:
             kwargs["betas"] = [_FALLBACK_BETA]
             kwargs["extra_body"] = {"fallbacks": "default"}
             response = self._client.beta.messages.create(**kwargs)
         else:
             response = self._client.messages.create(**kwargs)
+        return _parse(response)
 
-        if response.stop_reason == "refusal":
-            raise ModelError("Claude declined this request.")
-        if response.stop_reason == "max_tokens":
-            raise ModelError("Claude's answer was cut off at the length limit.")
-        text = next((b.text for b in response.content
-                     if getattr(b, "type", "") == "text"), "")
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ModelError("Claude's answer was not valid JSON.") from exc
+    def batch(self, requests: list[tuple[str, str, str]], *, schema: dict,
+              effort: str = "low", max_tokens: int = 16000,
+              on_wait=None, poll_seconds: float = 30.0) -> dict:
+        """Run many requests through the Message Batches API: half price,
+        answered within minutes to an hour (24 at most).
+
+        `requests` is [(custom_id, system, prompt)]. Returns custom_id ->
+        parsed dict, or the exception for that request. The server-side
+        refusal fallback is not available on batches, so a declined
+        request simply comes back as an error and is retried next time.
+        """
+        import time
+
+        created = self._client.messages.batches.create(requests=[
+            {"custom_id": cid,
+             "params": self._params(system, prompt, schema, effort,
+                                    max_tokens)}
+            for cid, system, prompt in requests])
+        while True:
+            status = self._client.messages.batches.retrieve(created.id)
+            if status.processing_status == "ended":
+                break
+            if on_wait:
+                counts = status.request_counts
+                on_wait(counts.succeeded + counts.errored + counts.canceled
+                        + counts.expired, len(requests))
+            time.sleep(poll_seconds)
+
+        out: dict = {}
+        for item in self._client.messages.batches.results(created.id):
+            result = item.result
+            if result.type != "succeeded":
+                out[item.custom_id] = ModelError(
+                    f"batch request {result.type}")
+                continue
+            try:
+                out[item.custom_id] = _parse(result.message)
+            except ModelError as exc:
+                out[item.custom_id] = exc
+        return out
+
+
+def _parse(response) -> dict:
+    if response.stop_reason == "refusal":
+        raise ModelError("Claude declined this request.")
+    if response.stop_reason == "max_tokens":
+        raise ModelError("Claude's answer was cut off at the length limit.")
+    text = next((b.text for b in response.content
+                 if getattr(b, "type", "") == "text"), "")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ModelError("Claude's answer was not valid JSON.") from exc

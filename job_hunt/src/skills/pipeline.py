@@ -91,7 +91,11 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
            total=len(extract.pending_roles(conn, user_id, limit)))
     read = extract.extract_pending(
         conn, user_id, reader, reference, limit=limit,
-        workers=int(settings.get("workers", 4)), on_progress=on_progress)
+        workers=int(settings.get("workers", 4)), on_progress=on_progress,
+        # A handful of postings is not worth waiting on a batch for.
+        use_batch=bool(settings.get("batch", True))
+        and len(extract.pending_roles(conn, user_id, limit))
+        >= int(settings.get("batch_min_postings", 50)))
 
     # Every call this time failed: say why, rather than build a path from
     # an older, partial reading as if nothing went wrong.

@@ -10,10 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 from .db import transaction
 
-# A first analysis reads every stored posting (about half an hour for a
-# thousand); a RUNNING row older than this belongs to a process that is
-# gone, and boot recovery clears it sooner when the app restarts.
-STALE_AFTER_MINUTES = 60
+# Reading through Claude's Batch API can legitimately wait up to 24 hours,
+# so only a row older than that is presumed dead. A process that died is
+# cleared sooner by boot recovery the next time the app starts.
+STALE_AFTER_MINUTES = 25 * 60
 _MAX_ERROR = 500
 
 

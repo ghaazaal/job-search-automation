@@ -33,7 +33,7 @@ For every posting, list each distinct skill the posting asks the candidate to ha
 - name: the skill's common short name, e.g. "SQL", "Python", "dbt", "Apache Airflow", "Snowflake", "AWS", "Power BI", "Data modeling", "A/B testing", "Stakeholder communication". Use the same name for the same skill across postings. When a name from the reference list fits, use it exactly as written there.
 - category: one of language (programming/query languages), tool (software products and libraries), platform (cloud and data platforms), concept (bodies of knowledge such as data modeling or statistics), practice (ways of working such as CI/CD, code review, agile), soft (communication, leadership and similar).
 - requirement: "required" when the posting presents it as a requirement or a core part of the job; "preferred" when it is a nice-to-have, bonus or plus.
-- evidence: a short quote copied exactly, character for character, from that posting's text, that shows the skill is asked for. Keep it under 20 words. Never paraphrase, translate, or join words from different places.
+- evidence: a short quote copied exactly, character for character, from that posting's text, that shows the skill is asked for. Keep it short: the fewest words that show it, at most 12. Never paraphrase, translate, or join words from different places.
 
 Only list skills the posting asks the candidate for. Skip the company's own product names, benefits, and skills mentioned only as something the company does. If a posting asks for no skills, return an empty list for it. Postings may be in any language; keep evidence in the posting's language and write the name in English."""
 
@@ -169,13 +169,17 @@ def _store(conn: sqlite3.Connection, role: dict, skills: list,
 
 def extract_pending(conn: sqlite3.Connection, user_id: int, model,
                     reference: list[str], limit: int | None = None,
-                    workers: int = 4, on_progress=None) -> dict:
+                    workers: int = 4, on_progress=None,
+                    use_batch: bool = False) -> dict:
     """Read every unread posting. Returns counts for the progress line.
 
-    API calls run on a small thread pool; every database write happens
-    here, on the calling thread, because a SQLite connection belongs to
-    the thread that opened it. A batch whose call fails is left unread and
-    is retried by the next analysis — a failure never marks a posting done.
+    Two ways to send the requests. `use_batch` hands them all to Claude's
+    Message Batches API at half price and waits (minutes, up to an hour);
+    otherwise they run on a small thread pool and finish sooner. Either
+    way every database write happens here, on the calling thread, because
+    a SQLite connection belongs to the thread that opened it. A request
+    that fails leaves its postings unread for the next analysis — a
+    failure never marks a posting done.
     """
     roles = pending_roles(conn, user_id, limit)
     batches = [roles[i:i + BATCH_SIZE] for i in range(0, len(roles), BATCH_SIZE)]
@@ -185,6 +189,50 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
         return totals
 
     model_name = getattr(model, "model", "unknown")
+
+    def absorb(batch, answer):
+        by_id = {}
+        for entry in (answer or {}).get("postings") or []:
+            if isinstance(entry, dict) and isinstance(entry.get("id"), int):
+                by_id[entry["id"]] = entry.get("skills") or []
+        for role in batch:
+            # A posting the answer skipped stays unread rather than being
+            # recorded as "asks for nothing".
+            if role["id"] not in by_id:
+                continue
+            kept, unverified = _store(conn, role, by_id[role["id"]],
+                                      model_name)
+            totals["read"] += 1
+            totals["skills"] += kept
+            totals["unverified"] += unverified
+
+    def failed(batch, exc):
+        logger.warning("Skill extraction failed for %d postings: %s",
+                       len(batch), exc)
+        totals["failed_batches"] += 1
+        totals.setdefault("error", str(exc)[:300])
+
+    if use_batch and hasattr(model, "batch"):
+        def waiting(done, total):
+            if on_progress:
+                on_progress({"stage": "waiting for Claude's batch",
+                             "done": done, "total": total})
+        requests = [(str(i), SYSTEM, _prompt(batch, reference))
+                    for i, batch in enumerate(batches)]
+        try:
+            answers = model.batch(requests, schema=SCHEMA, effort="low",
+                                  on_wait=waiting)
+        except Exception as exc:
+            failed(roles, exc)
+            totals["aborted"] = True
+            return totals
+        for i, batch in enumerate(batches):
+            answer = answers.get(str(i))
+            if answer is None or isinstance(answer, Exception):
+                failed(batch, answer or "no result returned")
+            else:
+                absorb(batch, answer)
+        return totals
 
     def call(batch):
         return model(system=SYSTEM, prompt=_prompt(batch, reference),
@@ -197,10 +245,7 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
             try:
                 answer = future.result()
             except Exception as exc:
-                logger.warning("Skill extraction failed for %d postings: %s",
-                               len(batch), exc)
-                totals["failed_batches"] += 1
-                totals.setdefault("error", str(exc)[:300])
+                failed(batch, exc)
                 # Nothing has worked yet and three calls have failed: this
                 # is a key, credit or network problem, not one bad posting.
                 # Stop rather than send every remaining batch to fail too.
@@ -210,20 +255,7 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
                     totals["aborted"] = True
                     break
                 continue
-            by_id = {}
-            for entry in (answer or {}).get("postings") or []:
-                if isinstance(entry, dict) and isinstance(entry.get("id"), int):
-                    by_id[entry["id"]] = entry.get("skills") or []
-            for role in batch:
-                # A posting the answer skipped stays unread rather than
-                # being recorded as "asks for nothing".
-                if role["id"] not in by_id:
-                    continue
-                kept, unverified = _store(conn, role, by_id[role["id"]],
-                                          model_name)
-                totals["read"] += 1
-                totals["skills"] += kept
-                totals["unverified"] += unverified
+            absorb(batch, answer)
             if on_progress:
                 on_progress({"stage": "reading postings",
                              "done": totals["read"],
