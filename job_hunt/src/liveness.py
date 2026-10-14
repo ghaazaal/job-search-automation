@@ -249,7 +249,8 @@ class HackerNews(Checker):
         if '"dead":true' in page.text.replace(" ", ""):
             return Verdict(CLOSED, "the Hacker News comment is dead "
                                    "(flagged or removed)", 200, page.url)
-        return None
+        return Verdict(UNKNOWN, "the Hacker News comment is still up, and "
+                                "HN has no closed state", 200, page.url)
 
 
 CHECKERS = (LinkedIn(), Jobicy(), Muse(), RemoteOK(), WeWorkRemotely(),

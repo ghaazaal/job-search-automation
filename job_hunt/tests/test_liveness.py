@@ -162,7 +162,9 @@ HN_API = "https://hacker-news.firebaseio.com/v0/item/49185103.json"
 def test_hacker_news_reads_the_api_and_only_deletion_closes():
     assert check(HN, server({HN_API: Resp(200, '{"deleted": true}')})).state == CLOSED
     assert check(HN, server({HN_API: Resp(200, '{"dead":true}')})).state == CLOSED
-    assert check(HN, server({HN_API: Resp(200, '{"text": "hiring"}')})).state == UNKNOWN
+    live = check(HN, server({HN_API: Resp(200, '{"text": "hiring"}')}))
+    assert live.state == UNKNOWN
+    assert "still up" in live.evidence
 
 
 def test_a_board_without_a_checker_is_never_asked():
