@@ -30,6 +30,7 @@ from .store.profile import (create_resume, delete_resume, get_profile,
 from .store.queries import (activity_board, eligibility_counts,
                             live_tracker_count, map_sections, mark_seen,
                             open_company_count)
+from .store.liveness import closed_posting_count
 from .store.runs import (active_run, clear_running, fail_run, get_run,
                          is_stale, latest_ok_run)
 from .store.schema import init_db
@@ -132,7 +133,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden, "offtopic": offtopic, **counts},
+                      "hidden": hidden, "offtopic": offtopic,
+                      "gone": closed_posting_count(conn, user_id), **counts},
                 running_run_id=in_flight["id"] if in_flight else None,
                 nav={"tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})

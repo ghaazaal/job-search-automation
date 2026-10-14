@@ -119,6 +119,14 @@ the authority, including their correction notes and accepted residuals):
   file, and only 5-10 earn a shared shape.
 - Every role stores `eligibility_verified`; unverified cards say
   "location eligibility not verified" and rank below verified ones.
+- A posting its own board says is closed leaves the map, counted as
+  "N HIDDEN (POSTING CLOSED)" (`src/liveness.py`, spec
+  `2026-10-14-posting-liveness-design.md`). Closed only on the board's
+  own words - a closed banner, an expired-job redirect, HTTP 404/410 -
+  quoted in `role.closed_evidence`, with every check kept in
+  `posting_check`. A rate limit, bot wall or network error is UNKNOWN and
+  changes nothing. A SAVED application follows the posting to CLOSED;
+  APPLIED and later stay put and the tracker card says POSTING CLOSED.
 - The first alias in a `vocabulary.yaml` country list IS the display name
   rendered in reason sentences — reordering it is a product change.
 

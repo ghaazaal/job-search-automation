@@ -120,6 +120,7 @@ SELECT r.*, a.status AS app_status FROM role r
    AND (a.id IS NULL OR a.status != 'HIDDEN')
    AND c.user_state != 'HIDDEN'
    AND r.dropped_at IS NULL
+   AND r.closed_at IS NULL
    AND (r.location_scope IS NULL OR r.location_scope != 'closed')
    AND r.first_seen_run_id {op} ?
 """
@@ -200,7 +201,7 @@ def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
              FROM role r
              JOIN company c ON c.id = r.company_id
             WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
-              AND r.dropped_at IS NULL
+              AND r.dropped_at IS NULL AND r.closed_at IS NULL
             GROUP BY verdict""", (user_id,)).fetchall()
     counts = {row["verdict"]: row["n"] for row in rows}
     return {"open": counts.get("open", 0),
@@ -220,7 +221,7 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
         """SELECT r.id, r.title, r.url, r.location, c.name AS company,
                   c.id AS company_id, r.band, r.reason,
                   r.description_captured, r.matched, r.gaps, r.work_mode,
-                  r.salary, r.posted_date,
+                  r.salary, r.posted_date, r.closed_at, r.closed_evidence,
                   a.status, a.applied_at, a.updated_at
              FROM application a
              JOIN role r ON r.id = a.role_id
@@ -247,6 +248,8 @@ def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
             "work_mode":  row["work_mode"],
             "salary":     row["salary"],
             "date":       row["posted_date"],
+            "closed_at":  row["closed_at"],
+            "closed_evidence": row["closed_evidence"],
             "status":     status,
             "applied_at": row["applied_at"],
             "updated_at": row["updated_at"],
@@ -284,6 +287,7 @@ def open_company_count(conn: sqlite3.Connection, user_id: int) -> int:
               AND (a.id IS NULL OR a.status != 'HIDDEN')
               AND c.user_state != 'HIDDEN'
               AND r.dropped_at IS NULL
+              AND r.closed_at IS NULL
               AND (r.location_scope IS NULL OR r.location_scope != 'closed')""",
         (user_id,)).fetchone()["n"]
 

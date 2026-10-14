@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS role (
     -- DELETE: the run that stored it is history, and a hard delete
     -- makes a wrong rule unrecoverable.
     dropped_at           TEXT,
+    -- Posting liveness (src/liveness.py). closed_at is stamped only on
+    -- evidence from the posting's own page, quoted in closed_evidence;
+    -- every check behind it is kept in posting_check.
+    closed_at            TEXT,
+    closed_evidence      TEXT,
+    last_checked_at      TEXT,
     eligibility_verified INTEGER NOT NULL DEFAULT 0,
     description          TEXT,
     description_captured INTEGER NOT NULL DEFAULT 0,
@@ -200,6 +206,19 @@ CREATE TABLE IF NOT EXISTS learning_path (
     path        TEXT
 );
 
+-- One row per liveness check that reached a board, whatever it found.
+-- A closure must always be traceable to what the page said.
+CREATE TABLE IF NOT EXISTS posting_check (
+    id          INTEGER PRIMARY KEY,
+    role_id     INTEGER NOT NULL REFERENCES role(id),
+    checked_at  TEXT NOT NULL,
+    verdict     TEXT NOT NULL CHECK (verdict IN ('open','closed','unknown')),
+    evidence    TEXT NOT NULL,
+    http_status INTEGER,
+    final_url   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_posting_check_role ON posting_check(role_id, checked_at);
 CREATE INDEX IF NOT EXISTS idx_role_company ON role(company_id);
 CREATE INDEX IF NOT EXISTS idx_role_last_run ON role(user_id, last_seen_run_id);
 CREATE INDEX IF NOT EXISTS idx_event_role ON event(role_id, at);
@@ -281,6 +300,15 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
     # every init, so CREATE TABLE IF NOT EXISTS reaches old databases
     # without an ALTER. The version still bumps so a newer store is never
     # mistaken for an older one.
+    12: (
+        # Posting liveness. posting_check is a new table and arrives via
+        # _DDL; these are the role columns the map filters on.
+        ("role", "closed_at", "ALTER TABLE role ADD COLUMN closed_at TEXT"),
+        ("role", "closed_evidence",
+         "ALTER TABLE role ADD COLUMN closed_evidence TEXT"),
+        ("role", "last_checked_at",
+         "ALTER TABLE role ADD COLUMN last_checked_at TEXT"),
+    ),
     9: (
         # Soft drop, never DELETE. The 800 roles stored before the
         # relevance gate existed are off-target, not fictional, and a rule

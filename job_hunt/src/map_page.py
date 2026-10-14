@@ -431,6 +431,12 @@ def render(maps: list[dict], meta: dict | None = None,
     if offtopic:
         meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A TARGET ROLE)"
 
+    # A posting its own board says is closed. Hidden like the others, and
+    # counted like them: a role leaving the map must not leave silently.
+    gone = meta.get("gone") or 0
+    if gone:
+        meta_2 = f"{meta_2} &middot; {gone} HIDDEN (POSTING CLOSED)"
+
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 

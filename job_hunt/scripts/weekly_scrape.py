@@ -130,6 +130,18 @@ def main() -> int:
     log.info("run %s done: scraped=%d kept=%d offtopic=%d dropped=%d",
              run_id, result.scraped, result.kept, result.offtopic,
              result.dropped)
+
+    # Then ask the older postings whether they are still open. The run is
+    # already finished, so a slow or rate-limited board delays nothing.
+    from src.liveness import check_postings
+    try:
+        summary = check_postings(conn, USER_ID)
+        log.info("posting check: %d checked, %d closed, %d open, %d unknown"
+                 " (rate-limited: %s)", summary["checked"], summary["closed"],
+                 summary["open"], summary["unknown"],
+                 ", ".join(summary["throttled"]) or "none")
+    except Exception:
+        log.exception("posting check failed; the scrape itself is stored")
     conn.close()
     return 0
 

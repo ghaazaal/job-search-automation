@@ -576,6 +576,32 @@ def run_learning_path(limit: int | None) -> None:
     print("  Open the LEARN tab (python main.py --serve) for the full path.")
 
 
+def run_check_postings(limit: int | None) -> None:
+    """Ask each stored posting's own page whether it is still open."""
+    from src.liveness import check_postings
+
+    conn, user_id = _open_store()
+    try:
+        print("Checking stored postings"
+              + (f" (at most {limit})" if limit else "")
+              + " - only a closed notice on the board itself closes one.")
+
+        def show(row, verdict):
+            if verdict.state == "closed":
+                print(f"  CLOSED  {row['company']} - {row['title']}")
+                print(f"          {verdict.evidence}")
+
+        summary = check_postings(conn, user_id, limit=limit, on_verdict=show)
+    finally:
+        conn.close()
+    print()
+    print(f"  {summary['checked']} checked: {summary['closed']} closed, "
+          f"{summary['open']} open, {summary['unknown']} could not tell.")
+    if summary["throttled"]:
+        print(f"  Rate-limited by {', '.join(summary['throttled'])}; "
+              "the rest wait for the next check.")
+
+
 # ── Entry ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     config = _load_config()
@@ -592,13 +618,19 @@ def main() -> None:
     parser.add_argument("--learning-path", action="store_true",
                         help="Analyse stored postings against your resume "
                              "and write a learning path (uses Claude)")
+    parser.add_argument("--check-postings", action="store_true",
+                        help="Re-open each stored posting and hide the ones "
+                             "its board says are closed")
     parser.add_argument("--limit", type=int, default=None,
                         help="With --learning-path: read at most this many "
-                             "new postings this time")
+                             "new postings this time. With --check-postings: "
+                             "check at most this many")
     args = parser.parse_args()
 
     if args.learning_path:
         run_learning_path(args.limit)
+    elif args.check_postings:
+        run_check_postings(args.limit)
     elif args.tailor:
         if not args.jd:
             print("ERROR: --jd <file.txt> is required with --tailor")

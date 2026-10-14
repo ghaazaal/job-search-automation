@@ -87,6 +87,7 @@ a:hover{color:#A83519}
 .role-btn:hover{border-color:#D6482B}
 .empty{border:1px dashed #D5CDB9;border-radius:3px;padding:14px 13px;font:400 13px/1.5 Inter,sans-serif;color:#A6AEB9}
 .err{font:400 11px/1.5 'JetBrains Mono',monospace;color:#A83519;margin-top:8px}
+.gone{font:500 9.5px/1.4 'JetBrains Mono',monospace;color:#A83519;letter-spacing:.09em;margin-top:8px;cursor:help}
 @media (prefers-reduced-motion: reduce){
   *{transition:none !important;animation:none !important}
 }
@@ -283,6 +284,18 @@ def _accent(card: dict) -> str:
     return f" {accent}" if accent else ""
 
 
+def _gone(card: dict) -> str:
+    """The posting's own board says it closed. Shown on the card, not
+    acted on: an application already sent outlives its job ad. The
+    evidence is one hover away, word for word as the check recorded it."""
+    if not card.get("closed_at"):
+        return ""
+    age = _days(card["closed_at"])
+    when = " TODAY" if age == "today" else (f" {age} AGO" if age else "")
+    return (f'<div class="gone" title="{_e(card.get("closed_evidence"))}">'
+            f'POSTING CLOSED{when}</div>')
+
+
 def _card(card: dict) -> str:
     return (
         f'<div class="card{_accent(card)}" draggable="true" '
@@ -291,6 +304,7 @@ def _card(card: dict) -> str:
         f'<div class="rt">{_e(card["title"])}</div>'
         f'{_pill(card)}'
         f'<div class="cmeta">{_e(_card_meta(card))}</div>'
+        f'{_gone(card)}'
         f'<div class="cfoot">'
         f'<button type="button" class="step step-back" aria-label="Move back">'
         f'&larr;</button>'

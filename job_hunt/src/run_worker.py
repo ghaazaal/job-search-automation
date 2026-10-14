@@ -13,6 +13,9 @@ from .store.runs import fail_run, get_run, set_progress
 
 logger = logging.getLogger(__name__)
 
+# LinkedIn wants ~3s between page loads, so 150 is a few minutes at most.
+POSTING_CHECKS_PER_RUN = 150
+
 
 def default_runner(conn, user_id: int, run_id: int, on_progress):
     """Load config and hand off to run_core. Replaced wholesale in tests."""
@@ -29,6 +32,15 @@ def default_runner(conn, user_id: int, run_id: int, on_progress):
     profile = get_profile(conn, user_id)
     execute(conn, user_id, run_id, config, resumes, profile,
             on_progress=on_progress)
+
+    # The run is finished and on the map by now. Spend the rest of this
+    # thread asking older postings whether they are still open - capped,
+    # least-recently-checked first, so a few runs cover the whole store.
+    from .liveness import check_postings
+    try:
+        check_postings(conn, user_id, limit=POSTING_CHECKS_PER_RUN)
+    except Exception:
+        logger.exception("Posting check after run %s failed", run_id)
 
 
 def work(db_path: Path | str, user_id: int, run_id: int, runner=None) -> None:

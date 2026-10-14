@@ -147,7 +147,8 @@ def test_schema_has_the_learning_tables(tmp_path):
     tables = {r["name"] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"skill_extraction", "posting_skill", "learning_path"} <= tables
-    assert SCHEMA_VERSION == 11
+    # 11 added these tables; later versions keep them.
+    assert SCHEMA_VERSION >= 11
 
 
 # ── quote verification ────────────────────────────────────────────────────
