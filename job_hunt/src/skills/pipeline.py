@@ -1,0 +1,190 @@
+"""One analysis, start to finish: read postings, count, compare, rank, plan.
+
+Writes one `learning_path` row. Every step reports progress so the page can
+say what is happening; any exception fails the row with its message.
+"""
+import logging
+import threading
+from collections import Counter
+from pathlib import Path
+
+import yaml
+
+from ..store import learning as store
+from ..store.db import connect
+from ..store.profile import list_resumes
+from . import compare, extract, market, path, rank
+
+logger = logging.getLogger(__name__)
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def load_settings() -> tuple[dict, dict]:
+    """(learning_path config, vocabulary)."""
+    with open(_ROOT / "config.yaml", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle) or {}
+    with open(_ROOT / "vocabulary.yaml", encoding="utf-8") as handle:
+        vocabulary = yaml.safe_load(handle) or {}
+    return config.get("learning_path") or {}, vocabulary
+
+
+def merged_resume(resumes: list[dict]) -> dict:
+    """Every active resume read as one person: their skills are the union.
+
+    The ask is one path for the user, not one per resume, and a skill on
+    any of their resumes is a skill they have.
+    """
+    skills, seen = [], set()
+    for resume in resumes:
+        for skill in resume.get("skills") or []:
+            key = str(skill.get("name", "")).lower()
+            if key and key not in seen:
+                seen.add(key)
+                skills.append(skill)
+    roles, seen_roles = [], set()
+    for resume in resumes:
+        for role in resume.get("target_roles") or []:
+            key = str(role.get("title", "")).lower()
+            if key and key not in seen_roles:
+                seen_roles.add(key)
+                roles.append(role)
+    bands = ["junior", "mid", "senior", "exec"]
+    seniority = max((r.get("seniority") for r in resumes
+                     if r.get("seniority") in bands),
+                    key=bands.index, default=None)
+    return {
+        "labels": [r.get("label", "") for r in resumes],
+        "skills": skills,
+        "target_roles": roles,
+        "seniority": seniority,
+        "extracted_text": "\n\n".join(r.get("extracted_text") or ""
+                                      for r in resumes),
+    }
+
+
+def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
+            on_progress=None, limit: int | None = None) -> tuple[dict, dict]:
+    """Returns (analysis, path). Raises when there is nothing to work from."""
+    def report(stage: str, **detail):
+        if on_progress:
+            on_progress({"stage": stage, **detail})
+
+    resumes = list_resumes(conn, user_id, active_only=True)
+    if not resumes:
+        raise ValueError("Upload a resume first — the path is built from it.")
+    resume = merged_resume(resumes)
+
+    reference = list(vocabulary.get("skill_names") or [])
+    reference += [s.get("name", "") for s in resume["skills"]
+                  if s.get("name") and s.get("name") not in reference]
+
+    report("reading postings", done=0,
+           total=len(extract.pending_roles(conn, user_id, limit)))
+    read = extract.extract_pending(
+        conn, user_id, model, reference, limit=limit,
+        workers=int(settings.get("workers", 4)), on_progress=on_progress)
+
+    # Every call this time failed: say why, rather than build a path from
+    # an older, partial reading as if nothing went wrong.
+    if read.get("aborted") or (read["failed_batches"] and not read["read"]):
+        raise RuntimeError("Claude could not read the postings: "
+                           + read.get("error", "unknown error"))
+
+    postings = extract.read_postings(conn, user_id)
+    if not postings:
+        raise ValueError("No posting has been read yet. Run a search first, "
+                         "or check the API key if reading failed.")
+    rows = extract.evidence_rows(conn, user_id)
+
+    report("grouping skill names")
+    spelling = market.spelling_groups(rows)
+    per_name: dict[str, set] = {}
+    for row in rows:
+        per_name.setdefault(spelling[row["name"]], set()).add(row["role_id"])
+    counts = Counter({n: len(ids) for n, ids in per_name.items()})
+    synonyms = market.merge_synonyms(model, counts)
+    names = {raw: synonyms.get(display, display)
+             for raw, display in spelling.items()}
+
+    report("counting demand")
+    view = market.build(rows, postings, vocabulary.get("role_families") or [],
+                        names)
+
+    report("comparing with your resume")
+    statuses = compare.compare(view["skills"], resume, model)
+
+    ranked = rank.rank(view, statuses, int(settings.get("top_gaps",
+                                                        rank.TOP_GAPS)))
+
+    report("writing your learning path")
+    strengths = [s["name"] for s in view["skills"]
+                 if statuses.get(s["name"], {}).get("status") == compare.HAVE
+                 and s["category"] != "soft"][:10]
+    plan = path.build_path(model, ranked["gaps"], resume, strengths)
+
+    # The snapshot keeps what the page needs, not every posting id.
+    skills = []
+    for skill in view["skills"][:60]:
+        status = statuses.get(skill["name"], {})
+        skills.append({k: skill[k] for k in
+                       ("name", "category", "postings", "required", "share",
+                        "samples")}
+                      | {"status": status.get("status"),
+                         "how": status.get("how", ""),
+                         "related_to": status.get("related_to", ""),
+                         "resume_evidence": status.get("evidence", "")})
+    analysis = {
+        "postings": view["postings"],
+        "date_from": view["date_from"],
+        "date_to": view["date_to"],
+        "resume_labels": resume["labels"],
+        "skills": skills,
+        "families": view["families"],
+        "trends": view["trends"],
+        "gaps": ranked["gaps"],
+        "coverage": ranked["coverage"],
+        "after": ranked["after"],
+        "unverified": extract.unverified_total(conn, user_id),
+        "unread": len(extract.pending_roles(conn, user_id)),
+        "this_run": read,
+    }
+    return analysis, plan
+
+
+def build_model(settings: dict):
+    from .claude import DEFAULT_MODEL, ClaudeJson
+    return ClaudeJson(settings.get("model") or DEFAULT_MODEL)
+
+
+def work(db_path, user_id: int, path_id: int, model=None,
+         limit: int | None = None) -> None:
+    """Run one analysis on the calling thread; the row always ends terminal."""
+    conn = connect(db_path)
+    try:
+        settings, vocabulary = load_settings()
+        model = model or build_model(settings)
+
+        def on_progress(event: dict) -> None:
+            store.set_progress(conn, path_id, event.get("stage", ""), event)
+
+        analysis, plan = analyse(conn, user_id, model, settings, vocabulary,
+                                 on_progress=on_progress, limit=limit)
+        store.finish(conn, path_id, getattr(model, "model", ""), analysis, plan)
+    except Exception as exc:
+        logger.exception("Learning path %s failed", path_id)
+        try:
+            store.fail(conn, path_id, str(exc))
+        except Exception:
+            logger.exception("Could not record the failure of %s", path_id)
+    finally:
+        conn.close()
+
+
+def run_in_background(db_path, user_id: int, path_id: int,
+                      model=None) -> threading.Thread:
+    thread = threading.Thread(target=work, args=(db_path, user_id, path_id,
+                                                 model),
+                              name=f"learning-path-{path_id}", daemon=True)
+    thread.start()
+    return thread

@@ -59,3 +59,14 @@ llm:
   model: "llama-3.3-70b-versatile"
   # provider: "anthropic"          # anthropic | groq | gemini
   # model:    "claude-sonnet-4-6"  # leave blank to use the provider's default
+
+# Learning path (LEARN tab, or `python main.py --learning-path`).
+# Always Claude, whatever llm.provider says: it reads every stored posting
+# for the skills it asks for, compares them with your resume, and writes
+# one path. Needs ANTHROPIC_API_KEY in job_hunt/.env or your shell.
+# Each posting is read once and remembered, so only the first analysis
+# reads the whole store; later ones read just the new postings.
+learning_path:
+  model: "claude-opus-5-5"
+  workers: 4          # postings are read in parallel batches
+  top_gaps: 12        # how many ranked gaps the path is built from

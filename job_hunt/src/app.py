@@ -15,6 +15,7 @@ from . import resume_intake as intake
 from .activity_page import render as render_activity
 from .agents.profile_parser import parse_profile
 from .llm.base import LLMClient
+from .learning_page import render as render_learning
 from .map_page import render as render_map
 from .profile_page import render as render_profile
 from .run_core import search_titles
@@ -62,7 +63,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                data_root: Path | str = DEFAULT_DATA_ROOT,
                llm_factory=None,
                runner=None,
-               run_in_thread: bool = True) -> Flask:
+               run_in_thread: bool = True,
+               learning_model=None) -> Flask:
     app = Flask(__name__)
 
     # Defense in depth: reject a request body far larger than any legitimate
@@ -452,6 +454,67 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.get("/learn")
+    def learning_screen():
+        from .store import learning
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            return render_learning(
+                learning.latest(conn, user_id, status="OK"),
+                learning.latest(conn, user_id),
+                nav={"map_count": open_company_count(conn, user_id),
+                     "tracker_count": live_tracker_count(conn, user_id),
+                     "user_label": user_name})
+        finally:
+            conn.close()
+
+    @app.post("/api/learning-path")
+    def start_learning_path():
+        from .skills import pipeline
+        from .store import learning
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            if not list_resumes(conn, user_id, active_only=True):
+                return jsonify({"error": "Upload a resume first — the path "
+                                         "is built from it."}), 400
+            # Checked here so the user gets a sentence now, not a failed
+            # row a second later. Tests inject a model and skip the key.
+            if learning_model is None and not (
+                    os.environ.get("ANTHROPIC_API_KEY")
+                    or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+                return jsonify({"error": "ANTHROPIC_API_KEY is not set. Add "
+                                         "it to job_hunt/.env and restart "
+                                         "the app."}), 400
+            path_id = learning.start(conn, user_id)
+            if path_id is None:
+                live = learning.latest(conn, user_id)
+                return jsonify({"error": "An analysis is already running.",
+                                "path_id": live["id"] if live else None}), 409
+        finally:
+            conn.close()
+        if run_in_thread:
+            pipeline.run_in_background(db_path, user_id, path_id,
+                                       learning_model)
+        else:
+            pipeline.work(db_path, user_id, path_id, learning_model)
+        return jsonify({"path_id": path_id}), 201
+
+    @app.get("/api/learning-path/<int:path_id>")
+    def poll_learning_path(path_id: int):
+        from .store import learning
+        conn = _conn()
+        try:
+            row = learning.get(conn, path_id)
+            if row is None or row["user_id"] != _user(conn):
+                return jsonify({"error": "not found"}), 404
+            return jsonify({"status": row["status"], "stage": row["stage"],
+                            "progress": row["progress"],
+                            "error": row["error"]})
+        finally:
+            conn.close()
+
     # Any RUNNING run belongs to a process that is no longer here — at boot
     # none of ours are alive yet. Without this one hard kill locks the user
     # out of ever starting another run, because POST /api/runs sees a RUNNING
@@ -465,6 +528,10 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         init_db(_boot_conn)
         cleared = clear_running(_boot_conn,
                                 "interrupted — the app restarted mid-run")
+        from .store.learning import clear_running as clear_learning
+        clear_learning(_boot_conn, "interrupted — the app restarted "
+                                   "mid-analysis; postings already read are "
+                                   "kept")
         if cleared:
             logger.info("Cleared %s run(s) left running by a previous process",
                         cleared)
