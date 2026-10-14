@@ -712,3 +712,14 @@ def test_a_path_stored_before_the_split_still_renders():
     page = render(row, row)
     assert "YOUR PATH · ALL ROLES" in page
     assert "CHOOSE A KIND OF ROLE" not in page
+
+
+def test_a_posting_with_no_date_is_dated_by_the_run_that_found_it(tmp_path):
+    _, conn, user_id = _store(tmp_path)
+    ids = _role_ids(conn)
+    # Ingest writes a missing source date as '' rather than NULL.
+    conn.execute("UPDATE role SET posted_date = '' WHERE id = ?",
+                 (ids["https://x/1"],))
+    pending = {r["id"] for r in extract.pending_roles(conn, user_id,
+                                                      since="2000-01-01")}
+    assert ids["https://x/1"] in pending

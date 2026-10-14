@@ -97,8 +97,10 @@ def verified(evidence: str, posting_text: str) -> bool:
 
 
 # When a posting appeared: the date it was posted, else the day a run
-# first saw it. The window ("the past month") is measured on this.
-_WHEN = "COALESCE(r.posted_date, substr(run.started_at, 1, 10))"
+# first saw it. The window ("the past month") is measured on this. Ingest
+# stores a missing date as '' rather than NULL, so blank counts as missing.
+_WHEN = ("COALESCE(NULLIF(r.posted_date, ''),"
+         " substr(run.started_at, 1, 10))")
 
 
 def _window(since: str | None) -> tuple[str, list]:
