@@ -6,6 +6,7 @@ say what is happening; any exception fails the row with its message.
 import logging
 import threading
 from collections import Counter
+from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -87,15 +88,21 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
     reference += [s.get("name", "") for s in resume["skills"]
                   if s.get("name") and s.get("name") not in reference]
 
-    report("reading postings", done=0,
-           total=len(extract.pending_roles(conn, user_id, limit)))
+    # Only postings from the last `days` days (0 or unset: everything
+    # stored). Older postings are neither read nor counted.
+    days = int(settings.get("days") or 0)
+    since = ((date.today() - timedelta(days=days)).isoformat()
+             if days > 0 else None)
+    unread = len(extract.pending_roles(conn, user_id, limit, since))
+
+    report("reading postings", done=0, total=unread)
     read = extract.extract_pending(
         conn, user_id, reader, reference, limit=limit,
         workers=int(settings.get("workers", 4)), on_progress=on_progress,
         # A handful of postings is not worth waiting on a batch for.
         use_batch=bool(settings.get("batch", True))
-        and len(extract.pending_roles(conn, user_id, limit))
-        >= int(settings.get("batch_min_postings", 50)))
+        and unread >= int(settings.get("batch_min_postings", 50)),
+        since=since)
 
     # Every call this time failed: say why, rather than build a path from
     # an older, partial reading as if nothing went wrong.
@@ -103,11 +110,11 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
         raise RuntimeError("Claude could not read the postings: "
                            + read.get("error", "unknown error"))
 
-    postings = extract.read_postings(conn, user_id)
+    postings = extract.read_postings(conn, user_id, since)
     if not postings:
         raise ValueError("No posting has been read yet. Run a search first, "
                          "or check the API key if reading failed.")
-    rows = extract.evidence_rows(conn, user_id)
+    rows = extract.evidence_rows(conn, user_id, since)
 
     report("grouping skill names")
     spelling = market.spelling_groups(rows)
@@ -121,7 +128,7 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
 
     report("counting demand")
     view = market.build(rows, postings, vocabulary.get("role_families") or [],
-                        names)
+                        names, window_days=days or None)
 
     report("comparing with your resume")
     statuses = compare.compare(view["skills"], resume, model)
@@ -157,8 +164,9 @@ def analyse(conn, user_id: int, model, settings: dict, vocabulary: dict,
         "gaps": ranked["gaps"],
         "coverage": ranked["coverage"],
         "after": ranked["after"],
-        "unverified": extract.unverified_total(conn, user_id),
-        "unread": len(extract.pending_roles(conn, user_id)),
+        "window_days": days or None,
+        "unverified": extract.unverified_total(conn, user_id, since),
+        "unread": len(extract.pending_roles(conn, user_id, since=since)),
         "this_run": read,
     }
     return analysis, plan

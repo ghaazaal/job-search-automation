@@ -636,3 +636,19 @@ def test_wrapper_sends_a_batch_and_parses_each_result():
     sent = client.messages.batches.sent[0]["params"]
     assert sent["output_config"]["format"]["type"] == "json_schema"
     assert "extra_body" not in sent  # no fallbacks on the Batch API
+
+
+def test_the_window_leaves_older_postings_unread_and_uncounted(tmp_path):
+    _, conn, user_id = _store(tmp_path)
+    ids = _role_ids(conn)
+    conn.execute("UPDATE role SET posted_date = '2026-01-05' WHERE id = ?",
+                 (ids["https://x/3"],))
+    since = "2026-09-01"
+    pending = {r["id"] for r in extract.pending_roles(conn, user_id,
+                                                      since=since)}
+    assert ids["https://x/3"] not in pending and len(pending) == 2
+    extract.extract_pending(conn, user_id, FakeModel(ids), [], since=since)
+    counted = {p["id"] for p in extract.read_postings(conn, user_id, since)}
+    assert counted == {ids["https://x/1"], ids["https://x/2"]}
+    assert not any(r["role_id"] == ids["https://x/3"]
+                   for r in extract.evidence_rows(conn, user_id, since))

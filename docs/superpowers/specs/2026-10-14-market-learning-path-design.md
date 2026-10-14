@@ -64,6 +64,11 @@ verifies.
   Residual: an app restart while a batch is waiting discards that batch's
   results (already paid for); the next analysis resubmits. Run the first
   big read from the command line to avoid it.
+- **Window:** only postings from the past `learning_path.days` days (default
+  30; 0 = everything stored), dated by posted date, else the day a run first
+  saw them. The user asked for the past month (2026-10-14): 331 of 1,085
+  stored postings. Older postings are neither read nor counted, and the
+  trend split becomes the window's halves (last 15 days vs the 15 before).
 - **Path format:** stages in the app's LEARN tab (paper shell), not a file.
 - **Soft skills:** shown in the market list, not planned.
 - **Several resumes:** merged; one path per person.

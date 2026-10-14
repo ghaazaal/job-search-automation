@@ -96,16 +96,30 @@ def verified(evidence: str, posting_text: str) -> bool:
     return quote in squash(posting_text)
 
 
+# When a posting appeared: the date it was posted, else the day a run
+# first saw it. The window ("the past month") is measured on this.
+_WHEN = "COALESCE(r.posted_date, substr(run.started_at, 1, 10))"
+
+
+def _window(since: str | None) -> tuple[str, list]:
+    if not since:
+        return "", []
+    return f" AND {_WHEN} >= ?", [since]
+
+
 def pending_roles(conn: sqlite3.Connection, user_id: int,
-                  limit: int | None = None) -> list[dict]:
+                  limit: int | None = None,
+                  since: str | None = None) -> list[dict]:
     """Postings on the map with a captured description, not yet read."""
-    sql = """SELECT r.id, r.title, r.description
+    window, extra = _window(since)
+    sql = f"""SELECT r.id, r.title, r.description
                FROM role r
+               JOIN run ON run.id = r.first_seen_run_id
                LEFT JOIN skill_extraction x ON x.role_id = r.id
               WHERE r.user_id = ? AND r.dropped_at IS NULL
-                AND r.description_captured = 1 AND x.role_id IS NULL
+                AND r.description_captured = 1 AND x.role_id IS NULL{window}
               ORDER BY r.id DESC"""
-    params: list = [user_id]
+    params: list = [user_id, *extra]
     if limit:
         sql += " LIMIT ?"
         params.append(int(limit))
@@ -170,7 +184,8 @@ def _store(conn: sqlite3.Connection, role: dict, skills: list,
 def extract_pending(conn: sqlite3.Connection, user_id: int, model,
                     reference: list[str], limit: int | None = None,
                     workers: int = 4, on_progress=None,
-                    use_batch: bool = False) -> dict:
+                    use_batch: bool = False,
+                    since: str | None = None) -> dict:
     """Read every unread posting. Returns counts for the progress line.
 
     Two ways to send the requests. `use_batch` hands them all to Claude's
@@ -181,7 +196,7 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
     that fails leaves its postings unread for the next analysis — a
     failure never marks a posting done.
     """
-    roles = pending_roles(conn, user_id, limit)
+    roles = pending_roles(conn, user_id, limit, since)
     batches = [roles[i:i + BATCH_SIZE] for i in range(0, len(roles), BATCH_SIZE)]
     totals = {"postings": len(roles), "read": 0, "skills": 0,
               "unverified": 0, "failed_batches": 0}
@@ -263,36 +278,45 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
     return totals
 
 
-def evidence_rows(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+def evidence_rows(conn: sqlite3.Connection, user_id: int,
+                  since: str | None = None) -> list[dict]:
     """Every stored skill mention for the user's live postings."""
+    window, extra = _window(since)
     rows = conn.execute(
-        """SELECT ps.role_id, ps.name, ps.category, ps.requirement,
+        f"""SELECT ps.role_id, ps.name, ps.category, ps.requirement,
                   ps.evidence, r.title, r.url, r.posted_date,
                   c.name AS company, run.started_at AS first_seen
              FROM posting_skill ps
              JOIN role r ON r.id = ps.role_id
              JOIN company c ON c.id = r.company_id
              JOIN run ON run.id = r.first_seen_run_id
-            WHERE r.user_id = ? AND r.dropped_at IS NULL""", (user_id,))
+            WHERE r.user_id = ? AND r.dropped_at IS NULL{window}""",
+        (user_id, *extra))
     return [dict(row) for row in rows]
 
 
-def read_postings(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+def read_postings(conn: sqlite3.Connection, user_id: int,
+                  since: str | None = None) -> list[dict]:
     """Every live posting that has been read, including ones naming nothing."""
+    window, extra = _window(since)
     rows = conn.execute(
-        """SELECT r.id, r.title, r.posted_date, run.started_at AS first_seen
+        f"""SELECT r.id, r.title, r.posted_date, run.started_at AS first_seen
              FROM role r
              JOIN skill_extraction x ON x.role_id = r.id
              JOIN run ON run.id = r.first_seen_run_id
-            WHERE r.user_id = ? AND r.dropped_at IS NULL""", (user_id,))
+            WHERE r.user_id = ? AND r.dropped_at IS NULL{window}""",
+        (user_id, *extra))
     return [dict(row) for row in rows]
 
 
-def unverified_total(conn: sqlite3.Connection, user_id: int) -> int:
+def unverified_total(conn: sqlite3.Connection, user_id: int,
+                     since: str | None = None) -> int:
+    window, extra = _window(since)
     row = conn.execute(
-        """SELECT COALESCE(SUM(x.unverified), 0) AS n
+        f"""SELECT COALESCE(SUM(x.unverified), 0) AS n
              FROM skill_extraction x JOIN role r ON r.id = x.role_id
-            WHERE r.user_id = ? AND r.dropped_at IS NULL""",
-        (user_id,)).fetchone()
+             JOIN run ON run.id = r.first_seen_run_id
+            WHERE r.user_id = ? AND r.dropped_at IS NULL{window}""",
+        (user_id, *extra)).fetchone()
     return int(row["n"])
 

@@ -134,7 +134,7 @@ def family_of(title: str, families: list[dict]) -> str:
 
 
 def build(rows: list[dict], postings: list[dict], families: list[dict],
-          names: dict[str, str]) -> dict:
+          names: dict[str, str], window_days: int | None = None) -> dict:
     """The market snapshot.
 
     `rows` are skill mentions (one per posting per skill), `postings` every
@@ -196,7 +196,11 @@ def build(rows: list[dict], postings: list[dict], families: list[dict],
         "date_to": max(dates).isoformat() if dates else None,
         "skills": demand,
         "families": _families(demand, family_by_role),
-        "trends": _trends(demand, date_by_role),
+        # Inside a short analysis window the trend split is its halves:
+        # a 30-day window compares the last 15 days with the 15 before.
+        "trends": _trends(demand, date_by_role,
+                          min(TREND_WINDOW_DAYS, window_days // 2)
+                          if window_days else TREND_WINDOW_DAYS),
     }
 
 
@@ -216,14 +220,15 @@ def _families(demand: list[dict], family_by_role: dict) -> list[dict]:
     return out
 
 
-def _trends(demand: list[dict], date_by_role: dict) -> dict:
+def _trends(demand: list[dict], date_by_role: dict,
+            split_days: int = TREND_WINDOW_DAYS) -> dict:
     dated = {r: d for r, d in date_by_role.items() if d}
     if not dated:
         return {"available": False,
                 "reason": "No posting carries a date, so nothing can be "
                           "compared over time."}
     newest = max(dated.values())
-    cutoff = newest - timedelta(days=TREND_WINDOW_DAYS)
+    cutoff = newest - timedelta(days=split_days)
     recent = {r for r, d in dated.items() if d > cutoff}
     earlier = {r for r, d in dated.items() if d <= cutoff}
     if len(recent) < TREND_MIN_POSTINGS or len(earlier) < TREND_MIN_POSTINGS:

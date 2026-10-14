@@ -311,6 +311,8 @@ def _method_card(row: dict) -> str:
     if analysis.get("date_from") and analysis.get("date_to"):
         span = (f' posted or first seen between {_e(analysis["date_from"])} '
                 f'and {_e(analysis["date_to"])}')
+    window = (f' from the past {analysis["window_days"]} days'
+              if analysis.get("window_days") else "")
     extra = []
     if analysis.get("unverified"):
         n = analysis["unverified"]
@@ -323,7 +325,7 @@ def _method_card(row: dict) -> str:
                      ' been read yet; the next refresh reads them.')
     return (
         '<div class="card sunk"><div class="lab">HOW THIS WAS BUILT</div>'
-        f'<div class="note">From {analysis["postings"]} stored postings{span}, '
+        f'<div class="note">From {analysis["postings"]} stored postings{window}{span}, '
         f'and your resume ({_e(", ".join(analysis.get("resume_labels") or []))}). '
         'Claude listed the skills each posting asks for and had to quote the '
         'posting for every one. Counts are postings, not mentions. Gaps are '
