@@ -103,14 +103,16 @@ font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
 .go:hover{background:#A83519;border-color:#A83519}
 .go.alt{background:transparent;color:#D6482B}
 .go.alt:hover{background:transparent;color:#A83519}
-.filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px;padding:13px 16px;background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px}
-.fl{display:flex;flex-direction:column;gap:6px;min-width:0}
+.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 14px;align-items:end;padding:18px 20px;background:#FFFDF8;border:1px solid #E0D8C4;border-radius:4px}
+.fl{display:flex;flex-direction:column;gap:7px;min-width:0;margin:0}
 .fl span{font:400 9.5px/1 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em}
-.fl select,.fl input{max-width:100%;font:500 11px/1.2 'JetBrains Mono',monospace;color:#2A3342;background:#F7F2E6;border:1px solid #E0D8C4;border-radius:3px;padding:6px 8px;letter-spacing:.04em}
+.fl select,.fl input{display:block;width:100%;height:32px;margin:0;font:500 11px/1 'JetBrains Mono',monospace;color:#2A3342;background:#F7F2E6;border:1px solid #E0D8C4;border-radius:3px;padding:0 9px;letter-spacing:.04em}
+.fl input::placeholder{color:#A9B0BA}
 .fl select:focus,.fl input:focus{outline:none;border-color:#2A5F86}
 .fl.on select,.fl.on input{border-color:#D6482B;color:#A83519}
-.fl-q input{width:150px}
-.filters .btn-q{padding:7px 4px}
+.fl-q{grid-column:span 3}
+.f-apply{height:32px;width:100%;margin:0}
+@media (max-width:640px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.fl-q{grid-column:span 1}}
 .fstate{display:flex;align-items:center;gap:12px;font:400 10.5px/1 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
 .fstate a{font-weight:500}
 """
@@ -357,7 +359,7 @@ def _controls(view: dict, choices: dict) -> str:
         + f'<label class="fl fl-q{" on" if q else ""}"><span>COMPANY</span>'
           f'<input type="search" name="q" value="{_e(q)}" '
           f'placeholder="NAME"></label>'
-          '<button type="submit" class="btn-q">APPLY</button></form>'
+          '<button type="submit" class="btn f-apply">APPLY</button></form>'
     )
 
 
