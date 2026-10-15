@@ -423,7 +423,7 @@ def render(board: dict, nav: dict | None = None) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>In flight</title>
+<title>Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -434,7 +434,7 @@ def render(board: dict, nav: dict | None = None) -> str:
 {top_nav}
 <div class="head"><div class="head-in">
 <div>
-<div class="title">in flight</div>
+<div class="title">tracker</div>
 <div class="sub">{_subtitle(live)}</div>
 </div>
 <div class="meta-r">
@@ -445,7 +445,7 @@ def render(board: dict, nav: dict | None = None) -> str:
 <div class="wrap"><div class="scroller"><div class="board">{columns}</div></div></div>
 </div>
 {DRAWER_MOUNT}
-<script>{drawer_js(payload, back_label="BACK TO BOARD")}</script>
+<script>{drawer_js(payload, back_label="BACK TO BOARD", reload_on_change=True)}</script>
 <script>{js}</script>
 </body>
 </html>

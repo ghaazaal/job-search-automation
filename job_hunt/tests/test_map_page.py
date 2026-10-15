@@ -262,15 +262,46 @@ def test_drawer_payload_carries_role_id_and_tracker_status():
 
 def test_drawer_offers_add_to_tracker_and_a_working_mark_applied():
     """The shared drawer's buttons must be wired to the status endpoint —
-    MARK APPLIED existed before but was dead (no data attributes, no id)."""
+    MARK APPLIED existed before but was dead (no data attributes, no id).
+    Since the 2026-10-15 UX pass the map stays put after either: the
+    panel confirms and links to the tracker instead of jumping there."""
     html = render([_ids(_map())])
     js = html.split("<script>")[1]  # the drawer's script block
-    assert "ADD TO TRACKER" in js
-    assert "MARK APPLIED" in js
-    assert js.count("data-dw-status=") >= 2
-    # MARK APPLIED says where it goes and actually goes there.
-    assert "GOES TO TRACKER" in js
-    assert "'/activity'" in js
+    assert "SAVE FOR LATER" in js
+    assert "ALREADY APPLIED" in js
+    assert js.count("data-dw-status=") >= 3
+    assert 'href="/activity"' in js
+    assert "var RELOAD = false" in js
+
+
+def test_drawer_asks_did_you_apply_after_opening_the_posting():
+    """The app cannot see the employer's site, so it asks on return."""
+    js = render([_ids(_map())]).split("<script>")[1]
+    assert "APPLY ON THEIR SITE" in js
+    assert "data-dw-apply" in js
+    assert "Did you apply?" in js
+    assert "YES, MARK APPLIED" in js
+    assert "visibilitychange" in js
+
+
+def test_drawer_walks_the_list_in_page_order():
+    """NEXT follows the cards as listed, so payload keys must come in
+    display order and match each card's REVIEW ROLE key."""
+    first = {**_map(name="First Co", state="DISCOVER"), "section": "new"}
+    second = {**_map(name="Second Co", state="DISCOVER"), "section": "new"}
+    html = render([first, second])
+    js = html.split("<script>")[1]
+    assert js.index('"First Co"') < js.index('"Second Co"')
+    assert 'data-dw-step="1"' in js
+    assert 'data-open="c0"' in html and '"c0": {' in js
+
+
+def test_new_search_sits_in_the_header():
+    html = _body(render([_map()]))
+    assert "SEARCH FOR NEW ROLES" in html
+    assert html.index("SEARCH FOR NEW ROLES") < html.index("Acme Analytics")
+    assert "SEARCH FOR NEW ROLES" not in _body(
+        render([_map()], running_run_id=5))
 
 
 # ── Hidden (dropped) count ────────────────────────────────────────────────────
@@ -281,8 +312,8 @@ def test_hidden_postings_are_announced_in_the_meta_line():
 
 
 def test_no_hidden_word_appears_when_nothing_was_dropped():
-    assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0,
-                                            "hidden": 0})
+    assert "HIDDEN" not in _body(render([], meta={"companies": 0,
+                                                  "roles": 0, "hidden": 0}))
 
 
 # ── Off-topic (relevance gate) count ──────────────────────────────────────────
@@ -318,7 +349,8 @@ def test_the_role_meta_leads_with_the_work_mode():
 def test_no_mode_means_no_chip():
     html = render([_map()])
     assert "HYBRID" not in html and "ONSITE" not in html
-    assert "HIDDEN" not in render([], meta={"companies": 0, "roles": 0})
+    assert "HIDDEN" not in _body(render([], meta={"companies": 0,
+                                                  "roles": 0}))
 
 
 def test_the_header_states_what_was_set_aside():

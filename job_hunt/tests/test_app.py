@@ -121,3 +121,17 @@ def test_setting_status_on_a_missing_role_returns_404(client):
 def test_setting_state_on_a_missing_company_returns_404(client):
     r = client.post("/api/companies/999999/state", json={"state": "WATCH"})
     assert r.status_code == 404
+
+
+def test_the_role_panel_can_load_the_posting_text(client):
+    """The panel shows the posting so a role can be judged in the app."""
+    rid = int(client.get("/").data.decode("utf-8")
+              .split('"rid": ')[1].split(",")[0])
+    r = client.get(f"/api/roles/{rid}/posting")
+    assert r.status_code == 200
+    assert r.get_json()["description"] == "dbt"
+    assert client.get("/api/roles/999999/posting").status_code == 404
+
+
+def test_the_map_header_names_the_real_last_search(client):
+    assert b"LAST SEARCH" in client.get("/").data

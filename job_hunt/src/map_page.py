@@ -102,6 +102,9 @@ font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
 .go:hover{background:#A83519;border-color:#A83519}
 .go.alt{background:transparent;color:#D6482B}
 .go.alt:hover{background:transparent;color:#A83519}
+.go-head{margin-top:14px}
+.card,.lead{cursor:pointer}
+.card:hover{border-color:#B9AC8F;box-shadow:0 1px 0 rgba(42,51,66,.08)}
 .mline{margin-top:3px}
 .mline b{font-weight:500;color:#4C5768}
 .mc{white-space:nowrap;cursor:help;border-bottom:1px dotted #C9BFA8}
@@ -362,13 +365,17 @@ def _quiet_header(open_count: int, unchecked: int) -> str:
     )
 
 
-def _drawer_payload(maps: list[dict]) -> dict:
-    """Data the drawer needs. The internal score is deliberately excluded."""
+def _drawer_payload(maps: list[dict], keys: dict | None = None) -> dict:
+    """Data the drawer needs. The internal score is deliberately excluded.
+
+    `maps` comes in the order the page lists the cards, and the drawer's
+    NEXT walks the payload in that order; `keys` maps id(m) to the key
+    the card's REVIEW ROLE button opens."""
     out: dict = {}
     for i, m in enumerate(maps):
         if not m.get("roles"):
             continue
-        out[f"c{i}"] = {
+        out[(keys or {}).get(id(m), f"c{i}")] = {
             "name": m["name"],
             "why": m["why"],
             "roles": [{
@@ -394,6 +401,14 @@ _JS = """
 document.addEventListener('click',function(e){
   const o=e.target.closest('[data-open]');
   if(o){window.Drawer.open(o.getAttribute('data-open'),0);return;}
+  // The whole card opens the role, not only its open button: a
+  // bigger target, and where people click on a job card anyway. Its own
+  // buttons and links keep their jobs; selecting text does not open it.
+  const card=e.target.closest('.card,.lead');
+  if(card&&!e.target.closest('button,a,input,select,label')&&!String(window.getSelection()).trim()){
+    const k=card.querySelector('[data-open]');
+    if(k){window.Drawer.open(k.getAttribute('data-open'),0);return;}
+  }
   const f=e.target.closest('[data-expand]');
   if(f){const grp=document.getElementById(f.getAttribute('data-expand'));if(grp){grp.classList.remove('hidden');}f.remove();}
 });
@@ -546,7 +561,8 @@ def render(maps: list[dict], meta: dict | None = None,
         + f'<div class="mline"><b>SET ASIDE</b>{sep}{sep.join(aside)}'
           f'{sep}<a href="/profile#filtered">WHY?</a></div>')
 
-    payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
+    payload = json.dumps(_drawer_payload(fresh + earlier, keys),
+                         ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 
     # Only counts the run has actually produced. While scraping, the total is
@@ -557,13 +573,15 @@ def render(maps: list[dict], meta: dict | None = None,
         banner = (f'<a class="banner" href="/searching/{running_run_id}">'
                   f'searching now &middot; see progress</a>')
 
+    # Starting a new search sits in the header, beside when the last one
+    # ran. It used to be the last thing on the page, below every folded
+    # company - the main way to get fresh roles was the hardest to find.
     empty = ""
     again = ""
-    if maps:
-        again = ('<div class="again">'
-                 '<button class="go alt" onclick="startRun()">SEARCH AGAIN'
-                 '</button></div>')
-    else:
+    if maps and not running_run_id:
+        again = ('<button class="go alt go-head" onclick="startRun()">'
+                 'SEARCH FOR NEW ROLES</button>')
+    elif not maps:
         empty = ('<div class="empty"><p>nothing searched yet</p>'
                  '<button class="go" onclick="startRun()">START SEARCHING'
                  '</button></div>')
@@ -599,6 +617,7 @@ async function startRun(){
 <div>
 <div class="title">today</div>
 <div class="sub">Companies worth twenty minutes. Everything below them is here for a reason you can read.</div>
+{again}
 </div>
 <div class="meta-r">
 <div class="meta-1">{n_co} COMPANIES &middot; {n_ro} ROLES</div>
@@ -609,7 +628,6 @@ async function startRun(){
 {banner}
 {empty}
 {"".join(body)}
-{again}
 {_watch_shelf(watching)}
 </div></div>
 </div>

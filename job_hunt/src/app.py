@@ -150,6 +150,24 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    @app.get("/api/roles/<int:role_id>/posting")
+    def role_posting(role_id: int):
+        """The posting text for the role panel, so a role can be judged
+        without leaving the app. Loaded on demand: inlining every
+        description would add hundreds of KB to each map page."""
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT description, description_captured FROM role"
+                " WHERE id = ? AND user_id = ?",
+                (role_id, _user(conn))).fetchone()
+            if row is None:
+                return jsonify({"error": "not found"}), 404
+            text = row["description"] if row["description_captured"] else ""
+            return jsonify({"role_id": role_id, "description": text or ""})
+        finally:
+            conn.close()
+
     @app.get("/activity")
     def activity_screen():
         conn = _conn()
