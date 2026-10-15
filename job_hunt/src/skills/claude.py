@@ -67,6 +67,9 @@ class ClaudeJson:
             response = self._client.beta.messages.create(**kwargs)
         else:
             response = self._client.messages.create(**kwargs)
+        # Read by callers that report what a call cost (resume tailoring).
+        self.last_usage = getattr(response, "usage", None)
+        self.last_model = getattr(response, "model", None) or self.model
         return _parse(response)
 
     def batch(self, requests: list[tuple[str, str, str]], *, schema: dict,

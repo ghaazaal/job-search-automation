@@ -83,3 +83,12 @@ learning_path:
   #   sonnet, no batch ~$9-11 · opus, no batch ~$18-21
   workers: 4          # parallel requests when not batching
   top_gaps: 12        # how many ranked gaps the path is built from
+
+# Resume tailoring (RESUME tab, and TAILOR RESUME on any role).
+# Always Claude, whatever llm.provider says. One call builds the master
+# resume from your uploaded resumes (~$0.10-0.30, rarely repeated); one
+# call per tailored resume (~$0.10-0.20 with Opus). Tailoring may reorder,
+# trim and reword the master, never add to it, and every line is checked
+# against the master afterwards. Needs ANTHROPIC_API_KEY in job_hunt/.env.
+resume_tailoring:
+  model: "claude-opus-5-5"

@@ -226,6 +226,39 @@ CREATE INDEX IF NOT EXISTS idx_event_role ON event(role_id, at);
 CREATE INDEX IF NOT EXISTS idx_resume_user ON resume(user_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_posting_skill_role ON posting_skill(role_id);
 CREATE INDEX IF NOT EXISTS idx_learning_path_user ON learning_path(user_id, id);
+
+-- Resume tailoring (spec: 2026-10-15-resume-tailoring-design.md). New
+-- tables only, so _DDL reaches every older database and SCHEMA_VERSION
+-- does not move: a bump here would collide with the other open branches
+-- that each claim the next number for real column migrations.
+-- One master per user: the Markdown the user edits. `report` is what the
+-- build left out because its source resumes did not say it.
+CREATE TABLE IF NOT EXISTS master_resume (
+    id         INTEGER PRIMARY KEY,
+    user_id    INTEGER NOT NULL UNIQUE REFERENCES user(id),
+    markdown   TEXT NOT NULL,
+    sources    TEXT NOT NULL DEFAULT '[]',
+    report     TEXT NOT NULL DEFAULT '{}',
+    model      TEXT,
+    edited     INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- A resume tailored to one posting. Keeps the master text it was built
+-- from: the ids in `report` are positions in that text, not the current.
+CREATE TABLE IF NOT EXISTS tailored_resume (
+    id              INTEGER PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES user(id),
+    role_id         INTEGER NOT NULL REFERENCES role(id),
+    created_at      TEXT NOT NULL,
+    model           TEXT,
+    master_markdown TEXT NOT NULL,
+    markdown        TEXT NOT NULL,
+    report          TEXT NOT NULL DEFAULT '{}',
+    usage           TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_tailored_role ON tailored_resume(user_id, role_id, id);
 """
 
 # SQLite allows ADD COLUMN with a REFERENCES clause only when the new column

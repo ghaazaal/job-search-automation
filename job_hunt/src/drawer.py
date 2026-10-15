@@ -112,6 +112,9 @@ _JS = """
         : '<button type="button" class="dw-sec" data-dw-status="SAVED" data-dw-role="'+esc(r.rid)+'">ADD TO TRACKER</button>'
           + '<button type="button" class="dw-sec" data-dw-status="APPLIED" data-dw-role="'+esc(r.rid)+'">MARK APPLIED \\u00b7 GOES TO TRACKER</button>';
     var posting = r.url ? '<a class="dw-open" href="'+esc(r.url)+'" target="_blank" rel="noopener">OPEN POSTING \\u2197</a>' : '';
+    // Tailoring cuts the master to the posting, so it needs the posting's text.
+    var tailor = (r.rid != null && r.captured)
+      ? '<a class="dw-sec" href="/tailor/'+encodeURIComponent(r.rid)+'">TAILOR RESUME</a>' : '';
     // A path toward this one job needs the posting's text to quote from.
     var learn = (r.rid != null && r.captured)
       ? '<a class="dw-sec" href="/learn/role/'+encodeURIComponent(r.rid)+'">LEARNING PATH FOR THIS JOB</a>' : '';
@@ -122,7 +125,7 @@ _JS = """
       + '<div class="dw-title">'+esc(r.title)+'</div>'
       + '<div class="dw-meta">'+esc(r.meta)+'</div>'
       + tabs + fit + grid + why
-      + '<div class="dw-foot">'+posting+learn+track
+      + '<div class="dw-foot">'+posting+tailor+learn+track
       + '<button type="button" class="dw-next" data-dw-next="1">'+nextLabel+'</button></div></div>';
     shell.classList.remove('dw-hidden');
     document.body.style.overflow = 'hidden';

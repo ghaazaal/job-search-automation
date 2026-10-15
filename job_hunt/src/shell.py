@@ -2,7 +2,8 @@
 
 From the design handoff (`design/wireframes/design_handoff_opportunity_map/`):
 a 14px solid hatched strip reads as the top edge of the page, then the
-wordmark and the MAP · TRACKER · LEARN · PROFILE tab set over a hairline rule.
+wordmark and the MAP · TRACKER · LEARN · RESUME · PROFILE tab set over a
+hairline rule.
 Tabs are plain links, so switching pages closes any open drawer by
 construction. Counts are optional; a None renders nothing rather than a 0
 that would have to be explained.
@@ -10,7 +11,7 @@ that would have to be explained.
 from html import escape
 
 _PAGES = [("/", "MAP"), ("/activity", "TRACKER"), ("/learn", "LEARN"),
-          ("/profile", "PROFILE")]
+          ("/resume", "RESUME"), ("/profile", "PROFILE")]
 
 SHELL_CSS = """
 .sh-nav{position:sticky;top:0;z-index:40;background:#F7F2E6}

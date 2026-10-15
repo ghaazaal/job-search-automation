@@ -588,6 +588,203 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         finally:
             conn.close()
 
+    # ── Resume tailoring (spec: 2026-10-15-resume-tailoring-design.md) ──
+    # Both Claude calls run inside the request: about a minute each, and the
+    # page says so while it waits. Tests set app.config["TAILOR_MODEL"].
+
+    def _tailor_model():
+        injected = app.config.get("TAILOR_MODEL")
+        if injected is not None:
+            return injected
+        if not (os.environ.get("ANTHROPIC_API_KEY")
+                or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            raise RuntimeError("ANTHROPIC_API_KEY is not set. Add it to "
+                               "job_hunt/.env and restart the app.")
+        from .tailor.service import make_model
+        return make_model()
+
+    def _tailor_nav(conn, user_id) -> dict:
+        return {"map_count": open_company_count(conn, user_id),
+                "tracker_count": live_tracker_count(conn, user_id),
+                "user_label": user_name}
+
+    @app.get("/resume")
+    def resume_screen():
+        from .resume_page import render_resume
+        from .store import tailoring
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            return render_resume(tailoring.get_master(conn, user_id),
+                                 tailoring.list_tailored(conn, user_id),
+                                 list_resumes(conn, user_id),
+                                 nav=_tailor_nav(conn, user_id))
+        finally:
+            conn.close()
+
+    @app.post("/api/master-resume/build")
+    def build_master_resume():
+        import io
+
+        from pdfminer.high_level import extract_text as pdf_text
+
+        from .store import tailoring
+        from .tailor import service
+        from .tailor.tailor import build_master
+
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            resumes = list_resumes(conn, user_id)
+            sources = [{"label": r["label"], "kind": "resume",
+                        "text": r["extracted_text"]} for r in resumes]
+            # Extra PDFs are read for the master only: never stored as a
+            # resume, so they cannot change what the search looks for.
+            for upload in request.files.getlist("sources"):
+                data = upload.read()
+                name = upload.filename or "upload.pdf"
+                try:
+                    intake.validate(name, data)
+                    text = pdf_text(io.BytesIO(data))
+                except intake.UploadRejected as rejected:
+                    return jsonify({"error": f"{name}: {rejected}"}), 400
+                except Exception:
+                    logger.exception("PDF text extraction failed")
+                    return jsonify({"error": f"{name} could not be read."}), 400
+                sources.append({"label": Path(name).stem[:60],
+                                "kind": "upload", "text": text})
+            if not any((s["text"] or "").strip() for s in sources):
+                return jsonify({"error": "Upload a resume first. The master "
+                                         "is built from it."}), 400
+            try:
+                model = _tailor_model()
+                built = build_master(sources, model, service.terms(resumes))
+            except RuntimeError as missing:
+                return jsonify({"error": str(missing)}), 400
+            except Exception:
+                logger.exception("Master resume build failed")
+                return jsonify({"error": "Claude could not build the master "
+                                         "this time. Try again."}), 502
+            tailoring.save_master(
+                conn, user_id, built["markdown"],
+                sources=[{"label": s["label"], "kind": s["kind"],
+                          "chars": len(s["text"] or "")} for s in sources],
+                report={**built["report"], "usage": built["usage"]},
+                model=(built["usage"] or {}).get("model"))
+            return jsonify({"saved": True,
+                            "left_out": len(built["report"]["left_out"])}), 201
+        finally:
+            conn.close()
+
+    @app.post("/api/master-resume")
+    def save_master_resume():
+        from .store import tailoring
+        from .tailor import document
+        markdown = str((request.get_json(silent=True) or {})
+                       .get("markdown") or "")
+        if not markdown.strip():
+            return jsonify({"error": "The master resume is empty."}), 400
+        if len(markdown) > 100_000:
+            return jsonify({"error": "That is too long for a resume."}), 400
+        if not document.parse(markdown)["sections"]:
+            return jsonify({"error": "Add at least one section, a line "
+                                     "starting with ## ."}), 400
+        conn = _conn()
+        try:
+            tailoring.save_master(conn, _user(conn), markdown)
+            return jsonify({"saved": True})
+        finally:
+            conn.close()
+
+    @app.get("/tailor/<int:role_id>")
+    def tailor_screen(role_id: int):
+        from .resume_page import render_tailor
+        from .store import tailoring
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            role = tailoring.role_for_tailoring(conn, user_id, role_id)
+            if role is None:
+                return jsonify({"error": "not found"}), 404
+            return render_tailor(
+                role, tailoring.latest_for_role(conn, user_id, role_id),
+                tailoring.get_master(conn, user_id),
+                nav=_tailor_nav(conn, user_id))
+        finally:
+            conn.close()
+
+    @app.post("/api/roles/<int:role_id>/tailor")
+    def tailor_role(role_id: int):
+        from .store import tailoring
+        from .tailor import service
+        from .tailor.tailor import tailor
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            role = tailoring.role_for_tailoring(conn, user_id, role_id)
+            if role is None:
+                return jsonify({"error": "not found"}), 404
+            master = tailoring.get_master(conn, user_id)
+            if master is None:
+                return jsonify({"error": "Build your master resume on the "
+                                         "RESUME tab first."}), 400
+            if not role.get("description_captured") or not (
+                    role.get("description") or "").strip():
+                return jsonify({"error": "This listing has no description "
+                                         "to tailor against."}), 400
+            try:
+                model = _tailor_model()
+                result = tailor(master["markdown"], role, model,
+                                service.terms(list_resumes(conn, user_id)))
+            except RuntimeError as missing:
+                return jsonify({"error": str(missing)}), 400
+            except ValueError as bad:
+                return jsonify({"error": str(bad)}), 400
+            except Exception:
+                logger.exception("Tailoring failed for role %s", role_id)
+                return jsonify({"error": "Claude could not tailor this one. "
+                                         "Try again."}), 502
+            tailored_id = tailoring.add_tailored(
+                conn, user_id, role_id, master_markdown=master["markdown"],
+                markdown=result["markdown"], report=result["report"],
+                usage=result["usage"],
+                model=(result["usage"] or {}).get("model"))
+            return jsonify({"tailored_id": tailored_id}), 201
+        finally:
+            conn.close()
+
+    @app.get("/tailored/<int:tailored_id>.md")
+    def tailored_markdown(tailored_id: int):
+        import re
+
+        from .store import tailoring
+        conn = _conn()
+        try:
+            row = tailoring.get_tailored(conn, _user(conn), tailored_id)
+            if row is None:
+                return jsonify({"error": "not found"}), 404
+            stem = re.sub(r"[^A-Za-z0-9]+", "_",
+                          f"resume {row['company']} {row['title']}")
+            return app.response_class(
+                row["markdown"], mimetype="text/markdown",
+                headers={"Content-Disposition":
+                         f'attachment; filename="{stem.strip("_")[:80]}.md"'})
+        finally:
+            conn.close()
+
+    @app.get("/tailored/<int:tailored_id>/print")
+    def tailored_print(tailored_id: int):
+        from .resume_page import render_print
+        from .store import tailoring
+        conn = _conn()
+        try:
+            row = tailoring.get_tailored(conn, _user(conn), tailored_id)
+            if row is None:
+                return jsonify({"error": "not found"}), 404
+            return render_print(row)
+        finally:
+            conn.close()
+
     # Any RUNNING run belongs to a process that is no longer here — at boot
     # none of ours are alive yet. Without this one hard kill locks the user
     # out of ever starting another run, because POST /api/runs sees a RUNNING
