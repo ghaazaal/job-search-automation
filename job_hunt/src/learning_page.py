@@ -85,7 +85,7 @@ _JS = """
   var btn=document.getElementById('lp-go'), msg=document.getElementById('lp-msg');
   var running=__RUNNING__;
   function poll(id){
-    fetch('/api/learning-path/'+id).then(function(r){return r.json()}).then(function(d){
+    fetch('__POLL__'+id).then(function(r){return r.json()}).then(function(d){
       if(d.status==='RUNNING'){
         var p=d.progress||{}, t=d.stage||'starting';
         if(p.total){t+=' — '+(p.done||0)+' of '+p.total;}
@@ -97,7 +97,7 @@ _JS = """
   if(running){ if(btn){btn.disabled=true;} poll(running); }
   if(btn){ btn.addEventListener('click',function(){
     btn.disabled=true; if(msg){msg.className='msg';msg.textContent='Starting…';}
-    fetch('/api/learning-path',{method:'POST'}).then(function(r){
+    fetch('__START__',{method:'POST'}).then(function(r){
       return r.json().then(function(d){return {ok:r.ok,d:d};});
     }).then(function(x){
       if(x.ok||x.d.path_id){poll(x.d.path_id);}
@@ -106,6 +106,12 @@ _JS = """
   }); }
 })();
 """
+
+
+def script(running_id, start_url: str, poll_url: str) -> str:
+    """The build button and the progress poll, pointed at one endpoint pair."""
+    return (_JS.replace("__RUNNING__", json.dumps(running_id))
+            .replace("__START__", start_url).replace("__POLL__", poll_url))
 
 
 def _e(value) -> str:
@@ -373,8 +379,29 @@ def _method_card(row: dict) -> str:
         '</div></div>')
 
 
+def _role_paths_card(role_paths: list[dict]) -> str:
+    """Paths built toward one job, newest first; and how to start one."""
+    how = ('<div class="note">To build one, open a role on the MAP or the '
+           'TRACKER and choose <b>LEARNING PATH FOR THIS JOB</b>.</div>')
+    if not role_paths:
+        return ('<div class="card"><div class="lab">PATHS FOR ONE JOB</div>'
+                f'{how}</div>')
+    rows = []
+    for item in role_paths:
+        gaps = item["gaps"]
+        state = ("nothing technical missing" if not gaps
+                 else f'{gaps} skill{"" if gaps == 1 else "s"} to close')
+        rows.append(
+            f'<div class="gline"><a href="/learn/role/{int(item["role_id"])}">'
+            f'{_e(item["title"])} · {_e(item["company"])}</a> '
+            f'<span class="note">{_e(state)}</span></div>')
+    return ('<div class="card"><div class="lab">PATHS FOR ONE JOB</div>'
+            f'{"".join(rows)}{how}</div>')
+
+
 def render(latest_ok: dict | None, latest_any: dict | None,
-           nav: dict | None = None, role: str = "all") -> str:
+           nav: dict | None = None, role: str = "all",
+           role_paths: list[dict] | None = None) -> str:
     nav = nav or {}
     running_id = (latest_any["id"] if latest_any
                   and latest_any["status"] == "RUNNING" else None)
@@ -400,11 +427,15 @@ def render(latest_ok: dict | None, latest_any: dict | None,
         if view["key"] == "all":
             body.append(_families_card(analysis))
         body.append(_trends_card(view))
+        body.append(_role_paths_card(role_paths or []))
         body.append(_method_card(latest_ok))
         sub = (f'A path for each kind of role you search, built from '
                f'{analysis["postings"]} postings and your resume.')
     else:
         body.append(_empty_card(running_id))
+        # A path toward one job needs no market analysis first.
+        if role_paths:
+            body.append(_role_paths_card(role_paths))
         sub = ('One path for the whole market you search, built from the '
                'postings your searches have stored and your resume.')
 
@@ -412,7 +443,7 @@ def render(latest_ok: dict | None, latest_any: dict | None,
                         counts={"/": nav.get("map_count"),
                                 "/activity": nav.get("tracker_count")},
                         user_label=nav.get("user_label") or "")
-    js = _JS.replace("__RUNNING__", json.dumps(running_id))
+    js = script(running_id, "/api/learning-path", "/api/learning-path/")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -464,6 +464,7 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 learning.latest(conn, user_id, status="OK"),
                 learning.latest(conn, user_id),
                 role=request.args.get("role", "all"),
+                role_paths=learning.role_paths(conn, user_id),
                 nav={"map_count": open_company_count(conn, user_id),
                      "tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
@@ -508,6 +509,77 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
         conn = _conn()
         try:
             row = learning.get(conn, path_id)
+            if row is None or row["user_id"] != _user(conn):
+                return jsonify({"error": "not found"}), 404
+            return jsonify({"status": row["status"], "stage": row["stage"],
+                            "progress": row["progress"],
+                            "error": row["error"]})
+        finally:
+            conn.close()
+
+    @app.get("/learn/role/<int:role_id>")
+    def role_learning_screen(role_id: int):
+        from .role_learning_page import render as render_role_learning
+        from .store import learning
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            role = learning.owned_role(conn, user_id, role_id)
+            if role is None:
+                return jsonify({"error": "not found"}), 404
+            return render_role_learning(
+                role,
+                learning.role_latest(conn, user_id, role_id, status="OK"),
+                learning.role_latest(conn, user_id, role_id),
+                nav={"map_count": open_company_count(conn, user_id),
+                     "tracker_count": live_tracker_count(conn, user_id),
+                     "user_label": user_name})
+        finally:
+            conn.close()
+
+    @app.post("/api/roles/<int:role_id>/learning-path")
+    def start_role_learning_path(role_id: int):
+        from .skills import role_path
+        from .store import learning
+        conn = _conn()
+        try:
+            user_id = _user(conn)
+            role = learning.owned_role(conn, user_id, role_id)
+            if role is None:
+                return jsonify({"error": "not found"}), 404
+            if not role["description_captured"]:
+                return jsonify({"error": "This posting was stored without "
+                                         "its description."}), 400
+            if not list_resumes(conn, user_id, active_only=True):
+                return jsonify({"error": "Upload a resume first — the path "
+                                         "is built from it."}), 400
+            if learning_model is None and not (
+                    os.environ.get("ANTHROPIC_API_KEY")
+                    or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+                return jsonify({"error": "ANTHROPIC_API_KEY is not set. Add "
+                                         "it to job_hunt/.env and restart "
+                                         "the app."}), 400
+            row_id = learning.role_start(conn, user_id, role_id)
+            if row_id is None:
+                live = learning.role_latest(conn, user_id, role_id)
+                return jsonify({"error": "A path for this job is already "
+                                         "being built.",
+                                "path_id": live["id"] if live else None}), 409
+        finally:
+            conn.close()
+        if run_in_thread:
+            role_path.run_in_background(db_path, user_id, row_id, role_id,
+                                        learning_model)
+        else:
+            role_path.work(db_path, user_id, row_id, role_id, learning_model)
+        return jsonify({"path_id": row_id}), 201
+
+    @app.get("/api/role-learning-path/<int:row_id>")
+    def poll_role_learning_path(row_id: int):
+        from .store import learning
+        conn = _conn()
+        try:
+            row = learning.role_get(conn, row_id)
             if row is None or row["user_id"] != _user(conn):
                 return jsonify({"error": "not found"}), 404
             return jsonify({"status": row["status"], "stage": row["stage"],

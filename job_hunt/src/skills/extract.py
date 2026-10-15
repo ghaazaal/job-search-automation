@@ -280,6 +280,35 @@ def extract_pending(conn: sqlite3.Connection, user_id: int, model,
     return totals
 
 
+def read_one(conn: sqlite3.Connection, role: dict, model,
+             reference: list[str]) -> tuple[int, int]:
+    """Read a single posting now, outside any batch: (kept, unverified).
+
+    For the one-job path, where the user is waiting on this posting alone.
+    Raises when the answer leaves the posting out, so it is never recorded
+    as asking for nothing.
+    """
+    answer = model(system=SYSTEM, prompt=_prompt([role], reference),
+                   schema=SCHEMA, effort="low")
+    for entry in (answer or {}).get("postings") or []:
+        if isinstance(entry, dict) and entry.get("id") == role["id"]:
+            return _store(conn, role, entry.get("skills") or [],
+                          getattr(model, "model", "unknown"))
+    raise RuntimeError("Claude's answer left this posting out; try again.")
+
+
+def role_skills(conn: sqlite3.Connection, role_id: int) -> list[dict]:
+    """The quoted skills stored for one posting."""
+    return [dict(row) for row in conn.execute(
+        "SELECT name, category, requirement, evidence FROM posting_skill"
+        " WHERE role_id = ? ORDER BY id", (role_id,))]
+
+
+def is_read(conn: sqlite3.Connection, role_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM skill_extraction WHERE role_id = ?",
+                        (role_id,)).fetchone() is not None
+
+
 def evidence_rows(conn: sqlite3.Connection, user_id: int,
                   since: str | None = None) -> list[dict]:
     """Every stored skill mention for the user's live postings."""

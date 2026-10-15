@@ -17,7 +17,7 @@ MAX_STAGES = 6
 
 SYSTEM = """You are a career coach for data professionals. You turn a ranked list of skill gaps into one learning path.
 
-You receive the candidate's current skills and a ranked list of skills to develop, each with the reasons it was ranked (counts from real job postings). Build a path of 3 to 6 stages:
+You receive the candidate's current skills and a ranked list of skills to develop, each with the reasons it was ranked (counts from real job postings). Build a path of up to 6 stages; with only a few skills, use only as many stages as they need:
 - Order stages so that each one builds on the previous ones and on skills the candidate already has. Foundations first.
 - Group skills that are naturally learned together; a stage holds 1 to 3 skills.
 - Use only skill names from the ranked list, written exactly as given. You may leave a ranked skill out if it does not fit; say why in left_out.
@@ -77,9 +77,11 @@ def _text(value, limit: int = 600) -> str:
 
 
 def prompt(gaps: list[dict], resume: dict, strengths: list[str],
-           focus: str | None = None) -> str:
+           focus: str | None = None, intro: str | None = None) -> str:
     lines = []
-    if focus:
+    if intro:
+        lines += [intro, ""]
+    elif focus:
         lines += [f"This path is for {focus} roles. The counts below come "
                   f"from {focus} postings only.", ""]
     lines.append("Candidate:")
@@ -144,10 +146,11 @@ def validate(answer: dict, gaps: list[dict]) -> dict:
 
 
 def build_path(model, gaps: list[dict], resume: dict,
-               strengths: list[str], focus: str | None = None) -> dict:
+               strengths: list[str], focus: str | None = None,
+               intro: str | None = None) -> dict:
     if not gaps:
         return {"summary": "", "stages": [], "left_out": []}
     answer = model(system=SYSTEM,
-                   prompt=prompt(gaps, resume, strengths, focus),
+                   prompt=prompt(gaps, resume, strengths, focus, intro),
                    schema=SCHEMA, effort="medium")
     return validate(answer, gaps)

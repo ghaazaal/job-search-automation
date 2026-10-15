@@ -159,6 +159,26 @@ CREATE TABLE IF NOT EXISTS event (
     at          TEXT NOT NULL
 );
 
+-- A learning path toward ONE posting the user picked (spec:
+-- 2026-10-14-market-learning-path-design.md, "One job"). Built from that
+-- posting's quoted skills; the latest row per role is the one shown.
+-- A new table, so CREATE TABLE IF NOT EXISTS reaches every store on its
+-- next init without a version bump or an ALTER.
+CREATE TABLE IF NOT EXISTS role_learning_path (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES user(id),
+    role_id     INTEGER NOT NULL REFERENCES role(id),
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL CHECK (status IN ('RUNNING','OK','FAILED')),
+    stage       TEXT,
+    progress    TEXT NOT NULL DEFAULT '{}',
+    error       TEXT,
+    model       TEXT,
+    analysis    TEXT,
+    path        TEXT
+);
+
 -- Learning path (spec: 2026-10-14-market-learning-path-design.md).
 -- One row per posting Claude has read for skills, even when it found
 -- none, so a posting is never re-read and never silently skipped.

@@ -73,12 +73,37 @@ verifies.
 - **Soft skills:** shown in the market list, not planned.
 - **Several resumes:** merged; one path per person.
 
+## One job (added 2026-10-15)
+
+The user asked for a path toward one specific posting, alongside the
+per-kind-of-role paths. `src/skills/role_path.py`:
+
+- Reads that posting now if the market analysis has not (one call, not a
+  batch), with the same quote check. A posting stored without its
+  description has nothing to read and says so.
+- Compares its quoted skills with the resume (same quote-backed compare).
+- Gaps are this posting's technical skills the resume lacks, ordered:
+  requirements before nice-to-haves, then by how many recent postings
+  also ask for the skill (it pays off beyond this one application), then
+  "builds on" before "missing". Reasons quote the posting.
+- No technical gap: no planner call; the page says to tailor the resume.
+- Claude plans as few stages as the gaps need; same validation.
+- Stored in `role_learning_path` (new table, no version bump), one row per
+  build, newest shown. Soft skills are listed, not planned.
+
+Entry point (default picked): **LEARNING PATH FOR THIS JOB** in the shared
+role drawer, so it appears on both the MAP and the TRACKER, for any role
+with a captured description. Page `/learn/role/<id>`; the LEARN page lists
+every job with a path under PATHS FOR ONE JOB.
+
 ## Surfaces
 
 - `GET /learn` — the path, the market table with quotes, role families,
   trends, and a "how this was built" note with dropped/unread counts.
 - `POST /api/learning-path` (background thread), `GET /api/learning-path/<id>`
   (poll). Boot recovery fails a RUNNING analysis; read postings are kept.
+- `GET /learn/role/<id>`, `POST /api/roles/<id>/learning-path`,
+  `GET /api/role-learning-path/<id>` — the one-job path.
 - `python main.py --learning-path [--limit N]`.
 - Schema v11: `skill_extraction`, `posting_skill`, `learning_path` (new
   tables only, no ALTERs).
