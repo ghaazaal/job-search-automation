@@ -505,3 +505,74 @@ location_scope:
     br: -3
     mx: -6
     za: 2
+
+# Learning path (spec: 2026-10-14-market-learning-path-design.md).
+#
+# How the market writes common skill names. Handed to Claude as the
+# spelling to use when one fits, so "Airflow", "apache airflow" and
+# "Apache-Airflow" arrive as one skill instead of three. Spelling only:
+# Claude still decides from the posting whether the skill is asked for.
+skill_names:
+  - SQL
+  - Python
+  - R
+  - Scala
+  - Java
+  - dbt
+  - Apache Airflow
+  - Apache Spark
+  - PySpark
+  - Apache Kafka
+  - Dagster
+  - Prefect
+  - Fivetran
+  - Airbyte
+  - Snowflake
+  - Databricks
+  - BigQuery
+  - Amazon Redshift
+  - PostgreSQL
+  - AWS
+  - Google Cloud
+  - Azure
+  - Microsoft Fabric
+  - Terraform
+  - Docker
+  - Kubernetes
+  - Git
+  - CI/CD
+  - Power BI
+  - Tableau
+  - Looker
+  - Excel
+  - Data modeling
+  - Data warehousing
+  - ETL
+  - Statistics
+  - A/B testing
+  - Machine learning
+  - Data quality
+  - Data governance
+  - Stakeholder communication
+
+# Role families for the market view's "what each kind of role asks for".
+# First match wins, so the more specific phrase goes first: "analytics
+# engineer" before anything that would also catch "engineer". Matched
+# word-bounded against the title only. A title matching none lands in
+# "Other data roles", counted, never dropped.
+role_families:
+  - name: Analytics Engineer
+    phrases: ["analytics engineer", "analytics engineering"]
+  - name: Data Engineer
+    phrases: ["data engineer", "data engineering", "etl developer",
+              "data platform", "platform engineer", "data warehouse"]
+  - name: BI Developer
+    phrases: ["business intelligence", "bi developer", "bi engineer",
+              "power bi", "bi analyst", "reporting analyst"]
+  - name: Product Analyst
+    phrases: ["product analyst", "product analytics"]
+  - name: Data Scientist
+    phrases: ["data scientist", "data science", "machine learning"]
+  - name: Data Analyst
+    phrases: ["data analyst", "data analytics", "insights analyst",
+              "analytics manager", "analyst"]

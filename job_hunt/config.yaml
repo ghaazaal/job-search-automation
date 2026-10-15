@@ -59,3 +59,27 @@ llm:
   model: "llama-3.3-70b-versatile"
   # provider: "anthropic"          # anthropic | groq | gemini
   # model:    "claude-sonnet-4-6"  # leave blank to use the provider's default
+
+# Learning path (LEARN tab, or `python main.py --learning-path`).
+# Always Claude, whatever llm.provider says: it reads every stored posting
+# for the skills it asks for, compares them with your resume, and writes
+# one path. Needs ANTHROPIC_API_KEY in job_hunt/.env or your shell.
+# Each posting is read once and remembered, so only the first analysis
+# reads the whole store; later ones read just the new postings.
+learning_path:
+  days: 30            # only postings from the past N days; 0 = all stored
+  model: "claude-opus-5-5"        # compares with your resume, writes the path
+  # Reads every posting for skills: ~95% of the cost. Each skill it names
+  # must quote the posting, so a cheaper reader mostly risks MISSING a
+  # skill, not inventing one.
+  read_model: "claude-sonnet-5-5"
+  # Send the reading through Claude's Batch API: half price, but answered
+  # in minutes to an hour instead of right away. Only used when at least
+  # batch_min_postings are unread (the first run, or after a big scrape).
+  batch: true
+  batch_min_postings: 50
+  # First full read of ~1,100 postings, estimated:
+  #   sonnet + batch ~$4-5 · opus + batch ~$9-10 · haiku ~$0.50
+  #   sonnet, no batch ~$9-11 · opus, no batch ~$18-21
+  workers: 4          # parallel requests when not batching
+  top_gaps: 12        # how many ranked gaps the path is built from

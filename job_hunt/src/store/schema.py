@@ -11,7 +11,7 @@ import sqlite3
 
 from .db import transaction
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS user (
@@ -159,10 +159,73 @@ CREATE TABLE IF NOT EXISTS event (
     at          TEXT NOT NULL
 );
 
+-- A learning path toward ONE posting the user picked (spec:
+-- 2026-10-14-market-learning-path-design.md, "One job"). Built from that
+-- posting's quoted skills; the latest row per role is the one shown.
+-- A new table, so CREATE TABLE IF NOT EXISTS reaches every store on its
+-- next init without a version bump or an ALTER.
+CREATE TABLE IF NOT EXISTS role_learning_path (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES user(id),
+    role_id     INTEGER NOT NULL REFERENCES role(id),
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL CHECK (status IN ('RUNNING','OK','FAILED')),
+    stage       TEXT,
+    progress    TEXT NOT NULL DEFAULT '{}',
+    error       TEXT,
+    model       TEXT,
+    analysis    TEXT,
+    path        TEXT
+);
+
+-- Learning path (spec: 2026-10-14-market-learning-path-design.md).
+-- One row per posting Claude has read for skills, even when it found
+-- none, so a posting is never re-read and never silently skipped.
+CREATE TABLE IF NOT EXISTS skill_extraction (
+    role_id      INTEGER PRIMARY KEY REFERENCES role(id),
+    extracted_at TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    kept         INTEGER NOT NULL DEFAULT 0,
+    -- Skills Claude named whose quote is not in the posting. Dropped,
+    -- never stored: a skill the posting does not say is not evidence.
+    unverified   INTEGER NOT NULL DEFAULT 0
+);
+
+-- A skill a posting names, with the posting's own words as evidence.
+CREATE TABLE IF NOT EXISTS posting_skill (
+    id          INTEGER PRIMARY KEY,
+    role_id     INTEGER NOT NULL REFERENCES role(id),
+    name        TEXT NOT NULL,
+    category    TEXT NOT NULL CHECK (category IN
+                  ('language','tool','platform','concept','practice','soft')),
+    requirement TEXT NOT NULL CHECK (requirement IN ('required','preferred')),
+    evidence    TEXT NOT NULL
+);
+
+-- One market analysis + learning path. The analysis is a snapshot: it
+-- states what the store held when it ran, so an old path keeps its facts.
+CREATE TABLE IF NOT EXISTS learning_path (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES user(id),
+    resume_id   INTEGER REFERENCES resume(id),
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL CHECK (status IN ('RUNNING','OK','FAILED')),
+    stage       TEXT,
+    progress    TEXT NOT NULL DEFAULT '{}',
+    error       TEXT,
+    model       TEXT,
+    analysis    TEXT,
+    path        TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_role_company ON role(company_id);
 CREATE INDEX IF NOT EXISTS idx_role_last_run ON role(user_id, last_seen_run_id);
 CREATE INDEX IF NOT EXISTS idx_event_role ON event(role_id, at);
 CREATE INDEX IF NOT EXISTS idx_resume_user ON resume(user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_posting_skill_role ON posting_skill(role_id);
+CREATE INDEX IF NOT EXISTS idx_learning_path_user ON learning_path(user_id, id);
 """
 
 # SQLite allows ADD COLUMN with a REFERENCES clause only when the new column
@@ -233,7 +296,8 @@ _MIGRATIONS: dict[int, tuple[tuple[str | None, str | None, str], ...]] = {
         ("run", "boards",
          "ALTER TABLE run ADD COLUMN boards TEXT NOT NULL DEFAULT '[]'"),
     ),
-    # 10 has no entries: watched_company is a NEW table, and _DDL runs on
+    # 10 and 11 have no entries: watched_company (10) and the learning
+    # path tables (11) are NEW tables, and _DDL runs on
     # every init, so CREATE TABLE IF NOT EXISTS reaches old databases
     # without an ALTER. The version still bumps so a newer store is never
     # mistaken for an older one.

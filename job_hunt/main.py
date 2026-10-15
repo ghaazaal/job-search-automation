@@ -429,6 +429,7 @@ def _serve(config: dict, port: int) -> None:
     url = f"http://127.0.0.1:{port}/"
     print(f"\n  Opportunity map: {url}")
     print(f"  Your resumes:    http://127.0.0.1:{port}/profile")
+    print(f"  Learning path:   http://127.0.0.1:{port}/learn")
     print("  Ctrl-C to stop.")
     webbrowser.open(url)
     app.run(host="127.0.0.1", port=port, debug=False)
@@ -536,6 +537,45 @@ def run_tailor(config: dict, jd_file: str) -> None:
             print(f"  Warning: Close {tracker_path.name} to update status.")
 
 
+# ── Learning path ──────────────────────────────────────────────────────────────
+def run_learning_path(limit: int | None) -> None:
+    """Analyse the stored postings and write one learning path."""
+    from src.skills.pipeline import work
+    from src.store import learning
+
+    conn, user_id = _open_store()
+    try:
+        path_id = learning.start(conn, user_id)
+        if path_id is None:
+            print("ERROR: An analysis is already running.")
+            sys.exit(1)
+    finally:
+        conn.close()
+
+    print("Reading postings and building your learning path"
+          + (f" (at most {limit} new postings)" if limit else "") + "...")
+    from src.store.db import DEFAULT_PATH
+    work(DEFAULT_PATH, user_id, path_id, limit=limit)
+
+    conn, _ = _open_store()
+    try:
+        row = learning.get(conn, path_id)
+    finally:
+        conn.close()
+    if row["status"] != "OK":
+        print(f"ERROR: {row['error']}")
+        sys.exit(1)
+    analysis, plans = row["analysis"], row["path"]
+    print()
+    print(f"  {analysis['postings']} postings analysed.")
+    for view in analysis["views"]:
+        print(f"\n  {view['name']} ({view['postings']} postings)")
+        for i, stage in enumerate(plans[view["key"]]["stages"], 1):
+            print(f"    {i}. {stage['title']}: {', '.join(stage['skills'])}")
+    print()
+    print("  Open the LEARN tab (python main.py --serve) for the full path.")
+
+
 # ── Entry ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     config = _load_config()
@@ -549,9 +589,17 @@ def main() -> None:
                         help="Serve the app without scraping")
     parser.add_argument("--port", type=int, default=5000,
                         help="Port for the local app (default 5000)")
+    parser.add_argument("--learning-path", action="store_true",
+                        help="Analyse stored postings against your resume "
+                             "and write a learning path (uses Claude)")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="With --learning-path: read at most this many "
+                             "new postings this time")
     args = parser.parse_args()
 
-    if args.tailor:
+    if args.learning_path:
+        run_learning_path(args.limit)
+    elif args.tailor:
         if not args.jd:
             print("ERROR: --jd <file.txt> is required with --tailor")
             sys.exit(1)
