@@ -32,7 +32,7 @@ a:hover{color:#A83519}
 .head-in{flex:1;max-width:820px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px}
 .title{font:600 42px/1 Caveat,cursive;color:#D6482B;letter-spacing:.01em}
 .sub{font:400 15px/1.6 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:46ch;text-wrap:pretty}
-.meta-r{flex:none;max-width:340px;text-align:right;padding-bottom:4px}
+.meta-r{flex:none;max-width:380px;text-align:right;padding-bottom:4px}
 .meta-1{font:500 11px/1.7 'JetBrains Mono',monospace;color:#4C5768;letter-spacing:.1em}
 .meta-2{font:400 11px/1.7 'JetBrains Mono',monospace;color:#8A93A1;letter-spacing:.1em;margin-top:7px}
 .wrap{display:flex;justify-content:center;padding:0 40px}
@@ -102,6 +102,15 @@ font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.06em}
 .go:hover{background:#A83519;border-color:#A83519}
 .go.alt{background:transparent;color:#D6482B}
 .go.alt:hover{background:transparent;color:#A83519}
+.mline{margin-top:3px}
+.mline b{font-weight:500;color:#4C5768}
+.mc{white-space:nowrap;cursor:help;border-bottom:1px dotted #C9BFA8}
+.btn-on{color:#2A5F86}
+.btn-on:hover{color:#1F4A69}
+.gone-card{display:none}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:16px;padding:11px 14px 11px 18px;background:#2A3342;color:#FFFDF8;border-radius:4px;box-shadow:0 8px 24px -12px rgba(42,51,66,.6);font:400 13.5px/1.4 Inter,sans-serif;max-width:min(560px,92vw)}
+.toast button{flex:none;border:1px solid rgba(255,253,248,.4);background:transparent;color:#FFFDF8;border-radius:3px;padding:6px 11px;font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.07em;cursor:pointer}
+.toast button:hover{border-color:#FFFDF8}
 """
 
 _PILL_CLASS = {"STRONG FIT": "pill-strong",
@@ -136,6 +145,29 @@ def _role_meta(role: dict) -> str:
     return " · ".join(b for b in bits if b).upper()
 
 
+def _last_search(finished) -> str:
+    """'TODAY 14:54', 'YESTERDAY 14:54' or 'OCT 14, 14:54', in local
+    time. `finished` is the run's stored UTC ISO stamp; anything
+    unreadable renders nothing rather than a guess."""
+    if not finished:
+        return ""
+    try:
+        when = datetime.fromisoformat(str(finished).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if when.tzinfo is not None:
+        when = when.astimezone()
+    days = (date.today() - when.date()).days
+    day = ("TODAY" if days == 0 else "YESTERDAY" if days == 1
+           else when.strftime("%b %d,").upper().replace(" 0", " "))
+    return f"{day} {when.strftime('%H:%M')}"
+
+
+def _clause(n: int, label: str, tip: str) -> str:
+    """One header count, kept on one line, explained on hover."""
+    return f'<span class="mc" title="{_e(tip)}">{int(n)} {_e(label)}</span>'
+
+
 def _section_heading(label: str) -> str:
     return (f'<div class="fold"><i></i><span>{_e(label)}</span>'
             f'<i></i></div>')
@@ -157,11 +189,15 @@ def _sentence(text: str) -> str:
 
 
 def _unchecked_block(role: dict) -> str:
-    """Rule 3 — its own state, never a weak band."""
+    """Rule 3 — its own state, never a weak band. The way out is the
+    posting itself: nothing here can fetch a description after the run,
+    so the button opens the original rather than promising a fetch."""
+    url = role.get("url") or ""
+    posting = (f'<a class="btn btn-fetch" href="{_e(url)}" target="_blank" '
+               f'rel="noopener">OPEN POSTING &#8599;</a>' if url else "")
     return (
         '<div class="unchecked"><span><b>Not checked yet.</b> '
-        f'{_e(_sentence(role.get("reason")))}</span>'
-        '<button type="button" class="btn btn-fetch">FETCH POSTING</button></div>'
+        f'{_e(_sentence(role.get("reason")))}</span>{posting}</div>'
     )
 
 
@@ -192,6 +228,28 @@ def _ids(company_id, role_id) -> str:
     return ids
 
 
+def _watch_button(m: dict, ids: str) -> str:
+    """WATCH keeps a company on the "keeping an eye on" shelf once its
+    roles close. It changes nothing on the card itself, so the button
+    has to show its own state or a click looks like it did nothing."""
+    if m.get("user_state") == "WATCH":
+        return (f'<button type="button" class="btn-q btn-on" data-state="NONE"'
+                f' title="Click to stop watching"{ids}>WATCHING &#10003;'
+                f'</button>')
+    return (f'<button type="button" class="btn-q" data-state="WATCH" '
+            f'title="Keep this company in view even when nothing is open"'
+            f'{ids}>WATCH</button>')
+
+
+def _hide_button(m: dict, ids: str) -> str:
+    """HIDE removes the role shown on the card, not the whole company.
+    The page waits a few seconds before saving it so a stray click can
+    be undone (see _JS)."""
+    more = ' data-more="1"' if len(m.get("roles") or []) > 1 else ""
+    return (f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"'
+            f' title="Hide this role from the map"{more}{ids}>HIDE</button>')
+
+
 def _watch_chip(m: dict) -> str:
     """Marker only — watching changed what was fetched, never a rank."""
     if not m.get("watched"):
@@ -210,8 +268,6 @@ def _lead_card(m: dict, key: str) -> str:
            if _checked(role) else
            _unchecked_block(role) if not role.get("description_captured")
            else "")
-    watchable = (f'<button type="button" class="btn-q" data-state="WATCH"'
-                 f'{ids}>WATCH</button>')
     return (
         f'<div class="lead"><div class="crow">'
         f'<div class="cname">{_e(m["name"])}{_watch_chip(m)}</div>'
@@ -225,9 +281,8 @@ def _lead_card(m: dict, key: str) -> str:
         f'<button type="button" class="btn-lead" data-open="{_e(key)}">'
         f'REVIEW ROLE</button>'
         f'{_track_action(role.get("id"), role.get("app_status"), ids)}'
-        f'{watchable}'
-        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"'
-        f'{ids}>HIDE</button>'
+        f'{_watch_button(m, ids)}'
+        f'{_hide_button(m, ids)}'
         f'</div></div>'
     )
 
@@ -244,9 +299,15 @@ def _compact_card(m: dict, key: str) -> str:
     meta = f'{tag}{n} {noun}' + (f' · {age}' if age else "")
 
     checked = _checked(role)
-    reason = (f' <span class="creason">{_e(role.get("reason"))}</span>'
-              if checked else "")
-    why = f'<div class="cwhy">{_e(m["why"])}{reason}</div>'
+    # Two sentences about two different things: the company line counts
+    # every matching role, the reason is about the one role on the card.
+    # Run together they read as one contradictory sentence ("naming
+    # Tableau ... nothing on your resume was named"), so the reason is
+    # set apart and says which role it means.
+    reason = (f'<span class="creason">Top role: {_e(role.get("reason"))}'
+              f'</span>' if checked else "")
+    company = _e(m["why"]) + ("." if m.get("why") and reason else "")
+    why = f'<div class="cwhy">{company} {reason}</div>'
     unchecked = ("" if role.get("description_captured")
                  else _unchecked_block(role))
     # Rule 2 — the pill renders in the action row only because the reason
@@ -262,9 +323,8 @@ def _compact_card(m: dict, key: str) -> str:
         f'<div class="acts">{pill}'
         f'<button type="button" class="btn" data-open="{_e(key)}">REVIEW ROLE</button>'
         f'{_track_action(role.get("id"), role.get("app_status"), ids)}'
-        f'<button type="button" class="btn-q" data-state="WATCH"{ids}>WATCH</button>'
-        f'<button type="button" class="btn-q btn-hide" data-status="HIDDEN"'
-        f'{ids}>HIDE</button>'
+        f'{_watch_button(m, ids)}'
+        f'{_hide_button(m, ids)}'
         f'</div></div>'
     )
 
@@ -286,15 +346,19 @@ def _watch_shelf(watch_maps: list[dict]) -> str:
 
 
 def _quiet_header(open_count: int, unchecked: int) -> str:
-    fetch = (f'<button type="button" class="btn">FETCH {unchecked} MISSING '
-             f'DESCRIPTIONS</button>' if unchecked else "")
+    # Both actions used to be buttons with nothing behind them (FETCH N
+    # MISSING DESCRIPTIONS, WIDEN SOURCES). The real ways to widen the
+    # search are the watchlist and the resumes, both on the profile.
+    missing = (f' {unchecked} of them arrived without a description, so '
+               'their skills could not be compared.' if unchecked else "")
     return (
         '<div class="quiet"><div class="quiet-t">nothing to apply to today</div>'
         f'<div class="quiet-b">{open_count} postings came in; none named enough '
         'of your stack to earn the top of the list. That is the check working, '
-        'not a dry spell.</div>'
-        f'<div class="acts">{fetch}'
-        '<button type="button" class="btn-q">WIDEN SOURCES</button></div></div>'
+        f'not a dry spell.{missing}</div>'
+        '<div class="acts">'
+        '<a class="btn" href="/profile#watchlist">WATCH MORE COMPANIES</a>'
+        '</div></div>'
     )
 
 
@@ -337,8 +401,36 @@ async function post(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r.ok){location.reload();}else{alert('That did not save. Try again.');}
 }
+// HIDE waits before saving, with an UNDO, because nothing on any page
+// can bring a hidden role back. Leaving the page saves it at once.
+let pendingHide=null;
+function flushHide(reload){
+  const p=pendingHide; if(!p){return;}
+  pendingHide=null; clearTimeout(p.timer); p.toast.remove();
+  fetch('/api/roles/'+p.role+'/status',{method:'POST',keepalive:true,
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({status:p.status})})
+    .then(function(r){if(!r.ok){throw new Error();} if(reload&&p.more){location.reload();}})
+    .catch(function(){p.card.classList.remove('gone-card');alert('That did not save. Try again.');});
+}
+function hideWithUndo(btn){
+  flushHide(false);
+  const card=btn.closest('.card,.lead');
+  const toast=document.createElement('div');
+  toast.className='toast'; toast.setAttribute('role','status');
+  toast.innerHTML='<span>Role hidden from the map.</span><button type="button" data-undo="1">UNDO</button>';
+  document.body.appendChild(toast);
+  if(card){card.classList.add('gone-card');}
+  pendingHide={role:btn.dataset.role,status:btn.dataset.status,more:btn.dataset.more==='1',
+    card:card||document.createElement('div'),toast:toast,timer:setTimeout(function(){flushHide(true);},6000)};
+}
+window.addEventListener('pagehide',function(){flushHide(false);});
 document.addEventListener('click',function(e){
+  if(e.target.closest('[data-undo]')&&pendingHide){
+    const p=pendingHide; pendingHide=null; clearTimeout(p.timer);
+    p.toast.remove(); p.card.classList.remove('gone-card'); return;
+  }
   const s=e.target.closest('[data-status]');
+  if(s&&s.dataset.role&&s.classList.contains('btn-hide')){hideWithUndo(s);return;}
   if(s&&s.dataset.role){post('/api/roles/'+s.dataset.role+'/status',{status:s.dataset.status});return;}
   const w=e.target.closest('[data-state]');
   if(w&&w.dataset.company){post('/api/companies/'+w.dataset.company+'/state',{state:w.dataset.state});}
@@ -396,7 +488,10 @@ def render(maps: list[dict], meta: dict | None = None,
 
     n_co = meta.get("companies", len(maps))
     n_ro = meta.get("roles", sum(len(m.get("roles") or []) for m in maps))
-    scraped = meta.get("scraped") or datetime.now().strftime("%H:%M")
+    # The finish time of the last successful search. This used to fall
+    # back to the clock at render time, so the header always claimed the
+    # data was scraped a moment ago. No run, no claim.
+    scraped = _last_search(meta.get("scraped"))
 
     # Hiding is never silent. The map lists roles proven open to this user
     # AND roles whose reach we simply could not judge; it hides only the
@@ -413,23 +508,43 @@ def render(maps: list[dict], meta: dict | None = None,
     # Unconditional, unlike the clauses below: "0 OPEN" is the answer when
     # it is the answer, and suppressing it would make an empty map read as
     # broken rather than as checked.
-    meta_2 = f"SCRAPED {_e(scraped)}"
-    meta_2 = f"{meta_2} &middot; {meta.get('open') or 0} OPEN"
-    meta_2 = f"{meta_2} &middot; {meta.get('closed') or 0} NOT OPEN"
-    meta_2 = f"{meta_2} &middot; {meta.get('unverified') or 0} UNVERIFIED"
+    #
+    # Laid out as two groups — what is ON the map, what was SET ASIDE —
+    # each clause unbroken and carrying a plain-words tooltip. As one
+    # run-on line the counts wrapped mid-clause ("HIDDEN (POSTING /
+    # CLOSED)") and read as a wall of codes.
+    on_map = [_clause(meta.get("open") or 0, "OPEN",
+                      "Roles whose posting says it can hire where you are"),
+              _clause(meta.get("unverified") or 0, "UNVERIFIED",
+                      "Roles that do not say where they can hire from. "
+                      "They are listed, below the proven-open ones")]
+    aside = [_clause(meta.get("closed") or 0, "NOT OPEN",
+                     "Postings whose own words rule out hiring where "
+                     "you are")]
 
     # The other policy exception that removes postings still has to say so
     # somewhere the reader will see it — not just the run row.
     hidden = meta.get("hidden") or 0
     if hidden:
-        meta_2 = f"{meta_2} &middot; {hidden} HIDDEN (ON-SITE ELSEWHERE)"
+        aside.append(_clause(hidden, "HIDDEN (ON-SITE ELSEWHERE)",
+                             "Hybrid or on-site roles in another country"))
 
     # A relevance-gate rejection is a different fact from a hidden-elsewhere
     # posting — wrong place vs. not this job at all — so it earns its own
     # clause rather than folding into the count above.
     offtopic = meta.get("offtopic") or 0
     if offtopic:
-        meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A TARGET ROLE)"
+        aside.append(_clause(offtopic, "OFF-TOPIC (NOT A TARGET ROLE)",
+                             "Job titles that are not one of your target "
+                             "roles"))
+
+    sep = " &middot; "
+    meta_2 = (
+        (f'<div class="mline">LAST SEARCH {_e(scraped)}</div>'
+         if scraped else "")
+        + f'<div class="mline"><b>ON THE MAP</b>{sep}{sep.join(on_map)}</div>'
+        + f'<div class="mline"><b>SET ASIDE</b>{sep}{sep.join(aside)}'
+          f'{sep}<a href="/profile#filtered">WHY?</a></div>')
 
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")

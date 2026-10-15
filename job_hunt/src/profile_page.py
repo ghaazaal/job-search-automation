@@ -73,6 +73,8 @@ a:hover{color:#A83519}
 .wform input:focus{outline:0;border-color:#2E7D5B}
 .sunk-t{font:600 24px/1 Caveat,cursive;color:#2E7D5B}
 .sunk-b{font:400 14px/1.7 Inter,sans-serif;color:#4C5768;margin-top:9px;max-width:64ch;text-wrap:pretty}
+.sunk-l{margin:11px 0 2px;padding:0 0 0 18px;font:400 14px/1.7 Inter,sans-serif;color:#4C5768;max-width:64ch}
+.sunk-l b{font:500 13px/1 'JetBrains Mono',monospace;color:#3A4557}
 .msg{font:400 13px/1.6 Inter,sans-serif;color:#8A93A1}
 .msg.err{color:#A83519}
 """
@@ -153,6 +155,18 @@ def _payload(value) -> str:
     return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
 
+def _country_name(code: str) -> str:
+    """'AM' -> 'Armenia', from the same offline dataset geo.py uses.
+    An unknown code renders as itself rather than as a guess."""
+    try:
+        import pycountry
+        hit = pycountry.countries.get(alpha_2=code.upper())
+    except (ImportError, LookupError, KeyError):
+        hit = None
+    return (getattr(hit, "common_name", None) or getattr(hit, "name", None)
+            or code.upper())
+
+
 def _added(created_at) -> str:
     try:
         d = datetime.fromisoformat(str(created_at).replace("Z", ""))
@@ -222,7 +236,10 @@ def _where_card(profile: dict, resumes: list[dict]) -> str:
                         for m in modes)
         country = (profile.get("country") or "").upper()
         if country:
-            chips += f'<span class="chip chip-d">country: {_e(country)}</span>'
+            # Eligibility is judged against this country, so name it in
+            # words: "country: AM" read as a code to decode.
+            chips += (f'<span class="chip chip-d">hiring from '
+                      f'{_e(_country_name(country))}</span>')
         body = (f'<div class="gline">{line}</div>'
                 f'<div class="chips">{chips}</div>')
     else:
@@ -287,7 +304,8 @@ def _watch_row(row: dict) -> str:
     meta = state
     yield_n = row.get("last_yield_count")
     if yield_n is not None:
-        meta += f" &middot; {int(yield_n)} LAST FETCH"
+        noun = "ROLE" if int(yield_n) == 1 else "ROLES"
+        meta += f" &middot; {int(yield_n)} {noun} FOUND LAST SEARCH"
     note = row.get("resolution_note")
     if state == "UNRESOLVED" and note:
         meta += f" &middot; {_e(note)}"
@@ -325,7 +343,8 @@ def _watchlist_card(watched: list[dict]) -> str:
     suggest = (f'<div class="note">Suggestions:</div>'
                f'<div class="chips">{chips}</div>' if chips else "")
     return (
-        f'<div class="card"><div class="lab-row" style="padding-bottom:11px;'
+        f'<div class="card" id="watchlist"><div class="lab-row" '
+        f'style="padding-bottom:11px;'
         f'border-bottom:1px solid #EBE3D2">'
         f'<span class="lab">YOUR WATCHLIST</span>'
         f'<span class="lab-m">{n} {noun}</span></div>'
@@ -336,27 +355,51 @@ def _watchlist_card(watched: list[dict]) -> str:
 
 
 def _filtered_card(filtered: dict) -> str:
-    """The visible half of "nothing is filtered silently"."""
+    """The visible half of "nothing is filtered silently" — and the page
+    the map header's WHY? link lands on, so it covers every count the
+    header sets aside, one plain sentence each.
+
+    Unverified roles are not filtered out: they are listed on the map,
+    ranked below the proven-open ones (CLAUDE.md, exception 2). This card
+    used to count them as filtered, which said the opposite."""
     closed = filtered.get("closed") or 0
     unverified = filtered.get("unverified") or 0
     offtopic = filtered.get("offtopic") or 0
-    if not (closed or unverified or offtopic):
-        body = ("Nothing has been filtered out yet — after a search, the "
-                "count of postings set aside (and why) appears here and in "
-                "the map header.")
+    platforms = filtered.get("platforms") or 0
+    hidden = filtered.get("hidden") or 0
+    gone = filtered.get("gone") or 0
+    lines = [
+        (closed, "not open to you: the posting's own words rule out "
+                 "hiring from where you are"),
+        (hidden, "on-site elsewhere: hybrid or on-site roles in another "
+                 "country, which you could not attend"),
+        (gone, "posting closed: the job board itself says the posting has "
+               "closed"),
+        (offtopic, "off-topic: the job title is not one of your target "
+                   "roles"),
+        (platforms, "talent platform: sites like Proxify or Toptal that "
+                    "recruit into a freelance pool, not an employer's "
+                    "own opening"),
+    ]
+    lines = [(n, text) for n, text in lines if n]
+    if not lines and not unverified:
+        body = ('<div class="sunk-b">Nothing has been filtered out yet — '
+                'after a search, the count of postings set aside (and why) '
+                'appears here and in the map header.</div>')
     else:
-        clauses = [f"{closed} postings are not open to someone hiring from "
-                   f"where you are" if closed else "",
-                   f"{unverified} could not be verified either way"
-                   if unverified else "",
-                   f"{offtopic} were not one of your target roles"
-                   if offtopic else ""]
-        joined = ", ".join(c for c in clauses if c)
-        body = (f"Right now: {joined}. The map header carries the same "
-                "counts — nothing is dropped silently.")
+        items = "".join(f'<li><b>{int(n)}</b> {_e(text)}</li>'
+                        for n, text in lines)
+        listed = (f'<div class="sunk-b">{int(unverified)} roles do not '
+                  'say where they can hire from. They are not filtered '
+                  'out: they are on the map, below the proven-open ones, '
+                  'marked "location eligibility not verified".</div>'
+                  if unverified else "")
+        body = (f'<ul class="sunk-l">{items}</ul>{listed}'
+                '<div class="sunk-b">The map header carries the same '
+                'counts — nothing is dropped silently.</div>')
     return (
-        f'<div class="card sunk"><div class="sunk-t">what got filtered out'
-        f'</div><div class="sunk-b">{body}</div></div>'
+        f'<div class="card sunk" id="filtered"><div class="sunk-t">what got '
+        f'filtered out</div>{body}</div>'
     )
 
 

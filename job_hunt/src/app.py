@@ -119,11 +119,17 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             latest = latest_ok_run(conn, user_id)
             hidden = 0
             offtopic = 0
+            scraped = None
             if latest:
                 latest_run = get_run(conn, latest)
                 if latest_run:
                     hidden = latest_run.get("dropped") or 0
                     offtopic = latest_run.get("offtopic") or 0
+                # When the data on screen was actually fetched — the header
+                # used to show the clock at render time instead.
+                scraped = conn.execute(
+                    "SELECT finished_at FROM run WHERE id = ?",
+                    (latest,)).fetchone()["finished_at"]
 
             counts = eligibility_counts(conn, user_id)
 
@@ -132,7 +138,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden, "offtopic": offtopic, **counts},
+                      "hidden": hidden, "offtopic": offtopic,
+                      "scraped": scraped, **counts},
                 running_run_id=in_flight["id"] if in_flight else None,
                 nav={"tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
@@ -435,11 +442,13 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             # off-topic count. Real numbers or nothing.
             counts = eligibility_counts(conn, user_id)
             offtopic = 0
+            hidden = 0
             latest = latest_ok_run(conn, user_id)
             if latest:
                 latest_run = get_run(conn, latest)
                 if latest_run:
                     offtopic = latest_run.get("offtopic") or 0
+                    hidden = latest_run.get("dropped") or 0
 
             return render_profile(
                 list_resumes(conn, user_id),
@@ -447,7 +456,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 watched=list_watched(conn, user_id),
                 filtered={"closed": counts["closed"],
                           "unverified": counts["unverified"],
-                          "offtopic": offtopic},
+                          "offtopic": offtopic,
+                          "hidden": hidden},
                 nav={"map_count": open_company_count(conn, user_id),
                      "tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})

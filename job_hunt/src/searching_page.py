@@ -50,6 +50,8 @@ a:hover{color:#A83519}
 .step[data-state=failed] .found{color:#A83519}
 .note{margin-top:20px;font:400 13.5px/1.6 Inter,sans-serif;color:#8A93A1;min-height:20px;text-wrap:pretty}
 .note.bad{color:#A83519}
+.leave{font:400 13.5px/1.6 Inter,sans-serif;color:#8A93A1;margin-top:8px}
+.leave a{border-bottom:1px solid #D6482B}
 a.retry{color:#D6482B;border-bottom:1px solid #D6482B}
 a.retry:hover{color:#A83519;border-bottom-color:#A83519}
 """
@@ -71,6 +73,7 @@ _HTML = """<!doctype html>
 <div class="head"><div class="head-in">
 <div class="title">searching</div>
 <div class="sub">Reading LinkedIn and Remote boards for the roles on your resumes.</div>
+<div class="leave">A search takes a while. <a href="/">Back to the map</a> &mdash; it keeps running, and the map links back here until it is done.</div>
 </div></div>
 <div class="wrap"><div class="col">
 <div class="steps" id="steps"></div>
@@ -131,9 +134,13 @@ async function tick() {{
   }} else {{
     const n = (body.progress && body.progress.scraped) || 0;
     const dropped = (body.progress && body.progress.dropped) || 0;
-    note.textContent = !n ? 'starting'
-      : dropped > 0 ? n + ' found so far · ' + dropped + ' hidden (on-site elsewhere)'
-      : n + ' found so far';
+    // Steps are all planned up front, so "x of y" is a real count.
+    const all = (body.progress && body.progress.steps) || [];
+    const done = all.filter(s => s.state === 'done' || s.state === 'failed').length;
+    const stepsLine = all.length ? done + ' of ' + all.length + ' steps done · ' : '';
+    note.textContent = !n ? stepsLine + 'starting'
+      : dropped > 0 ? stepsLine + n + ' found so far · ' + dropped + ' hidden (on-site elsewhere)'
+      : stepsLine + n + ' found so far';
     note.className = 'note';
   }}
   setTimeout(tick, POLL);

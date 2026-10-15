@@ -83,6 +83,7 @@ a:hover{color:#A83519}
 .step{width:26px;padding:5px 0;border:1px solid #E0D8C4;background:transparent;border-radius:2px;color:#8A93A1;font:400 11px/1 'JetBrains Mono',monospace;white-space:nowrap;cursor:pointer}
 .step-back:hover{border-color:#CBBFA5;color:#3A4557}
 .step-fwd:hover{border-color:#D6482B;color:#D6482B}
+.step:disabled{opacity:.35;cursor:default;border-color:#E0D8C4;color:#8A93A1}
 .role-btn{margin-left:auto;padding:5px 8px;border:1px solid transparent;background:transparent;border-radius:2px;color:#D6482B;font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap;cursor:pointer}
 .role-btn:hover{border-color:#D6482B}
 .empty{border:1px dashed #D5CDB9;border-radius:3px;padding:14px 13px;font:400 13px/1.5 Inter,sans-serif;color:#A6AEB9}
@@ -144,6 +145,25 @@ _JS = """
     });
   }
 
+  // Each arrow says where it goes ("Move to APPLIED"), and an arrow with
+  // nowhere to go is disabled, so a click never seems to do nothing.
+  function labelSteps() {
+    document.querySelectorAll('.card').forEach(function (card) {
+      var col = card.closest('.col');
+      if (!col) { return; }
+      var i = LADDER.indexOf(col.getAttribute('data-status'));
+      [['.step-back', i - 1], ['.step-fwd', i + 1]].forEach(function (pair) {
+        var btn = card.querySelector(pair[0]);
+        if (!btn) { return; }
+        var to = LADDER[pair[1]];
+        btn.disabled = !to;
+        var label = to ? 'Move to ' + to : 'Already at the end';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      });
+    });
+  }
+
   function moveCard(card, targetCol) {
     var fromStack = card.parentElement;
     // Captured before the move so a failed POST puts the card back where
@@ -154,12 +174,14 @@ _JS = """
     targetCol.querySelector('.stack').appendChild(card);
     fixPlaceholders();
     refreshCounts();
+    labelSteps();
     post(card.getAttribute('data-role-id'), status).then(function (r) {
       if (!r.ok) { throw new Error('HTTP ' + r.status); }
     }).catch(function () {
       fromStack.insertBefore(card, anchor);
       fixPlaceholders();
       refreshCounts();
+      labelSteps();
       flashError(card, 'could not move — reverted');
     });
   }
@@ -181,6 +203,8 @@ _JS = """
     var role = e.target.closest('[data-drawer-key]');
     if (role) { window.Drawer.open(role.getAttribute('data-drawer-key'), 0); }
   });
+
+  labelSteps();
 
   document.querySelectorAll('.card').forEach(function (card) {
     card.addEventListener('dragstart', function (e) {

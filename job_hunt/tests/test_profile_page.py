@@ -128,7 +128,23 @@ def test_filtered_card_states_the_real_counts():
     assert "what got filtered out" in html
     assert "570" in html
     assert "34" in html
-    assert "5 were not one of your target roles" in html
+    assert "<b>5</b> off-topic: the job title is not one of your" in html
+    # Unverified roles are on the map, so they are not "filtered out".
+    assert "34 roles do not say where they can hire from" in html
+
+
+def test_filtered_card_explains_on_site_elsewhere():
+    """The map header's WHY? link lands here, so every count the header
+    sets aside must be explained too."""
+    html = render(_RESUMES, _SET_PROFILE, filtered={"hidden": 126})
+    assert 'id="filtered"' in html
+    assert "<b>126</b> on-site elsewhere" in html
+
+
+def test_the_search_country_is_named_in_words():
+    html = render(_RESUMES, _SET_PROFILE)
+    assert "hiring from Canada" in html
+    assert "country: CA" not in html
 
 
 def test_filtered_card_with_nothing_filtered_says_so():

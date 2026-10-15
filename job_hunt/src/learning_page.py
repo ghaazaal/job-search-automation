@@ -315,7 +315,9 @@ def _families_card(analysis: dict) -> str:
         line = ", ".join(f'{_e(s["name"])} {_pct(s["share"])}'
                          for s in family["top"][:6])
         cards.append(f'<div class="famc"><div class="famn">{_e(family["name"])}'
-                     f' <span class="lab-m">{family["postings"]} POSTINGS</span>'
+                     f' <span class="lab-m">{family["postings"]} '
+                     f'{"POSTING" if family["postings"] == 1 else "POSTINGS"}'
+                     f'</span>'
                      f'</div><div class="faml">{line}</div></div>')
     return ('<div class="card"><div class="lab">BY KIND OF ROLE</div>'
             '<div class="note">Share of that kind of posting naming each skill.</div>'

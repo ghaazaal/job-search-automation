@@ -86,9 +86,11 @@ _JS = """
     }).join('') + '</div>' : '';
     var fit;
     if(!r.captured){
+      // No fetch button: nothing can fetch a description after the run.
+      // OPEN POSTING in the footer is the way to read it.
       fit = '<div class="dw-unchecked"><span><b>Not checked yet.</b> This listing arrived '
-        + 'without a description, so no skills have been compared against it.</span>'
-        + '<button type="button" class="dw-fetch">FETCH POSTING</button></div>';
+        + 'without a description, so no skills have been compared against it. '
+        + (r.url ? 'Open the posting to read it yourself.' : '') + '</span></div>';
     } else if(r.band && r.reason){
       fit = '<div class="dw-band"><span class="dw-pill '+pillClass(r.band)+'">'+esc(r.band)+'</span>'
         + '<span class="dw-reason">'+esc(r.reason)+'</span></div>';

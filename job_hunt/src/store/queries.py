@@ -85,7 +85,7 @@ def _group(conn, rows, shortlist_min, watched_fps=frozenset()) -> list[dict]:
                          for r in group)
         verified = max(1 if r["eligibility_verified"] else 0 for r in group)
         company = conn.execute(
-            "SELECT name, fingerprint FROM company WHERE id = ?",
+            "SELECT name, fingerprint, user_state FROM company WHERE id = ?",
             (company_id,)).fetchone()
         name = company["name"]
         maps.append({
@@ -94,6 +94,8 @@ def _group(conn, rows, shortlist_min, watched_fps=frozenset()) -> list[dict]:
             # Marker only: watching changed what was FETCHED, never how
             # anything here ranks or scores.
             "watched": company["fingerprint"] in watched_fps,
+            # The user's own WATCH click, so the card can say WATCHING.
+            "user_state": company["user_state"],
             "state": "ACT_NOW" if best >= shortlist_min else "DISCOVER",
             "why":   _why(group),
             "roles": [_role_view(r) for r in group],
@@ -145,7 +147,7 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
 
     watching = [
         {"id": r["id"], "name": r["name"], "state": "WATCH", "roles": [],
-         "why": "watched â€” nothing open right now"}
+         "why": "watched — nothing open right now"}
         for r in conn.execute(
             "SELECT id, name FROM company WHERE user_id = ? AND user_state = 'WATCH'"
             " ORDER BY name", (user_id,))

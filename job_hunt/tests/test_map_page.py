@@ -67,7 +67,10 @@ def test_unchecked_listing_shows_no_band_pill():
 def test_unchecked_listing_shows_the_not_checked_block():
     html = render([_map(roles=[_UNCHECKED])])
     assert "Not checked yet" in html
-    assert "FETCH POSTING" in html
+    # Its way out opens the posting; nothing can fetch it after the run,
+    # so no button may promise to.
+    assert 'href="https://example.com/2"' in _body(html)
+    assert "FETCH POSTING" not in html
 
 
 def test_not_checked_sentence_starts_capitalised():
@@ -347,3 +350,54 @@ def test_a_watched_company_shows_the_watchlist_chip():
     html2 = render([{**base, "watched": False}],
                    meta={"companies": 1, "roles": 1})
     assert "WATCHLIST" not in html2
+
+
+# ── UX pass, 2026-10-15 ───────────────────────────────────────────────────────
+
+def test_no_button_without_an_action_behind_it():
+    """FETCH N MISSING DESCRIPTIONS and WIDEN SOURCES had no handler."""
+    html = render([_map(state="DISCOVER", roles=[_UNCHECKED])])
+    assert "MISSING DESCRIPTIONS" not in html
+    assert "WIDEN SOURCES" not in html
+    assert 'href="/profile#watchlist"' in html
+
+
+def test_the_header_names_the_real_last_search_not_the_clock():
+    html = render([], meta={"companies": 0, "roles": 0,
+                            "scraped": "2026-10-14T10:54:49+00:00"})
+    assert "LAST SEARCH" in html
+    assert "SCRAPED" not in html
+    assert "LAST SEARCH" not in render([], meta={"companies": 0, "roles": 0})
+
+
+def test_the_header_groups_what_is_listed_and_what_was_set_aside():
+    html = render([], meta={"companies": 0, "roles": 0, "open": 2,
+                            "closed": 66, "unverified": 3, "hidden": 4})
+    on_map, aside = html.index("ON THE MAP"), html.index("SET ASIDE")
+    assert on_map < html.index("2 OPEN") < aside
+    assert on_map < html.index("3 UNVERIFIED") < aside
+    assert aside < html.index("66 NOT OPEN")
+    assert aside < html.index("4 HIDDEN (ON-SITE ELSEWHERE)")
+    assert 'href="/profile#filtered"' in html
+
+
+def test_a_compact_card_sets_the_role_reason_apart_from_the_company_line():
+    m = _map(state="DISCOVER", why="2 roles match your target titles")
+    html = render([m])
+    assert ("2 roles match your target titles. "
+            '<span class="creason">Top role: matches dbt') in html
+
+
+def test_watch_shows_its_own_state():
+    base = _map(state="DISCOVER")
+    base = {**base, "id": 7, "roles": [{**_ROLE, "id": 70}]}
+    assert ">WATCH</button>" in render([base])
+    watched = render([{**base, "user_state": "WATCH"}])
+    assert "WATCHING" in watched and 'data-state="NONE"' in watched
+
+
+def test_hide_waits_for_an_undo():
+    m = {**_map(state="DISCOVER"), "id": 7, "roles": [{**_ROLE, "id": 70}]}
+    html = render([m])
+    assert 'class="btn-q btn-hide"' in html
+    assert "UNDO" in html  # the page script offers it before saving
