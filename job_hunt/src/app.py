@@ -59,6 +59,7 @@ def _default_llm() -> LLMClient:
 def create_app(db_path: Path | str = DEFAULT_PATH,
                user_name: str = "default",
                shortlist_min: int = 7,
+               max_age_days: int | None = None,
                data_root: Path | str = DEFAULT_DATA_ROOT,
                llm_factory=None,
                runner=None,
@@ -102,7 +103,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             if not resumes or not profile.get("setup_complete"):
                 return redirect("/setup")
 
-            sections = map_sections(conn, user_id, shortlist_min)
+            sections = map_sections(conn, user_id, shortlist_min,
+                                    max_age_days=max_age_days)
             tagged = (
                 [{**m, "section": "new"} for m in sections["new"]]
                 + [{**m, "section": "earlier"} for m in sections["earlier"]]
@@ -123,14 +125,16 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                     hidden = latest_run.get("dropped") or 0
                     offtopic = latest_run.get("offtopic") or 0
 
-            counts = eligibility_counts(conn, user_id)
+            counts = eligibility_counts(conn, user_id, max_age_days)
 
             html = render_map(
                 tagged,
                 meta={"companies": len(sections["new"]) + len(sections["earlier"]),
                       "roles": sum(len(m["roles"]) for m in
                                    sections["new"] + sections["earlier"]),
-                      "hidden": hidden, "offtopic": offtopic, **counts},
+                      "hidden": hidden, "offtopic": offtopic,
+                      "duplicates": sections["duplicates"],
+                      "max_age_days": max_age_days, **counts},
                 running_run_id=in_flight["id"] if in_flight else None,
                 nav={"tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
@@ -148,7 +152,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
             user_id = _user(conn)
             return render_activity(
                 activity_board(conn, user_id),
-                nav={"map_count": open_company_count(conn, user_id),
+                nav={"map_count": open_company_count(conn, user_id,
+                                                         max_age_days),
                      "user_label": user_name})
         finally:
             conn.close()
@@ -446,7 +451,8 @@ def create_app(db_path: Path | str = DEFAULT_PATH,
                 filtered={"closed": counts["closed"],
                           "unverified": counts["unverified"],
                           "offtopic": offtopic},
-                nav={"map_count": open_company_count(conn, user_id),
+                nav={"map_count": open_company_count(conn, user_id,
+                                                         max_age_days),
                      "tracker_count": live_tracker_count(conn, user_id),
                      "user_label": user_name})
         finally:

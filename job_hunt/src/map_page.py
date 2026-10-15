@@ -431,6 +431,19 @@ def render(maps: list[dict], meta: dict | None = None,
     if offtopic:
         meta_2 = f"{meta_2} &middot; {offtopic} OFF-TOPIC (NOT A TARGET ROLE)"
 
+    # Out of date: nothing within the search window - its posted date, a
+    # search finding it again, a check seeing it open - says it is still up.
+    stale = meta.get("stale") or 0
+    if stale:
+        days = meta.get("max_age_days") or 30
+        meta_2 = f"{meta_2} &middot; {stale} HIDDEN (NOT SEEN IN {days} DAYS)"
+
+    # Second copies of one posting: the same job per country, language or
+    # board. The best copy stays on the map.
+    copies = meta.get("duplicates") or 0
+    if copies:
+        meta_2 = f"{meta_2} &middot; {copies} HIDDEN (DUPLICATE COPY)"
+
     payload = json.dumps(_drawer_payload(maps), ensure_ascii=False)
     payload = payload.replace("</", "<\\/")
 

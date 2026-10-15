@@ -425,7 +425,12 @@ def _serve(config: dict, port: int) -> None:
     from src.app import create_app
 
     shortlist_min = config.get("tailoring", {}).get("shortlist_score", 7)
-    app = create_app(user_name=DEFAULT_USER, shortlist_min=shortlist_min)
+    # The map hides a role nothing has shown alive within the window a
+    # search looks back over: older than that, a search could not have
+    # found it again, so its absence says nothing - its age does.
+    max_age_days = (config.get("search", {}) or {}).get("days_posted", 30)
+    app = create_app(user_name=DEFAULT_USER, shortlist_min=shortlist_min,
+                     max_age_days=max_age_days)
     url = f"http://127.0.0.1:{port}/"
     print(f"\n  Opportunity map: {url}")
     print(f"  Your resumes:    http://127.0.0.1:{port}/profile")

@@ -429,6 +429,7 @@ def execute(conn, user_id: int, run_id: int, config: dict,
 
     from .pipeline_store import persist_run
     from .scoring.scorer import Scorer
+    from .store.ingest import mark_reseen
     from .store.queries import known_listings
     from .tracker.dedup import dedupe
 
@@ -602,6 +603,10 @@ def execute(conn, user_id: int, run_id: int, config: dict,
     # not the signal, because 133 rows arrived from those four.
     boards_seen = sorted({str(job["source_board"]) for job in all_scraped
                           if job.get("source_board")})
+
+    # Before dedupe throws the known postings away: finding one again is
+    # the evidence the map uses to tell a live posting from a stale one.
+    mark_reseen(conn, user_id, run_id, all_scraped)
 
     known_urls, known_rows = known_listings(conn, user_id)
     new_jobs = dedupe(all_scraped,

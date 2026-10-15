@@ -223,6 +223,22 @@ def test_a_listing_already_in_the_store_is_not_stored_twice(conn, user, resume):
     assert result.kept == 0
 
 
+def test_a_listing_found_again_is_marked_seen_by_that_run(conn, user, resume):
+    """Not stored twice, but not forgotten either: the map uses this
+    stamp to tell a posting still listed from one long gone."""
+    first = start_run(conn, user)
+    execute(conn, user, first, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(remote_boards_jobs=[_job("https://x/1")]))
+
+    second = start_run(conn, user)
+    execute(conn, user, second, _CONFIG, [resume], _PROFILE,
+            scrapers=_scrapers(remote_boards_jobs=[_job("https://x/1")]))
+
+    row = conn.execute(
+        "SELECT first_seen_run_id, last_seen_run_id FROM role").fetchone()
+    assert (row["first_seen_run_id"], row["last_seen_run_id"]) == (first, second)
+
+
 def test_duplicates_within_one_scrape_collapse(conn, user, resume):
     run_id = start_run(conn, user)
     result = execute(conn, user, run_id, _CONFIG, [resume], _PROFILE,

@@ -91,6 +91,43 @@ def _upsert_role(conn: sqlite3.Connection, user_id: int, run_id: int,
             (user_id, company_id, job["url"], url_n, *values, run_id, run_id))
 
 
+def mark_reseen(conn: sqlite3.Connection, user_id: int, run_id: int,
+                jobs: list[dict]) -> int:
+    """Stamp `last_seen_run_id` on stored roles this run found again.
+
+    `dedupe` removes every posting the store already holds before anything
+    is written, so `_upsert_role`'s UPDATE branch never ran: on the live
+    store 0 of 2,191 roles had ever been seen twice, and the map could not
+    tell a posting still listed from one gone since August. Called on the
+    raw scrape, before dedupe. A role counts as found again when a scraped
+    job carries its URL or its company/title fingerprint. Nothing else on
+    the row changes - its scoring and description are another step's facts.
+
+    Returns how many roles were stamped.
+    """
+    urls = {normalize_url(job.get("url", "")) for job in jobs} - {""}
+    fps = {fingerprint(job) for job in jobs} - {"|"}
+    if not urls and not fps:
+        return 0
+    rows = conn.execute(
+        """SELECT r.id, r.url_normalised, r.title, c.name AS company
+             FROM role r JOIN company c ON c.id = r.company_id
+            WHERE r.user_id = ? AND r.last_seen_run_id < ?""",
+        (user_id, run_id)).fetchall()
+    ids = [row["id"] for row in rows
+           if row["url_normalised"] in urls
+           or fingerprint({"company": row["company"],
+                           "title": row["title"]}) in fps]
+    with transaction(conn):
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            conn.execute(
+                f"UPDATE role SET last_seen_run_id = ? WHERE id IN ({marks})",
+                (run_id, *chunk))
+    return len(ids)
+
+
 def upsert_jobs(conn: sqlite3.Connection, user_id: int, run_id: int,
                 jobs: list[dict]) -> None:
     """Write scored jobs in short batches so writers do not block the app."""

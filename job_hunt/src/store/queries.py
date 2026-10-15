@@ -122,17 +122,82 @@ SELECT r.*, a.status AS app_status FROM role r
    AND r.dropped_at IS NULL
    AND (r.location_scope IS NULL OR r.location_scope != 'closed')
    AND r.first_seen_run_id {op} ?
+   AND {current}
 """
 
 
+def _is_current(conn: sqlite3.Connection,
+                max_age_days: int | None) -> tuple[str, tuple]:
+    """A SQL condition on `role r`: something in the last `max_age_days`
+    says this posting is still up. Returns (sql, params).
+
+    Three kinds of evidence, any one enough: the posting's own date, a
+    search that found it again (`last_seen_run_id`, see
+    `ingest.mark_reseen`), or a liveness check that saw it open. Without
+    any of them a role is out of date - on 2026-10-15 the map still
+    carried postings first and last seen in August. A role the user has
+    acted on stays whatever its age, like every other map rule.
+
+    None or 0 switches the rule off.
+    """
+    if not max_age_days:
+        return "1", ()
+    since = f"-{int(max_age_days)} days"
+    parts = ["EXISTS (SELECT 1 FROM application ap WHERE ap.role_id = r.id"
+             " AND ap.status != 'HIDDEN')",
+             "date(r.posted_date) >= date('now', ?)",
+             "(SELECT date(started_at) FROM run"
+             " WHERE id = r.last_seen_run_id) >= date('now', ?)"]
+    params = [since, since]
+    # The liveness checker's table, where that feature is present.
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'"
+                    " AND name = 'posting_check'").fetchone():
+        parts.append("EXISTS (SELECT 1 FROM posting_check pc"
+                     " WHERE pc.role_id = r.id AND pc.verdict = 'open'"
+                     " AND date(pc.checked_at) >= date('now', ?))")
+        params.append(since)
+    return "(" + " OR ".join(parts) + ")", tuple(params)
+
+
+def _one_per_posting(*row_lists) -> tuple[list[list], int]:
+    """Keep one row per company and posting; return the lists and how many
+    rows were set aside as copies.
+
+    Stored before `dedupe` learned to ignore per-copy title noise: TELUS
+    Digital's "Online Data Analyst" in seven languages, BairesDev's one
+    REF# per country, Ryder's "Data Analyst III" with and without
+    "(remote)". The best-scoring copy stays, then the most recent.
+    """
+    from ..tracker.dedup import title_key
+    best: dict[tuple, sqlite3.Row] = {}
+    for row in (r for rows in row_lists for r in rows):
+        key = (row["company_id"], title_key(row["title"]))
+        rank = (row["match_score"] or 0, row["posted_date"] or "", row["id"])
+        held = best.get(key)
+        if held is None or rank > (held["match_score"] or 0,
+                                   held["posted_date"] or "", held["id"]):
+            best[key] = row
+    winners = {row["id"] for row in best.values()}
+    kept = [[r for r in rows if r["id"] in winners] for rows in row_lists]
+    copies = sum(len(rows) for rows in row_lists) - len(winners)
+    return kept, copies
+
+
 def map_sections(conn: sqlite3.Connection, user_id: int,
-                 shortlist_min: int = 7) -> dict:
-    """The three sections of the map screen."""
+                 shortlist_min: int = 7,
+                 max_age_days: int | None = None) -> dict:
+    """The three sections of the map screen.
+
+    `duplicates` counts the copies `_one_per_posting` set aside."""
     seen = conn.execute("SELECT last_seen_run_id FROM user WHERE id = ?",
                         (user_id,)).fetchone()["last_seen_run_id"] or 0
 
-    new_rows = conn.execute(_OPEN_ROLES.format(op=">"), (user_id, seen)).fetchall()
-    old_rows = conn.execute(_OPEN_ROLES.format(op="<="), (user_id, seen)).fetchall()
+    current, cur_params = _is_current(conn, max_age_days)
+    new_rows = conn.execute(_OPEN_ROLES.format(op=">", current=current),
+                            (user_id, seen, *cur_params)).fetchall()
+    old_rows = conn.execute(_OPEN_ROLES.format(op="<=", current=current),
+                            (user_id, seen, *cur_params)).fetchall()
+    (new_rows, old_rows), duplicates = _one_per_posting(new_rows, old_rows)
 
     from .watchlist import watched_fingerprints
     watched_fps = watched_fingerprints(conn, user_id)
@@ -151,7 +216,8 @@ def map_sections(conn: sqlite3.Connection, user_id: int,
             " ORDER BY name", (user_id,))
         if r["id"] not in listed
     ]
-    return {"new": new, "earlier": earlier, "watching": watching}
+    return {"new": new, "earlier": earlier, "watching": watching,
+            "duplicates": duplicates}
 
 
 def drop_roles_from_runs(conn: sqlite3.Connection, user_id: int, *,
@@ -182,7 +248,8 @@ def drop_roles_from_runs(conn: sqlite3.Connection, user_id: int, *,
         return cursor.rowcount
 
 
-def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
+def eligibility_counts(conn: sqlite3.Connection, user_id: int,
+                       max_age_days: int | None = None) -> dict:
     """How every stored role divides on the only question that matters.
 
     `unverified` is a NULL or "unknown" `location_scope` â€” a row nothing
@@ -193,20 +260,37 @@ def eligibility_counts(conn: sqlite3.Connection, user_id: int) -> dict:
 
     Run 6's split for the working profile was 2 open, 66 closed, 316
     unverified â€” which is why the map stopped rendering all 384.
+
+    `stale`, present only when `max_age_days` is set, is an open or
+    unverified role `_is_current` rules out of date.
+    A role both out of date and not open counts once, as not open - the
+    posting's own words outrank its age.
     """
+    current, cur_params = _is_current(conn, max_age_days)
     rows = conn.execute(
-        """SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
+        f"""SELECT COALESCE(r.location_scope, 'unverified') AS verdict,
+                  {current} AS is_current,
                   COUNT(*) AS n
              FROM role r
              JOIN company c ON c.id = r.company_id
             WHERE r.user_id = ? AND c.user_state != 'HIDDEN'
               AND r.dropped_at IS NULL
-            GROUP BY verdict""", (user_id,)).fetchall()
-    counts = {row["verdict"]: row["n"] for row in rows}
-    return {"open": counts.get("open", 0),
-            "closed": counts.get("closed", 0),
-            "unverified": (counts.get("unverified", 0)
-                           + counts.get("unknown", 0))}
+            GROUP BY verdict, is_current""",
+        (*cur_params, user_id)).fetchall()
+    counts: dict[str, int] = {}
+    stale = 0
+    for row in rows:
+        if row["verdict"] != "closed" and not row["is_current"]:
+            stale += row["n"]
+        else:
+            counts[row["verdict"]] = counts.get(row["verdict"], 0) + row["n"]
+    result = {"open": counts.get("open", 0),
+              "closed": counts.get("closed", 0),
+              "unverified": (counts.get("unverified", 0)
+                             + counts.get("unknown", 0))}
+    if max_age_days:
+        result["stale"] = stale
+    return result
 
 
 def activity_board(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -272,20 +356,23 @@ def live_tracker_count(conn: sqlite3.Connection, user_id: int) -> int:
         (user_id, *LIVE_STATUSES)).fetchone()["n"]
 
 
-def open_company_count(conn: sqlite3.Connection, user_id: int) -> int:
+def open_company_count(conn: sqlite3.Connection, user_id: int,
+                       max_age_days: int | None = None) -> int:
     """How many companies the map lists — the shell's MAP badge.
 
     Same filter as the map's role query, without the seen/unseen split."""
+    current, cur_params = _is_current(conn, max_age_days)
     return conn.execute(
-        """SELECT COUNT(DISTINCT r.company_id) AS n FROM role r
+        f"""SELECT COUNT(DISTINCT r.company_id) AS n FROM role r
              JOIN company c ON c.id = r.company_id
              LEFT JOIN application a ON a.role_id = r.id
             WHERE r.user_id = ?
               AND (a.id IS NULL OR a.status != 'HIDDEN')
               AND c.user_state != 'HIDDEN'
               AND r.dropped_at IS NULL
-              AND (r.location_scope IS NULL OR r.location_scope != 'closed')""",
-        (user_id,)).fetchone()["n"]
+              AND (r.location_scope IS NULL OR r.location_scope != 'closed')
+              AND {current}""",
+        (user_id, *cur_params)).fetchone()["n"]
 
 
 def known_listings(conn: sqlite3.Connection,
